@@ -1,9 +1,9 @@
 # droid-proxy
 
 A localhost HTTP proxy that lets [Factory Droid](https://factory.ai) use any
-BYOK / custom model — Anthropic, OpenAI, DeepSeek, xAI, Kimi, ZAI, Groq,
-Fireworks, local Ollama or vLLM, custom OpenAI-compatible endpoints, plus
-Codex/ChatGPT and xAI Grok Build OAuth — from a single Go binary.
+BYOK / custom model — Anthropic, OpenAI, DeepSeek, Xiaomi MiMo, xAI, Kimi, ZAI,
+Groq, Fireworks, local Ollama or vLLM, custom OpenAI-compatible endpoints,
+plus Codex/ChatGPT and xAI Grok Build OAuth — from a single Go binary.
 
 - **Localhost-first.** Examples use `http://127.0.0.1:8787`. No tunneling
   required unless you specifically want remote access.
@@ -91,6 +91,7 @@ Requires Go 1.26.3 or newer in the Go 1.26 line. The build produces a single sta
 ## More examples
 
 - [DeepSeek](docs/examples/deepseek.md)
+- [Xiaomi MiMo](docs/examples/mimo.md)
 - [Local Ollama](docs/examples/local-ollama.md)
 - [Local vLLM](docs/examples/local-vllm.md)
 - [OpenAI](docs/examples/openai.md)
@@ -107,8 +108,8 @@ Ready-to-paste `settings.json` snippets:
 Every supported provider with tier classification is in
 [`docs/PROVIDERS.md`](docs/PROVIDERS.md). The short version:
 
-- **T1 native passthrough** for DeepSeek, OpenAI (`/v1/responses`), Anthropic
-  (`/v1/messages` + `count_tokens`), and OpenAI-compatible providers.
+- **T1/T2 passthrough** for DeepSeek, Xiaomi MiMo, OpenAI (`/v1/responses`),
+  Anthropic (`/v1/messages` + `count_tokens`), and OpenAI-compatible providers.
 - **OAuth Responses support** for Codex/ChatGPT and xAI Grok Build through
   `droid-proxy auth codex --config config.yaml` or
   `droid-proxy auth xai --config config.yaml`.

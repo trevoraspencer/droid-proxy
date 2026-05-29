@@ -32,7 +32,7 @@ This release ships:
   Codex/ChatGPT OAuth and `openai` over `xai-responses` for xAI Grok Build
   OAuth.
 - ✅ **DeepSeek reasoning replay** (T1) for upstreams identified as DeepSeek or
-  any model with `capabilities.reasoning: deepseek`.
+  any model with `capabilities.reasoning: deepseek`, including Xiaomi MiMo.
 - ✅ **T3** translation paths: `openai` over `openai-chat` and `anthropic`
   over `openai-chat` translate text, streaming, tool calls, and tool results
   against OpenAI-compatible Chat Completions upstreams.
@@ -53,12 +53,33 @@ in `config.yaml` always wins.
 | `groq` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | `openai-chat` | T2 |
 | `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | `openai-chat` | T2 |
 | `zai` | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` | `openai-chat` | T2 |
+| `mimo` | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` | `openai-chat` | T2 (reasoning replay) |
+| `mimo-token-plan-cn` | `https://token-plan-cn.xiaomimimo.com/v1` | `MIMO_TOKEN_PLAN_CN_API_KEY` | `openai-chat` | T2 (reasoning replay) |
+| `mimo-token-plan-sgp` | `https://token-plan-sgp.xiaomimimo.com/v1` | `MIMO_TOKEN_PLAN_SGP_API_KEY` | `openai-chat` | T2 (reasoning replay) |
+| `mimo-token-plan-ams` | `https://token-plan-ams.xiaomimimo.com/v1` | `MIMO_TOKEN_PLAN_AMS_API_KEY` | `openai-chat` | T2 (reasoning replay) |
 | `ollama` | `http://127.0.0.1:11434/v1` | _(none; local no-auth)_ | `openai-chat` | T2 |
 | `vllm` | `http://127.0.0.1:8000/v1` | _(none; local no-auth)_ | `openai-chat` | T2 |
 
 Custom OpenAI-compatible upstreams (LiteLLM, custom self-hosted gateways, etc.)
 work the same as the above — set `base_url`, `api_key_env`, and
 `upstream_protocol: openai-chat`. No `known_auth` needed.
+
+## Xiaomi MiMo
+
+MiMo is OpenAI Chat-compatible and should be exposed to Droid as
+`generic-chat-completion-api`. The built-in profiles use Xiaomi's documented
+`api-key` header and enable DeepSeek-style reasoning replay by default because
+MiMo thinking mode returns `reasoning_content` with tool calls and requires it
+to be sent back in later turns.
+
+Use `mimo-v2.5-pro` for coding and long reasoning. Use `mimo-v2.5` when
+multimodal input is needed. Avoid new configs with legacy `mimo-v2-pro` or
+`mimo-v2-omni`; Xiaomi says those legacy names start auto-routing to V2.5 on
+June 1, 2026 and are fully deprecated on June 30, 2026.
+
+Provider-side prompt cache hits are billed separately from cache misses, but
+Xiaomi does not document a Chat `cache_control` field. Keep
+`capabilities.prompt_caching` unset unless their API adds an explicit control.
 
 OpenRouter is intentionally not supported and not on the roadmap.
 

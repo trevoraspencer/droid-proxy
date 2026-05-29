@@ -67,6 +67,21 @@ models:
   #   known_auth: ollama
   #   # No API key is required for local Ollama by default.
 
+  # Example: Xiaomi MiMo via Factory's generic-chat-completion-api mode.
+  # - alias: droid-mimo-v2.5-pro
+  #   display_name: "MiMo V2.5 Pro"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: mimo
+  #   upstream_model: mimo-v2.5-pro
+  #   max_output_tokens: 131072
+  #   max_context_tokens: 1048576
+  #   capabilities:
+  #     reasoning: deepseek
+  #   extra_args:
+  #     thinking:
+  #       type: enabled
+
   # Example: Anthropic native pass-through.
   # - alias: droid-claude-sonnet
   #   display_name: "Claude Sonnet"

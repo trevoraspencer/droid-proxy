@@ -14,8 +14,9 @@ type KnownAuth struct {
 	APIKeyEnv        string
 	UpstreamProtocol UpstreamProtocol
 	NoAuth           bool
+	DefaultReasoning ReasoningMode
 	// AuthHeader and AuthScheme override the defaults (Authorization / Bearer)
-	// used for OpenAI-compatible providers. Anthropic uses x-api-key with no scheme.
+	// used for OpenAI-compatible providers. Empty AuthScheme means raw header value.
 	AuthHeader string
 	AuthScheme string
 	// ExtraHeaders are appended to every outgoing request to this provider.
@@ -29,6 +30,7 @@ var knownAuthRegistry = map[string]KnownAuth{
 	"deepseek": {
 		Name: "deepseek", BaseURL: "https://api.deepseek.com/v1",
 		APIKeyEnv: "DEEPSEEK_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
+		DefaultReasoning: ReasoningDeepSeek,
 	},
 	"openai": {
 		Name: "openai", BaseURL: "https://api.openai.com/v1",
@@ -61,6 +63,30 @@ var knownAuthRegistry = map[string]KnownAuth{
 	"zai": {
 		Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4",
 		APIKeyEnv: "ZAI_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
+	},
+	"mimo": {
+		Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1",
+		APIKeyEnv: "MIMO_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
+		DefaultReasoning: ReasoningDeepSeek,
+		AuthHeader:       "api-key",
+	},
+	"mimo-token-plan-cn": {
+		Name: "mimo-token-plan-cn", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1",
+		APIKeyEnv: "MIMO_TOKEN_PLAN_CN_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
+		DefaultReasoning: ReasoningDeepSeek,
+		AuthHeader:       "api-key",
+	},
+	"mimo-token-plan-sgp": {
+		Name: "mimo-token-plan-sgp", BaseURL: "https://token-plan-sgp.xiaomimimo.com/v1",
+		APIKeyEnv: "MIMO_TOKEN_PLAN_SGP_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
+		DefaultReasoning: ReasoningDeepSeek,
+		AuthHeader:       "api-key",
+	},
+	"mimo-token-plan-ams": {
+		Name: "mimo-token-plan-ams", BaseURL: "https://token-plan-ams.xiaomimimo.com/v1",
+		APIKeyEnv: "MIMO_TOKEN_PLAN_AMS_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
+		DefaultReasoning: ReasoningDeepSeek,
+		AuthHeader:       "api-key",
 	},
 	"ollama": {
 		Name: "ollama", BaseURL: "http://127.0.0.1:11434/v1",
@@ -97,8 +123,8 @@ func HydrateModel(m *Model) error {
 	if m.UpstreamProtocol == "" {
 		m.UpstreamProtocol = ka.UpstreamProtocol
 	}
-	if ka.Name == "deepseek" && m.Capabilities.Reasoning == "" {
-		m.Capabilities.Reasoning = ReasoningDeepSeek
+	if ka.DefaultReasoning != "" && m.Capabilities.Reasoning == "" {
+		m.Capabilities.Reasoning = ka.DefaultReasoning
 	}
 	if len(ka.ExtraHeaders) > 0 {
 		if m.ExtraHeaders == nil {

@@ -509,6 +509,74 @@ models:
 	}
 }
 
+func TestLoad_KnownAuthMimoProfilesHydrate(t *testing.T) {
+	for env := range map[string]string{
+		"MIMO_API_KEY":                "secret",
+		"MIMO_TOKEN_PLAN_CN_API_KEY":  "secret",
+		"MIMO_TOKEN_PLAN_SGP_API_KEY": "secret",
+		"MIMO_TOKEN_PLAN_AMS_API_KEY": "secret",
+	} {
+		t.Setenv(env, "secret")
+	}
+
+	cases := []struct {
+		knownAuth string
+		baseURL   string
+		apiEnv    string
+	}{
+		{"mimo", "https://api.xiaomimimo.com/v1", "MIMO_API_KEY"},
+		{"mimo-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1", "MIMO_TOKEN_PLAN_CN_API_KEY"},
+		{"mimo-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1", "MIMO_TOKEN_PLAN_SGP_API_KEY"},
+		{"mimo-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1", "MIMO_TOKEN_PLAN_AMS_API_KEY"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.knownAuth, func(t *testing.T) {
+			in := `
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    known_auth: ` + tc.knownAuth + `
+`
+			cfg, err := parse([]byte(in))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			m := cfg.Models[0]
+			if m.BaseURL != tc.baseURL {
+				t.Fatalf("base_url = %q, want %q", m.BaseURL, tc.baseURL)
+			}
+			if m.APIKeyEnv != tc.apiEnv {
+				t.Fatalf("api_key_env = %q, want %q", m.APIKeyEnv, tc.apiEnv)
+			}
+			if m.UpstreamProtocol != UpstreamOpenAIChat {
+				t.Fatalf("upstream_protocol = %q, want %q", m.UpstreamProtocol, UpstreamOpenAIChat)
+			}
+			if m.Capabilities.Reasoning != ReasoningDeepSeek {
+				t.Fatalf("reasoning = %q, want %q", m.Capabilities.Reasoning, ReasoningDeepSeek)
+			}
+		})
+	}
+}
+
+func TestLoad_KnownAuthMimoReasoningOverridePreserved(t *testing.T) {
+	t.Setenv("MIMO_API_KEY", "secret")
+	in := `
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    known_auth: mimo
+    capabilities:
+      reasoning: none
+`
+	cfg, err := parse([]byte(in))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Models[0].Capabilities.Reasoning != ReasoningNone {
+		t.Fatalf("explicit reasoning override overwritten: %q", cfg.Models[0].Capabilities.Reasoning)
+	}
+}
+
 func TestLoad_KnownAuthKeptProvidersHydrateAndDroppedProvidersFail(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "secret")
 	t.Setenv("OPENAI_API_KEY", "secret")
@@ -518,8 +586,12 @@ func TestLoad_KnownAuthKeptProvidersHydrateAndDroppedProvidersFail(t *testing.T)
 	t.Setenv("GROQ_API_KEY", "secret")
 	t.Setenv("FIREWORKS_API_KEY", "secret")
 	t.Setenv("ZAI_API_KEY", "secret")
+	t.Setenv("MIMO_API_KEY", "secret")
+	t.Setenv("MIMO_TOKEN_PLAN_CN_API_KEY", "secret")
+	t.Setenv("MIMO_TOKEN_PLAN_SGP_API_KEY", "secret")
+	t.Setenv("MIMO_TOKEN_PLAN_AMS_API_KEY", "secret")
 
-	for _, knownAuth := range []string{"deepseek", "openai", "anthropic", "xai", "kimi", "groq", "fireworks", "zai", "ollama", "vllm"} {
+	for _, knownAuth := range []string{"deepseek", "openai", "anthropic", "xai", "kimi", "groq", "fireworks", "zai", "mimo", "mimo-token-plan-cn", "mimo-token-plan-sgp", "mimo-token-plan-ams", "ollama", "vllm"} {
 		t.Run("kept "+knownAuth, func(t *testing.T) {
 			fp := "generic-chat-completion-api"
 			if knownAuth == "openai" {

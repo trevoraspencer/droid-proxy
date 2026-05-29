@@ -120,6 +120,27 @@ func TestApplyAuthHeader_Anthropic(t *testing.T) {
 	}
 }
 
+func TestApplyAuthHeader_MiMo(t *testing.T) {
+	for _, knownAuth := range []string{
+		"mimo",
+		"mimo-token-plan-cn",
+		"mimo-token-plan-sgp",
+		"mimo-token-plan-ams",
+	} {
+		t.Run(knownAuth, func(t *testing.T) {
+			req, _ := http.NewRequest("POST", "https://x.test", nil)
+			m := &config.Model{Alias: "x", KnownAuth: knownAuth}
+			ApplyAuthHeader(httpReqAdapter{r: req}, m, "sk-mimo-test")
+			if got := req.Header.Get("api-key"); got != "sk-mimo-test" {
+				t.Errorf("api-key: %q", got)
+			}
+			if got := req.Header.Get("Authorization"); got != "" {
+				t.Errorf("Authorization should be empty for %s, got %q", knownAuth, got)
+			}
+		})
+	}
+}
+
 func TestApplyAuthHeader_EmptyKeyNoOp(t *testing.T) {
 	req, _ := http.NewRequest("POST", "https://x.test", nil)
 	m := &config.Model{Alias: "x"}
