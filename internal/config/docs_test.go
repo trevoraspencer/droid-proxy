@@ -36,6 +36,24 @@ func readRepoRel(t *testing.T, rel string) string {
 	return readRepoFile(t, filepath.FromSlash(rel))
 }
 
+func docExampleMarkdownFiles() []string {
+	return []string{
+		"docs/examples/anthropic.md",
+		"docs/examples/codex-oauth.md",
+		"docs/examples/deepseek.md",
+		"docs/examples/fireworks.md",
+		"docs/examples/groq.md",
+		"docs/examples/kimi.md",
+		"docs/examples/local-ollama.md",
+		"docs/examples/local-vllm.md",
+		"docs/examples/mimo.md",
+		"docs/examples/openai.md",
+		"docs/examples/xai-oauth.md",
+		"docs/examples/xai.md",
+		"docs/examples/zai.md",
+	}
+}
+
 func TestDocsGoVersionMatchesModule(t *testing.T) {
 	mod := readRepoFile(t, "go.mod")
 	var goVersion string
@@ -72,15 +90,7 @@ func TestDocsFactorySettingsUseCurrentSchema(t *testing.T) {
 		})
 	}
 
-	for _, rel := range []string{
-		"README.md",
-		"docs/examples/anthropic.md",
-		"docs/examples/deepseek.md",
-		"docs/examples/mimo.md",
-		"docs/examples/local-ollama.md",
-		"docs/examples/local-vllm.md",
-		"docs/examples/openai.md",
-	} {
+	for _, rel := range append([]string{"README.md"}, docExampleMarkdownFiles()...) {
 		t.Run(rel, func(t *testing.T) {
 			for _, block := range fencedBlocks(readRepoRel(t, rel), "json") {
 				if strings.Contains(block, `"customModels"`) {
@@ -192,18 +202,14 @@ func TestDocsExamplesParseAndLoad(t *testing.T) {
 		t.Fatalf("config.example.yaml should default to current DeepSeek alias, got %+v", cfg.Models)
 	}
 
-	for _, rel := range []string{
+	for _, rel := range append([]string{
 		"README.md",
 		"docs/CONFIG.md",
 		"docs/PROVIDERS.md",
 		"docs/SMOKE.md",
-		"docs/examples/anthropic.md",
-		"docs/examples/deepseek.md",
-		"docs/examples/mimo.md",
-		"docs/examples/local-ollama.md",
-		"docs/examples/local-vllm.md",
-		"docs/examples/openai.md",
-	} {
+		"docs/OAUTH.md",
+		"docs/CLI.md",
+	}, docExampleMarkdownFiles()...) {
 		t.Run(rel, func(t *testing.T) {
 			body := readRepoRel(t, rel)
 			for _, block := range fencedBlocks(body, "json") {
@@ -274,6 +280,65 @@ func TestDocsDoNotDescribeImplementedTranslatorsAs501(t *testing.T) {
 			if strings.Contains(body, bad) {
 				t.Fatalf("%s still describes implemented translator path as %q", rel, bad)
 			}
+		}
+	}
+}
+
+func TestDocsREADMELinksToDocsIndex(t *testing.T) {
+	readme := readRepoFile(t, "README.md")
+	if !strings.Contains(readme, "docs/README.md") {
+		t.Fatal("README.md must link to docs/README.md documentation hub")
+	}
+}
+
+func TestDocsCLIDocumented(t *testing.T) {
+	cli := readRepoFile(t, "docs", "CLI.md")
+	for _, cmd := range []string{
+		"start",
+		"stop",
+		"status",
+		"logs",
+		"service install",
+		"service uninstall",
+		"auth codex",
+		"auth xai",
+		"--env-file",
+		"--no-browser",
+	} {
+		if !strings.Contains(cli, cmd) {
+			t.Fatalf("docs/CLI.md must document %q", cmd)
+		}
+	}
+}
+
+func TestDocsExamplePagesExistForKnownAuth(t *testing.T) {
+	providers := readRepoFile(t, "docs/PROVIDERS.md")
+	wantExample := map[string]string{
+		"deepseek":              "examples/deepseek.md",
+		"openai":                "examples/openai.md",
+		"anthropic":             "examples/anthropic.md",
+		"xai":                   "examples/xai.md",
+		"kimi":                  "examples/kimi.md",
+		"groq":                  "examples/groq.md",
+		"fireworks":             "examples/fireworks.md",
+		"zai":                   "examples/zai.md",
+		"zai-main-api":          "examples/zai.md",
+		"zai-coding-api":        "examples/zai.md",
+		"mimo":                  "examples/mimo.md",
+		"mimo-token-plan-cn":    "examples/mimo.md",
+		"mimo-token-plan-sgp":   "examples/mimo.md",
+		"mimo-token-plan-ams":   "examples/mimo.md",
+		"ollama":                "examples/local-ollama.md",
+		"vllm":                  "examples/local-vllm.md",
+	}
+	for name, example := range wantExample {
+		if !strings.Contains(providers, example) {
+			t.Fatalf("docs/PROVIDERS.md must link to %s for known_auth %q", example, name)
+		}
+	}
+	for name := range knownAuthRegistry {
+		if _, ok := wantExample[name]; !ok {
+			t.Fatalf("docs test missing example mapping for known_auth %q", name)
 		}
 	}
 }

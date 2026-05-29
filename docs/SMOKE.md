@@ -1,25 +1,37 @@
 # Smoke test guide
 
-Once `go test ./...` passes, exercise the running binary end-to-end against a
-real upstream. This document is the recipe.
-
-## 1. Health
+Verify your proxy setup after configuration. Run these checks with the proxy
+started in the background:
 
 ```bash
-curl -s http://127.0.0.1:8787/health
-# {"service":"droid-proxy","status":"ok","version":"0.0.0-dev"}
+./droid-proxy start --config config.yaml
+./droid-proxy status
 ```
 
-## 2. Models list
+See [CLI.md](CLI.md) for start/stop/logs. Per-provider setup:
+[examples/](examples/).
+
+## 0. Confirm the proxy is running
+
+```bash
+./droid-proxy status
+curl -s http://127.0.0.1:8787/health
+# {"service":"droid-proxy","status":"ok","version":"..."}
+```
+
+If health fails, check `./droid-proxy logs` or `~/.droid-proxy/stderr.log`.
+
+## 1. Models list
 
 ```bash
 curl -s http://127.0.0.1:8787/v1/models | jq '.data[] | {id, factory_provider, upstream_protocol, agent_ready}'
 ```
 
-Every configured alias should appear, with `factory_provider` and
-`upstream_protocol` matching what's in `config.yaml`.
+Every configured alias should appear with fields matching `config.yaml`.
 
-## 3. Chat completions (DeepSeek example)
+## 2. Chat completions (DeepSeek example)
+
+Requires `deepseek-v4-flash` in config and `DEEPSEEK_API_KEY` set.
 
 Non-streaming:
 
@@ -47,7 +59,7 @@ curl -sS -N http://127.0.0.1:8787/v1/chat/completions \
 
 You should see `data: {...}` chunks ending with `data: [DONE]`.
 
-## 4. Tool calls (DeepSeek)
+## 3. Tool calls (DeepSeek)
 
 ```bash
 curl -sS http://127.0.0.1:8787/v1/chat/completions \
@@ -66,9 +78,11 @@ curl -sS http://127.0.0.1:8787/v1/chat/completions \
   }' | jq '.choices[0].message.tool_calls'
 ```
 
-The response should include a `tool_calls` array with a function call request.
+The response should include a `tool_calls` array.
 
-## 5. Anthropic messages
+## 4. Anthropic messages
+
+Requires `claude-sonnet-4-5-20250929` (or your Anthropic alias) in config:
 
 ```bash
 curl -sS http://127.0.0.1:8787/v1/messages \
@@ -80,7 +94,7 @@ curl -sS http://127.0.0.1:8787/v1/messages \
   }' | jq -r '.content[0].text'
 ```
 
-## 6. count_tokens
+## 5. count_tokens
 
 ```bash
 curl -sS http://127.0.0.1:8787/v1/messages/count_tokens \
@@ -91,7 +105,9 @@ curl -sS http://127.0.0.1:8787/v1/messages/count_tokens \
   }' | jq '.input_tokens'
 ```
 
-## 7. OpenAI Responses
+## 6. OpenAI Responses
+
+Requires `gpt-4o` (or your OpenAI Responses alias) in config:
 
 ```bash
 curl -sS http://127.0.0.1:8787/v1/responses \
@@ -99,29 +115,69 @@ curl -sS http://127.0.0.1:8787/v1/responses \
   -d '{
     "model": "gpt-4o",
     "input": "hello"
-  }' | jq '.output[].content'
+  }' | jq '.output'
+```
+
+## 7. OAuth Responses (optional)
+
+Requires prior login (`droid-proxy auth codex` or `auth xai`) and a matching
+model in config. Skip if you only use API-key providers.
+
+Codex example:
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/responses \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "gpt-5.2-codex",
+    "input": "hello"
+  }' | jq '.output'
+```
+
+xAI Grok Build example:
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/responses \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "grok-build-0.1",
+    "input": "hello"
+  }' | jq '.output'
 ```
 
 ## 8. Drive Droid
 
-1. Start the proxy.
-2. Add a model entry to `~/.factory/settings.json` (see `docs/factory-settings/`).
+1. Start the proxy: `./droid-proxy start --config config.yaml`
+2. Add a model entry to `~/.factory/settings.json` (see [FACTORY.md](FACTORY.md)).
 3. Select the model in Droid.
 4. Send a message; confirm a response.
-5. Ask the agent to do something tool-using ("read the README"); confirm tool
-   calls flow.
-6. Watch the proxy's log to confirm each request id is visible and the trace
-   shape matches what you expect.
+5. Ask the agent to use a tool ("read the README"); confirm tool calls flow.
+6. Watch `./droid-proxy logs` for request IDs.
 
 ## 9. Verify no secrets leak in logs
 
-With `trace_requests: true` and an Authorization header set on a request:
+With `trace_requests: true` in config and a test API key:
 
 ```bash
-DROID_PROXY_TEST_KEY=sk-secret-do-not-log-1234 ./droid-proxy --config config.yaml 2> /tmp/proxy.log &
+set -a && source .env.local && set +a
+./droid-proxy --config config.yaml 2> /tmp/proxy.log &
 sleep 1
-curl -sS http://127.0.0.1:8787/v1/chat/completions -d '...' >/dev/null
-grep -q 'sk-secret-do-not-log-1234' /tmp/proxy.log && echo "LEAK!" || echo "OK"
+curl -sS http://127.0.0.1:8787/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}' >/dev/null
+grep -q 'sk-' /tmp/proxy.log && echo "LEAK!" || echo "OK"
+kill %1 2>/dev/null
 ```
 
-`OK` means the redaction is in place.
+`OK` means redaction is working. Use foreground mode here only for this debug
+check — normal operation should use `start`.
+
+## Developers
+
+After code changes, also run:
+
+```bash
+go test ./...
+```
+
+Workflow validation uses local fake upstreams and does not require provider API keys.

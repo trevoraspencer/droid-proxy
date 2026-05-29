@@ -1,7 +1,12 @@
 # droid-proxy example configuration.
 #
-# Run with: droid-proxy --config config.example.yaml
-# Use a copy as config.yaml (which is gitignored by default).
+# Setup:
+#   cp config.example.yaml config.yaml
+#   cp .env.local.example .env.local   # add API keys
+#   set -a && source .env.local && set +a
+#   ./droid-proxy start --config config.yaml
+#
+# See docs/CLI.md and docs/README.md for full documentation.
 
 listen:
   host: 127.0.0.1
@@ -116,3 +121,45 @@ models:
   #   upstream_protocol: xai-responses
   #   oauth_provider: xai
   #   upstream_model: grok-build-0.1
+
+  # Example: xAI API key (generic chat mode). See docs/examples/xai.md.
+  # - alias: grok-3
+  #   display_name: "Grok 3 (xAI)"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: xai
+  #   upstream_model: grok-3
+
+  # Example: Kimi (Moonshot). See docs/examples/kimi.md.
+  # - alias: kimi-k2
+  #   display_name: "Kimi K2 (Moonshot)"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: kimi
+  #   upstream_model: kimi-k2-0711-preview
+
+  # Example: Groq. See docs/examples/groq.md.
+  # - alias: llama-3.3-70b
+  #   display_name: "Llama 3.3 70B (Groq)"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: groq
+  #   upstream_model: llama-3.3-70b-versatile
+
+  # Example: Fireworks. See docs/examples/fireworks.md.
+  # - alias: deepseek-v4-pro
+  #   display_name: "DeepSeek V4 Pro (Fireworks)"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: fireworks
+  #   upstream_model: accounts/fireworks/models/deepseek-v4-pro
+  #   capabilities:
+  #     reasoning: deepseek
+
+  # Example: Z.AI GLM Coding Plan. See docs/examples/zai.md.
+  # - alias: glm-5.1
+  #   display_name: "GLM 5.1 (Z.AI)"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: zai-coding-api
+  #   upstream_model: glm-5.1

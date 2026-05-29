@@ -1,5 +1,14 @@
 # DeepSeek
 
+## Overview
+
+| | |
+|---|---|
+| **Tier** | T1 — native OpenAI Chat passthrough |
+| **Factory mode** | `generic-chat-completion-api` |
+| **Upstream protocol** | `openai-chat` |
+| **When to use** | DeepSeek models with tool-using agent workflows and reasoning replay |
+
 DeepSeek's chat API speaks OpenAI Chat Completions and returns `reasoning_content`
 deltas when the model thinks. droid-proxy captures these automatically so
 follow-up turns with tool results carry the prior reasoning forward — required
@@ -7,9 +16,13 @@ by DeepSeek to keep tool-using conversations coherent.
 
 The examples below use the current 2026 `deepseek-v4-flash` naming. Older
 aliases such as `deepseek-chat`, `deepseek-reasoner`, and legacy proxy aliases
-like `droid-deepseek-v3` or `droid-deepseek-v4-flash` may still work for
-existing configs, but treat them as legacy compatibility names rather than new
-defaults.
+like `droid-deepseek-v3` may still work for existing configs, but treat them as
+legacy compatibility names rather than new defaults.
+
+## Prerequisites
+
+- API key from [DeepSeek](https://platform.deepseek.com/)
+- Env var: `DEEPSEEK_API_KEY`
 
 ## config.yaml
 
@@ -27,10 +40,8 @@ models:
       reasoning: deepseek
 ```
 
-`known_auth: deepseek` fills in:
-
-- `base_url: https://api.deepseek.com/v1`
-- `api_key_env: DEEPSEEK_API_KEY`
+`known_auth: deepseek` fills in `base_url`, `api_key_env`, and reasoning defaults.
+See [PROVIDERS.md](../PROVIDERS.md) for tier details.
 
 ## ~/.factory/settings.json
 
@@ -53,10 +64,18 @@ models:
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
-droid-proxy --config config.yaml
+./droid-proxy start --config config.yaml
+./droid-proxy status
 ```
 
-## Curl smoke test
+Or load from `.env.local`:
+
+```bash
+set -a && source .env.local && set +a
+./droid-proxy start --config config.yaml
+```
+
+## Verify
 
 ```bash
 curl -sS http://127.0.0.1:8787/v1/chat/completions \
@@ -65,5 +84,11 @@ curl -sS http://127.0.0.1:8787/v1/chat/completions \
     "model": "deepseek-v4-flash",
     "messages": [{"role":"user","content":"hello"}],
     "stream": false
-  }' | jq .
+  }' | jq -r '.choices[0].message.content'
 ```
+
+## Notes
+
+- Enable `capabilities.reasoning: deepseek` (or use `known_auth: deepseek`) for
+  reasoning replay on multi-turn tool conversations.
+- Ready-to-paste Factory snippet: [generic.json](../factory-settings/generic.json).

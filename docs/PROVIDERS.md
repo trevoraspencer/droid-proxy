@@ -43,24 +43,24 @@ This release ships:
 (base URL, env var, auth header, version headers). Anything you set explicitly
 in `config.yaml` always wins.
 
-| known_auth | Default base URL | Env var | Default upstream | Tier |
-|-----|-----|-----|-----|-----|
-| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `openai-responses` | T1 (openai mode) |
-| `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | `anthropic-messages` | T1 (anthropic mode) |
-| `deepseek` | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | `openai-chat` | T1 (generic mode, reasoning replay) |
-| `xai` | `https://api.x.ai/v1` | `XAI_API_KEY` | `openai-chat` | T2 |
-| `kimi` | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | `openai-chat` | T2 |
-| `groq` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | `openai-chat` | T2 |
-| `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | `openai-chat` | T2 |
-| `zai` | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` | `openai-chat` | T2 (legacy main API alias) |
-| `zai-main-api` | `https://api.z.ai/api/paas/v4` | `ZAI_MAIN_API_KEY` | `openai-chat` | T2 |
-| `zai-coding-api` | `https://api.z.ai/api/coding/paas/v4` | `ZAI_CODING_API_KEY` | `openai-chat` | T2 (GLM Coding Plan) |
-| `mimo` | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` | `openai-chat` | T2 (reasoning replay) |
-| `mimo-token-plan-cn` | `https://token-plan-cn.xiaomimimo.com/v1` | `MIMO_TOKEN_PLAN_CN_API_KEY` | `openai-chat` | T2 (reasoning replay) |
-| `mimo-token-plan-sgp` | `https://token-plan-sgp.xiaomimimo.com/v1` | `MIMO_TOKEN_PLAN_SGP_API_KEY` | `openai-chat` | T2 (reasoning replay) |
-| `mimo-token-plan-ams` | `https://token-plan-ams.xiaomimimo.com/v1` | `MIMO_TOKEN_PLAN_AMS_API_KEY` | `openai-chat` | T2 (reasoning replay) |
-| `ollama` | `http://127.0.0.1:11434/v1` | _(none; local no-auth)_ | `openai-chat` | T2 |
-| `vllm` | `http://127.0.0.1:8000/v1` | _(none; local no-auth)_ | `openai-chat` | T2 |
+| known_auth | Default base URL | Env var | Default upstream | Tier | Example |
+|-----|-----|-----|-----|-----|-----|
+| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `openai-responses` | T1 (openai mode) | [openai.md](examples/openai.md) |
+| `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | `anthropic-messages` | T1 (anthropic mode) | [anthropic.md](examples/anthropic.md) |
+| `deepseek` | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | `openai-chat` | T1 (generic mode, reasoning replay) | [deepseek.md](examples/deepseek.md) |
+| `xai` | `https://api.x.ai/v1` | `XAI_API_KEY` | `openai-chat` | T2 | [xai.md](examples/xai.md) |
+| `kimi` | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | `openai-chat` | T2 | [kimi.md](examples/kimi.md) |
+| `groq` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | `openai-chat` | T2 | [groq.md](examples/groq.md) |
+| `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | `openai-chat` | T2 | [fireworks.md](examples/fireworks.md) |
+| `zai` | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` | `openai-chat` | T2 (legacy main API alias) | [zai.md](examples/zai.md) |
+| `zai-main-api` | `https://api.z.ai/api/paas/v4` | `ZAI_MAIN_API_KEY` | `openai-chat` | T2 | [zai.md](examples/zai.md) |
+| `zai-coding-api` | `https://api.z.ai/api/coding/paas/v4` | `ZAI_CODING_API_KEY` | `openai-chat` | T2 (GLM Coding Plan) | [zai.md](examples/zai.md) |
+| `mimo` | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` | `openai-chat` | T2 (reasoning replay) | [mimo.md](examples/mimo.md) |
+| `mimo-token-plan-cn` | `https://token-plan-cn.xiaomimimo.com/v1` | `MIMO_TOKEN_PLAN_CN_API_KEY` | `openai-chat` | T2 (reasoning replay) | [mimo.md](examples/mimo.md) |
+| `mimo-token-plan-sgp` | `https://token-plan-sgp.xiaomimimo.com/v1` | `MIMO_TOKEN_PLAN_SGP_API_KEY` | `openai-chat` | T2 (reasoning replay) | [mimo.md](examples/mimo.md) |
+| `mimo-token-plan-ams` | `https://token-plan-ams.xiaomimimo.com/v1` | `MIMO_TOKEN_PLAN_AMS_API_KEY` | `openai-chat` | T2 (reasoning replay) | [mimo.md](examples/mimo.md) |
+| `ollama` | `http://127.0.0.1:11434/v1` | _(none; local no-auth)_ | `openai-chat` | T2 | [local-ollama.md](examples/local-ollama.md) |
+| `vllm` | `http://127.0.0.1:8000/v1` | _(none; local no-auth)_ | `openai-chat` | T2 | [local-vllm.md](examples/local-vllm.md) |
 
 Custom OpenAI-compatible upstreams (LiteLLM, custom self-hosted gateways, etc.)
 work the same as the above — set `base_url`, `api_key_env`, and
@@ -97,10 +97,12 @@ Run `droid-proxy auth codex --config config.yaml` or
 `factory_provider: openai`, the matching OAuth upstream protocol, and
 `oauth_provider`.
 
-| oauth_provider | upstream_protocol | Default upstream | Callback default | Notes |
+| oauth_provider | upstream_protocol | Default upstream | Callback default | Example |
 |---|---|---|---|---|
-| `codex` | `codex-responses` | `https://chatgpt.com/backend-api/codex` | `localhost:1455/auth/callback` | Codex/ChatGPT OAuth for text, streaming, tools, and tool outputs. |
-| `xai` | `xai-responses` | `https://api.x.ai/v1` | `127.0.0.1:56121/callback` | xAI Grok Build OAuth through xAI's Responses API. |
+| `codex` | `codex-responses` | `https://chatgpt.com/backend-api/codex` | `localhost:1455/auth/callback` | [codex-oauth.md](examples/codex-oauth.md) |
+| `xai` | `xai-responses` | `https://api.x.ai/v1` | `127.0.0.1:56121/callback` | [xai-oauth.md](examples/xai-oauth.md) |
+
+See [OAUTH.md](OAUTH.md) for the full OAuth walkthrough.
 
 OAuth token files live under `oauth.auth_dir` (default
 `~/.droid-proxy/auth`) with `0700` directory and `0600` file permissions. If a

@@ -1,8 +1,21 @@
 # Anthropic
 
-Anthropic's `/v1/messages` is supported with native streaming and count_tokens.
-The proxy automatically decompresses gzipped responses (Anthropic's LB sometimes
-strips the `Content-Encoding` header).
+## Overview
+
+| | |
+|---|---|
+| **Tier** | T1 — native Anthropic Messages passthrough |
+| **Factory mode** | `anthropic` |
+| **Upstream protocol** | `anthropic-messages` |
+| **When to use** | Claude models via Anthropic's Messages API |
+
+The proxy automatically decompresses gzipped responses (Anthropic's load balancer
+sometimes strips the `Content-Encoding` header).
+
+## Prerequisites
+
+- API key from [Anthropic](https://console.anthropic.com/)
+- Env var: `ANTHROPIC_API_KEY`
 
 ## config.yaml
 
@@ -17,8 +30,8 @@ models:
     max_context_tokens: 200000
 ```
 
-`known_auth: anthropic` injects the required `anthropic-version: 2023-06-01`
-header and uses `x-api-key` instead of `Authorization`.
+`known_auth: anthropic` injects `anthropic-version: 2023-06-01` and uses
+`x-api-key` instead of `Authorization`.
 
 ## ~/.factory/settings.json
 
@@ -41,10 +54,24 @@ header and uses `x-api-key` instead of `Authorization`.
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-droid-proxy --config config.yaml
+./droid-proxy start --config config.yaml
+./droid-proxy status
 ```
 
-## Pass-through of custom Anthropic headers
+## Verify
 
-The proxy forwards `anthropic-version` and `anthropic-beta` headers from the
-client when set, so opt-in features that Droid sends arrive at Anthropic intact.
+```bash
+curl -sS http://127.0.0.1:8787/v1/messages \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens": 256,
+    "messages": [{"role":"user","content":"hi"}]
+  }' | jq -r '.content[0].text'
+```
+
+## Notes
+
+- The proxy forwards `anthropic-version` and `anthropic-beta` headers from Droid
+  when set, so opt-in features arrive at Anthropic intact.
+- Ready-to-paste Factory snippet: [anthropic.json](../factory-settings/anthropic.json).

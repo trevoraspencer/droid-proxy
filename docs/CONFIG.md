@@ -6,6 +6,36 @@ expansion — secrets stay in the environment, not in the file.
 
 A working example lives at [`config.example.yaml`](../config.example.yaml).
 
+## Process management
+
+The YAML file describes the HTTP server only. Starting, stopping, and installing
+as a background service are CLI commands — see [CLI.md](CLI.md).
+
+Typical flow:
+
+```bash
+cp config.example.yaml config.yaml
+cp .env.local.example .env.local
+set -a && source .env.local && set +a
+./droid-proxy start --config config.yaml
+```
+
+## Environment files
+
+Load API keys from a shell-style env file instead of exporting them manually.
+
+| Mechanism | Behavior |
+|-----------|----------|
+| `--env-file PATH` | Explicit path; used by foreground mode and `start` |
+| Auto-resolution | When `--env-file` is omitted, `start` and `service install` pick the first existing file: `.env.live-e2e.local` → `.env.local` → `~/.droid-proxy/env` (relative to the config directory for the first two) |
+
+Env files support `KEY=value` or `export KEY=value` lines. Comments (`#`) and
+blank lines are ignored. Missing files are skipped without error.
+
+See [`.env.local.example`](../.env.local.example) for a template of all supported
+API key env vars. OAuth tokens are **not** loaded from env files — use
+`droid-proxy auth codex` / `auth xai` ([OAUTH.md](OAUTH.md)).
+
 ## Top-level structure
 
 ```yaml
