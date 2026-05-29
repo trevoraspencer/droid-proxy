@@ -1,0 +1,26 @@
+# Binaries
+/droid-proxy
+/dist/
+*.exe
+*.test
+*.out
+
+# Go cache / build
+/.cache/
+/coverage.out
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local config
+config.yaml
+config.local.yaml
+.env
+.env.local
+
+# Factory validation reports
+/.factory/validation/

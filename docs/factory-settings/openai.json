@@ -1,0 +1,12 @@
+{
+  "customModels": [
+    {
+      "model": "droid-gpt-4o",
+      "modelDisplayName": "GPT-4o (via droid-proxy)",
+      "provider": "openai",
+      "baseUrl": "http://127.0.0.1:8787",
+      "apiKey": "not-required-when-client-auth-disabled",
+      "maxTokens": 16000
+    }
+  ]
+}

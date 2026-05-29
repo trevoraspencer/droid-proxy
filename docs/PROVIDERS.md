@@ -1,0 +1,100 @@
+# Supported providers
+
+`droid-proxy` is designed to put any model in front of Factory Droid. The exact
+behavior depends on three things:
+
+1. The **Factory provider mode** Droid uses to call the proxy
+   (`anthropic`, `openai`, or `generic-chat-completion-api`).
+2. The **upstream protocol** the actual provider speaks
+   (`anthropic-messages`, `openai-responses`, or `openai-chat`).
+3. The **tier**: how much translation we do between (1) and (2).
+
+This page documents the matrix and the honest tier classification of each
+supported provider.
+
+## Tier definitions
+
+| Tier | Meaning |
+|------|---------|
+| **T1** | Direct passthrough. Droid's protocol matches the upstream's protocol natively. Streaming, tools, structured output, multimodal all work as-is. |
+| **T2** | OpenAI-compatible endpoint. Upstream speaks `/v1/chat/completions` correctly. Streaming + tools tested. |
+| **T3** | Protocol translation. We re-shape request and response between protocols. Streaming + tools are supported for the implemented OpenAI Chat-backed translations, with minor delta-event timing differences from native upstreams. |
+| **T4** | Best effort. Chat-only support; tool calls / structured output / multimodal may not survive translation reliably. `agent_ready: false`. |
+
+## Current status
+
+This release ships:
+
+- ✅ **T1 / T2** paths: `generic-chat-completion-api` over `openai-chat`,
+  `openai` over `openai-responses`, `anthropic` over `anthropic-messages`.
+- ✅ **DeepSeek reasoning replay** (T1) for upstreams identified as DeepSeek or
+  any model with `capabilities.reasoning: deepseek`.
+- ✅ **T3** translation paths: `openai` over `openai-chat` and `anthropic`
+  over `openai-chat` translate text, streaming, tool calls, and tool results
+  against OpenAI-compatible Chat Completions upstreams.
+
+## Provider matrix
+
+`known_auth` is a short string you can set on a model to inherit defaults
+(base URL, env var, auth header, version headers). Anything you set explicitly
+in `config.yaml` always wins.
+
+| known_auth | Default base URL | Env var | Default upstream | Tier |
+|-----|-----|-----|-----|-----|
+| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `openai-responses` | T1 (openai mode) |
+| `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | `anthropic-messages` | T1 (anthropic mode) |
+| `deepseek` | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | `openai-chat` | T1 (generic mode, reasoning replay) |
+| `xai` | `https://api.x.ai/v1` | `XAI_API_KEY` | `openai-chat` | T2 |
+| `kimi` | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | `openai-chat` | T2 |
+| `groq` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | `openai-chat` | T2 |
+| `together` | `https://api.together.xyz/v1` | `TOGETHER_API_KEY` | `openai-chat` | T2 |
+| `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | `openai-chat` | T2 |
+| `mistral` | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` | `openai-chat` | T2 |
+| `zai` | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` | `openai-chat` | T2 |
+| `iflow` | `https://apis.iflow.cn/v1` | `IFLOW_API_KEY` | `openai-chat` | T2 |
+| `ollama` | `http://127.0.0.1:11434/v1` | _(none; local no-auth)_ | `openai-chat` | T2 |
+| `vllm` | `http://127.0.0.1:8000/v1` | _(none; local no-auth)_ | `openai-chat` | T2 |
+
+Custom OpenAI-compatible upstreams (LiteLLM, custom self-hosted gateways, etc.)
+work the same as the above — set `base_url`, `api_key_env`, and
+`upstream_protocol: openai-chat`. No `known_auth` needed.
+
+OpenRouter is intentionally not supported and not on the roadmap.
+
+## Factory provider × upstream protocol matrix
+
+| factory_provider | upstream_protocol | Droid hits | Tier | Status in this build |
+|---|---|---|---|---|
+| `generic-chat-completion-api` | `openai-chat` | `/v1/chat/completions` | T1/T2 | ✅ supported |
+| `openai` | `openai-responses` | `/v1/responses` and `/v1/chat/completions` | T1 | ✅ supported (Responses native; Chat returns native chat-completions response when Droid sends one) |
+| `openai` | `openai-chat` | `/v1/responses` (translated) and `/v1/chat/completions` (native) | T3 | ✅ supported |
+| `anthropic` | `anthropic-messages` | `/v1/messages`, `/v1/messages/count_tokens` | T1 | ✅ supported (gzip auto-decompress, native streaming) |
+| `anthropic` | `openai-chat` | `/v1/messages` (translated), `/v1/messages/count_tokens` (local fallback) | T3 | ✅ supported |
+
+A model marked `agent_ready: true` in `/v1/models` means:
+
+- Streaming works.
+- Tool calls survive a round trip.
+- `tool_result` messages are forwarded without reshaping.
+
+To opt a model out of agent-ready, set `capabilities.streaming: false` (or
+`tools: false`, etc.) explicitly.
+
+## Adding a new provider
+
+`droid-proxy` does not require code changes to add a new OpenAI-compatible
+provider. Just add a model entry to `config.yaml`:
+
+```yaml
+models:
+  - alias: my-custom-model
+    display_name: "Custom"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: "https://my-provider.example.com/v1"
+    api_key_env: MY_PROVIDER_KEY
+```
+
+Only when a provider needs a non-default auth header (like Anthropic's
+`x-api-key`) or default version headers, would a code change be needed.
+File an issue with the provider's docs link.
