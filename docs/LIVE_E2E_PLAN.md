@@ -15,6 +15,8 @@ Target date: 2026-05-29
   - Z.AI GLM coding plan through OpenAI-compatible chat
   - Fireworks through OpenAI-compatible chat
   - DeepSeek through OpenAI-compatible chat with reasoning replay
+  - Xiaomi MiMo V2.5 Pro through OpenAI-compatible chat with `api-key` auth
+    and reasoning replay
 - Exercise direct HTTP proxy calls and real Factory Droid coding-agent flows.
 - Confirm old local `CLIProxyAPIPlus` and `VibeProxy` installs are removed or
   quarantined before testing begins.
@@ -43,6 +45,8 @@ the exact model IDs in the provider dashboard or docs and adjust `config.local.y
 - Fireworks chat completions API: https://docs.fireworks.ai/api-reference/post-chatcompletions
 - DeepSeek chat completions API: https://api-docs.deepseek.com/api/create-chat-completion
 - DeepSeek model/pricing page: https://api-docs.deepseek.com/quick_start/pricing
+- Xiaomi MiMo repo example: [`docs/examples/mimo.md`](examples/mimo.md)
+- Xiaomi MiMo provider matrix: [`docs/PROVIDERS.md`](PROVIDERS.md#xiaomi-mimo)
 
 ## Phase 0: Decommission local donor proxies
 
@@ -202,6 +206,18 @@ models:
       thinking:
         type: enabled
 
+  - alias: droid-mimo-v2.5-pro
+    display_name: "MiMo V2.5 Pro"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: "${MIMO_KNOWN_AUTH:-mimo}"
+    upstream_model: "${MIMO_MODEL:-mimo-v2.5-pro}"
+    max_output_tokens: 131072
+    max_context_tokens: 1048576
+    extra_args:
+      thinking:
+        type: enabled
+
   - alias: droid-fireworks
     display_name: "Fireworks Coding"
     factory_provider: generic-chat-completion-api
@@ -228,6 +244,7 @@ Required environment:
 ```bash
 export DEEPSEEK_API_KEY=...
 export ZAI_API_KEY=...
+export MIMO_API_KEY=...
 export FIREWORKS_API_KEY=...
 export FIREWORKS_MODEL=...
 
@@ -235,8 +252,16 @@ export FIREWORKS_MODEL=...
 export CODEX_UPSTREAM_MODEL=gpt-5.2-codex
 export XAI_GROK_BUILD_MODEL=grok-build-0.1
 export ZAI_GLM_MODEL=glm-4.6
+export MIMO_KNOWN_AUTH=mimo
+export MIMO_MODEL=mimo-v2.5-pro
 export DEEPSEEK_MODEL=deepseek-v4-flash
 ```
+
+For MiMo Token Plan, set `MIMO_KNOWN_AUTH` to one of
+`mimo-token-plan-cn`, `mimo-token-plan-sgp`, or `mimo-token-plan-ams`, then
+export the matching env var from [`docs/examples/mimo.md`](examples/mimo.md):
+`MIMO_TOKEN_PLAN_CN_API_KEY`, `MIMO_TOKEN_PLAN_SGP_API_KEY`, or
+`MIMO_TOKEN_PLAN_AMS_API_KEY`.
 
 Config acceptance gate:
 
@@ -293,12 +318,12 @@ run_dir=".factory/validation/live-e2e/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$run_dir"
 ```
 
-### 3.1 Chat providers: DeepSeek, Z.AI, Fireworks
+### 3.1 Chat providers: DeepSeek, Z.AI, MiMo, Fireworks
 
 Run each alias through the same contract:
 
 ```bash
-for model in droid-deepseek-v4-flash droid-zai-glm droid-fireworks; do
+for model in droid-deepseek-v4-flash droid-zai-glm droid-mimo-v2.5-pro droid-fireworks; do
   curl -sS http://127.0.0.1:8787/v1/chat/completions \
     -H 'Content-Type: application/json' \
     -d "{
@@ -359,6 +384,19 @@ Z.AI-specific checks:
   with the current account-specific coding model.
 - Confirm `extra_args.thinking.type: enabled` is accepted. If the account rejects
   it, remove the extra arg and retest before changing code.
+
+MiMo-specific checks:
+
+- Confirm the account uses the correct profile: `mimo` for normal API access, or
+  the correct regional `mimo-token-plan-*` profile for Token Plan access.
+- Confirm the upstream request uses Xiaomi's `api-key` header and not
+  `Authorization: Bearer`.
+- Confirm `mimo-v2.5-pro` is accepted for coding and long reasoning. If the
+  account only exposes a different V2.5 model, update `MIMO_MODEL` and retest.
+- Confirm `extra_args.thinking.type: enabled` is accepted and that
+  `reasoning_content` replay works across a tool-call turn, as with DeepSeek.
+- Do not enable Xiaomi web search or prompt-cache controls during this run unless
+  their API docs explicitly expose those controls for Chat Completions.
 
 Fireworks-specific checks:
 
@@ -443,7 +481,7 @@ Run one intentional failure per provider:
 Secret scan:
 
 ```bash
-rg -n 'sk-|xai-|Bearer |refresh_token|access_token|id_token|DEEPSEEK_API_KEY|ZAI_API_KEY|FIREWORKS_API_KEY' \
+rg -n 'sk-|xai-|Bearer |refresh_token|access_token|id_token|DEEPSEEK_API_KEY|ZAI_API_KEY|MIMO_API_KEY|MIMO_TOKEN_PLAN|FIREWORKS_API_KEY' \
   .factory/validation/live-e2e 2>/dev/null
 ```
 
@@ -460,6 +498,7 @@ Update `~/.factory/settings.json` so every tested model points at
 | `droid-codex-oauth` | `openai` | `http://127.0.0.1:8787` |
 | `droid-grok-build-oauth` | `openai` | `http://127.0.0.1:8787` |
 | `droid-zai-glm` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
+| `droid-mimo-v2.5-pro` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
 | `droid-fireworks` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
 | `droid-deepseek-v4-flash` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
 
@@ -496,6 +535,7 @@ Fill this table during the live run.
 | ChatGPT/Codex OAuth | `droid-codex-oauth` |  |  |  |  |  |  |  |  |  |
 | xAI Grok Build OAuth | `droid-grok-build-oauth` |  |  |  |  |  |  |  |  |  |
 | Z.AI GLM coding | `droid-zai-glm` |  |  |  |  | N/A |  |  |  |  |
+| Xiaomi MiMo | `droid-mimo-v2.5-pro` |  |  |  |  | N/A |  |  |  |  |
 | Fireworks | `droid-fireworks` |  |  |  |  | N/A |  |  |  |  |
 | DeepSeek | `droid-deepseek-v4-flash` |  |  |  |  | N/A |  |  |  |  |
 
