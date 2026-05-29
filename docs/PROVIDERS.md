@@ -6,7 +6,8 @@ behavior depends on three things:
 1. The **Factory provider mode** Droid uses to call the proxy
    (`anthropic`, `openai`, or `generic-chat-completion-api`).
 2. The **upstream protocol** the actual provider speaks
-   (`anthropic-messages`, `openai-responses`, or `openai-chat`).
+   (`anthropic-messages`, `openai-responses`, `openai-chat`,
+   `codex-responses`, or `xai-responses`).
 3. The **tier**: how much translation we do between (1) and (2).
 
 This page documents the matrix and the honest tier classification of each
@@ -27,6 +28,9 @@ This release ships:
 
 - ✅ **T1 / T2** paths: `generic-chat-completion-api` over `openai-chat`,
   `openai` over `openai-responses`, `anthropic` over `anthropic-messages`.
+- ✅ **OAuth Responses paths**: `openai` over `codex-responses` for
+  Codex/ChatGPT OAuth and `openai` over `xai-responses` for xAI Grok Build
+  OAuth.
 - ✅ **DeepSeek reasoning replay** (T1) for upstreams identified as DeepSeek or
   any model with `capabilities.reasoning: deepseek`.
 - ✅ **T3** translation paths: `openai` over `openai-chat` and `anthropic`
@@ -47,11 +51,8 @@ in `config.yaml` always wins.
 | `xai` | `https://api.x.ai/v1` | `XAI_API_KEY` | `openai-chat` | T2 |
 | `kimi` | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | `openai-chat` | T2 |
 | `groq` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | `openai-chat` | T2 |
-| `together` | `https://api.together.xyz/v1` | `TOGETHER_API_KEY` | `openai-chat` | T2 |
 | `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | `openai-chat` | T2 |
-| `mistral` | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` | `openai-chat` | T2 |
 | `zai` | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` | `openai-chat` | T2 |
-| `iflow` | `https://apis.iflow.cn/v1` | `IFLOW_API_KEY` | `openai-chat` | T2 |
 | `ollama` | `http://127.0.0.1:11434/v1` | _(none; local no-auth)_ | `openai-chat` | T2 |
 | `vllm` | `http://127.0.0.1:8000/v1` | _(none; local no-auth)_ | `openai-chat` | T2 |
 
@@ -61,6 +62,24 @@ work the same as the above — set `base_url`, `api_key_env`, and
 
 OpenRouter is intentionally not supported and not on the roadmap.
 
+## OAuth providers
+
+OAuth providers are configured per model rather than through `known_auth`.
+Run `droid-proxy auth codex --config config.yaml` or
+`droid-proxy auth xai --config config.yaml` first, then configure a model with
+`factory_provider: openai`, the matching OAuth upstream protocol, and
+`oauth_provider`.
+
+| oauth_provider | upstream_protocol | Default upstream | Callback default | Notes |
+|---|---|---|---|---|
+| `codex` | `codex-responses` | `https://chatgpt.com/backend-api/codex` | `127.0.0.1:1455/auth/callback` | Codex/ChatGPT OAuth for text, streaming, tools, and tool outputs. |
+| `xai` | `xai-responses` | `https://api.x.ai/v1` | `127.0.0.1:56121/callback` | xAI Grok Build OAuth through xAI's Responses API. |
+
+OAuth token files live under `oauth.auth_dir` (default
+`~/.droid-proxy/auth`) with `0700` directory and `0600` file permissions. If a
+model sets `oauth_account`, the proxy selects that stored account; otherwise it
+uses the first valid account for the provider after refresh.
+
 ## Factory provider × upstream protocol matrix
 
 | factory_provider | upstream_protocol | Droid hits | Tier | Status in this build |
@@ -68,6 +87,8 @@ OpenRouter is intentionally not supported and not on the roadmap.
 | `generic-chat-completion-api` | `openai-chat` | `/v1/chat/completions` | T1/T2 | ✅ supported |
 | `openai` | `openai-responses` | `/v1/responses` and `/v1/chat/completions` | T1 | ✅ supported (Responses native; Chat returns native chat-completions response when Droid sends one) |
 | `openai` | `openai-chat` | `/v1/responses` (translated) and `/v1/chat/completions` (native) | T3 | ✅ supported |
+| `openai` | `codex-responses` | `/v1/responses` | T1 OAuth | ✅ supported for Responses text, streaming, tools, and tool outputs |
+| `openai` | `xai-responses` | `/v1/responses` | T1 OAuth | ✅ supported for Responses text, streaming, tools, and tool outputs |
 | `anthropic` | `anthropic-messages` | `/v1/messages`, `/v1/messages/count_tokens` | T1 | ✅ supported (gzip auto-decompress, native streaming) |
 | `anthropic` | `openai-chat` | `/v1/messages` (translated), `/v1/messages/count_tokens` (local fallback) | T3 | ✅ supported |
 

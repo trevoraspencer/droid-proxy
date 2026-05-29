@@ -30,11 +30,28 @@ const (
 	UpstreamOpenAIChat        UpstreamProtocol = "openai-chat"
 	UpstreamOpenAIResponses   UpstreamProtocol = "openai-responses"
 	UpstreamAnthropicMessages UpstreamProtocol = "anthropic-messages"
+	UpstreamCodexResponses    UpstreamProtocol = "codex-responses"
+	UpstreamXAIResponses      UpstreamProtocol = "xai-responses"
 )
 
 func (p UpstreamProtocol) IsValid() bool {
 	switch p {
-	case UpstreamOpenAIChat, UpstreamOpenAIResponses, UpstreamAnthropicMessages:
+	case UpstreamOpenAIChat, UpstreamOpenAIResponses, UpstreamAnthropicMessages, UpstreamCodexResponses, UpstreamXAIResponses:
+		return true
+	}
+	return false
+}
+
+type OAuthProvider string
+
+const (
+	OAuthProviderCodex OAuthProvider = "codex"
+	OAuthProviderXAI   OAuthProvider = "xai"
+)
+
+func (p OAuthProvider) IsValid() bool {
+	switch p {
+	case OAuthProviderCodex, OAuthProviderXAI:
 		return true
 	}
 	return false
@@ -63,6 +80,7 @@ type Config struct {
 	Logging        Logging        `yaml:"logging"`
 	ReasoningCache ReasoningCache `yaml:"reasoning_cache"`
 	Upstream       Upstream       `yaml:"upstream"`
+	OAuth          OAuth          `yaml:"oauth"`
 	Models         []*Model       `yaml:"models"`
 
 	present map[string]bool `yaml:"-"`
@@ -109,11 +127,21 @@ type Upstream struct {
 	ErrorBodyMaxBytes    int64         `yaml:"error_body_max_bytes"`
 }
 
+type OAuth struct {
+	AuthDir           string `yaml:"auth_dir"`
+	CodexCallbackHost string `yaml:"codex_callback_host"`
+	CodexCallbackPort int    `yaml:"codex_callback_port"`
+	XAICallbackHost   string `yaml:"xai_callback_host"`
+	XAICallbackPort   int    `yaml:"xai_callback_port"`
+}
+
 type Model struct {
 	Alias            string            `yaml:"alias"`
 	DisplayName      string            `yaml:"display_name"`
 	FactoryProvider  FactoryProvider   `yaml:"factory_provider"`
 	UpstreamProtocol UpstreamProtocol  `yaml:"upstream_protocol"`
+	OAuthProvider    OAuthProvider     `yaml:"oauth_provider"`
+	OAuthAccount     string            `yaml:"oauth_account"`
 	UpstreamModel    string            `yaml:"upstream_model"`
 	BaseURL          string            `yaml:"base_url"`
 	APIKeyEnv        string            `yaml:"api_key_env"`
@@ -211,7 +239,7 @@ func supportsAgentWorkflow(fp FactoryProvider, up UpstreamProtocol) bool {
 	case FactoryProviderGeneric:
 		return up == UpstreamOpenAIChat
 	case FactoryProviderOpenAI:
-		return up == UpstreamOpenAIResponses || up == UpstreamOpenAIChat
+		return up == UpstreamOpenAIResponses || up == UpstreamOpenAIChat || up == UpstreamCodexResponses || up == UpstreamXAIResponses
 	case FactoryProviderAnthropic:
 		return up == UpstreamAnthropicMessages || up == UpstreamOpenAIChat
 	default:
@@ -228,7 +256,7 @@ func (m *Model) Validate() error {
 		return fmt.Errorf("model %q: invalid factory_provider %q (must be one of: anthropic, openai, generic-chat-completion-api)", m.Alias, m.FactoryProvider)
 	}
 	if !m.UpstreamProtocol.IsValid() {
-		return fmt.Errorf("model %q: invalid upstream_protocol %q (must be one of: openai-chat, openai-responses, anthropic-messages)", m.Alias, m.UpstreamProtocol)
+		return fmt.Errorf("model %q: invalid upstream_protocol %q (must be one of: openai-chat, openai-responses, anthropic-messages, codex-responses, xai-responses)", m.Alias, m.UpstreamProtocol)
 	}
 	allowed := allowedUpstreamFor(m.FactoryProvider)
 	ok := false
@@ -241,7 +269,21 @@ func (m *Model) Validate() error {
 	if !ok {
 		return fmt.Errorf("model %q: factory_provider %q does not support upstream_protocol %q (allowed: %v)", m.Alias, m.FactoryProvider, m.UpstreamProtocol, allowed)
 	}
-	if strings.TrimSpace(m.BaseURL) == "" && strings.TrimSpace(m.KnownAuth) == "" {
+	if isOAuthUpstream(m.UpstreamProtocol) {
+		if m.FactoryProvider != FactoryProviderOpenAI {
+			return fmt.Errorf("model %q: oauth upstream_protocol %q requires factory_provider %q", m.Alias, m.UpstreamProtocol, FactoryProviderOpenAI)
+		}
+		wantProvider := oauthProviderForUpstream(m.UpstreamProtocol)
+		if !m.OAuthProvider.IsValid() {
+			return fmt.Errorf("model %q: oauth_provider is required for upstream_protocol %q (must be one of: codex, xai)", m.Alias, m.UpstreamProtocol)
+		}
+		if m.OAuthProvider != wantProvider {
+			return fmt.Errorf("model %q: upstream_protocol %q requires oauth_provider %q", m.Alias, m.UpstreamProtocol, wantProvider)
+		}
+	} else if m.OAuthProvider != "" {
+		return fmt.Errorf("model %q: oauth_provider is only valid with codex-responses or xai-responses upstream_protocol", m.Alias)
+	}
+	if strings.TrimSpace(m.BaseURL) == "" && strings.TrimSpace(m.KnownAuth) == "" && !isOAuthUpstream(m.UpstreamProtocol) {
 		return fmt.Errorf("model %q: base_url or known_auth is required", m.Alias)
 	}
 	if m.Capabilities.Reasoning != "" && !m.Capabilities.Reasoning.IsValid() {
@@ -258,11 +300,26 @@ func allowedUpstreamFor(fp FactoryProvider) []UpstreamProtocol {
 	case FactoryProviderGeneric:
 		return []UpstreamProtocol{UpstreamOpenAIChat}
 	case FactoryProviderOpenAI:
-		return []UpstreamProtocol{UpstreamOpenAIResponses, UpstreamOpenAIChat}
+		return []UpstreamProtocol{UpstreamOpenAIResponses, UpstreamOpenAIChat, UpstreamCodexResponses, UpstreamXAIResponses}
 	case FactoryProviderAnthropic:
 		return []UpstreamProtocol{UpstreamAnthropicMessages, UpstreamOpenAIChat}
 	}
 	return nil
+}
+
+func isOAuthUpstream(up UpstreamProtocol) bool {
+	return up == UpstreamCodexResponses || up == UpstreamXAIResponses
+}
+
+func oauthProviderForUpstream(up UpstreamProtocol) OAuthProvider {
+	switch up {
+	case UpstreamCodexResponses:
+		return OAuthProviderCodex
+	case UpstreamXAIResponses:
+		return OAuthProviderXAI
+	default:
+		return ""
+	}
 }
 
 func validateBaseURL(m *Model) error {

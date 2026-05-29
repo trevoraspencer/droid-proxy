@@ -15,6 +15,7 @@ client_auth: {...}       # require an api key from Droid (optional)
 logging: {...}           # log level, format, secret redaction
 reasoning_cache: {...}   # DeepSeek-style reasoning replay
 upstream: {...}          # http client timeouts and response caps
+oauth: {...}             # Codex/ChatGPT and xAI OAuth token storage/callbacks
 models:                  # required, non-empty
   - alias: ...
   - alias: ...
@@ -92,6 +93,27 @@ the security-hardening features that consume this schema.
 | `response_body_max_bytes` | int | `104857600` | Maximum upstream non-stream success body size in bytes. `0` opts out. |
 | `error_body_max_bytes` | int | `1048576` | Maximum upstream error body size in bytes. `0` opts out. |
 
+## `oauth`
+
+OAuth is optional and only used by models whose `upstream_protocol` is
+`codex-responses` or `xai-responses`. Token files are written with restrictive
+permissions and token values are never logged by the auth commands.
+
+| key | type | default | description |
+|---|---|---|---|
+| `auth_dir` | string | `~/.droid-proxy/auth` | Directory for saved OAuth token JSON files. |
+| `codex_callback_host` | string | `127.0.0.1` | Loopback host for Codex/ChatGPT OAuth login. |
+| `codex_callback_port` | int | `1455` | Loopback port for Codex/ChatGPT OAuth login. |
+| `xai_callback_host` | string | `127.0.0.1` | Loopback host for xAI Grok Build OAuth login. |
+| `xai_callback_port` | int | `56121` | Loopback port for xAI Grok Build OAuth login. |
+
+Authenticate before starting the proxy:
+
+```bash
+droid-proxy auth codex --config config.yaml
+droid-proxy auth xai --config config.yaml
+```
+
 ## `models[]` (required)
 
 Each model entry maps a public alias (what Droid sends as `model`) to a
@@ -102,11 +124,13 @@ specific upstream configuration.
 | `alias` | string | ✅ | Identifier Droid sends as `model`. |
 | `display_name` | string |  | Human-readable name surfaced in `/v1/models`. |
 | `factory_provider` | enum | ✅ | One of `anthropic`, `openai`, `generic-chat-completion-api`. Picks which Droid endpoint protocol the proxy serves. |
-| `upstream_protocol` | enum | ✅ | One of `anthropic-messages`, `openai-responses`, `openai-chat`. Picks how the proxy talks to the real provider. See the matrix in [PROVIDERS.md](PROVIDERS.md). |
-| `base_url` | string | one of `base_url` or `known_auth` required | Upstream root URL. e.g. `https://api.deepseek.com/v1`. |
+| `upstream_protocol` | enum | ✅ | One of `anthropic-messages`, `openai-responses`, `openai-chat`, `codex-responses`, `xai-responses`. Picks how the proxy talks to the real provider. See the matrix in [PROVIDERS.md](PROVIDERS.md). |
+| `oauth_provider` | enum | for OAuth upstreams | `codex` for `codex-responses`, or `xai` for `xai-responses`. |
+| `oauth_account` | string |  | Optional stored OAuth account selector. Matches saved email, subject, account id, or token filename stem. |
+| `base_url` | string | one of `base_url`, `known_auth`, or OAuth upstream required | Upstream root URL. e.g. `https://api.deepseek.com/v1`. OAuth upstreams use their provider default when omitted. |
 | `known_auth` | string |  | Shortcut: looks up base_url, env var, auth header, version headers from a built-in registry. See PROVIDERS.md. |
 | `upstream_model` | string |  | Forwarded `model` field on the upstream call. If unset, the alias itself is sent. |
-| `api_key_env` | string |  | Env var holding the API key. If unset, the env var declared by `known_auth` is used. |
+| `api_key_env` | string |  | Env var holding the API key. If unset, the env var declared by `known_auth` is used. Not required for OAuth upstreams. |
 | `max_output_tokens` | int |  | Informational; surfaced in `/v1/models`. |
 | `max_context_tokens` | int |  | Informational; surfaced in `/v1/models`. |
 | `extra_headers` | map[string]string |  | Headers appended to every upstream request for this model. |
@@ -130,6 +154,28 @@ All optional. Defaults are reasonable for most OpenAI-compatible providers.
 
 A model is reported as `agent_ready: true` in `/v1/models` iff
 `streaming && tools && tool_result_safe` are all true.
+
+### OAuth model examples
+
+```yaml
+oauth:
+  auth_dir: "~/.droid-proxy/auth"
+
+models:
+  - alias: droid-codex
+    display_name: "Codex OAuth"
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: gpt-5.3-codex
+
+  - alias: droid-grok-build
+    display_name: "Grok Build OAuth"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    upstream_model: grok-build-0.1
+```
 
 ## Environment variables
 
@@ -160,8 +206,11 @@ At startup, droid-proxy validates:
 - Every model has a unique `alias`.
 - Every model has `factory_provider` and `upstream_protocol` set and the combo
   is one of the allowed pairs above.
-- Every model has either `base_url` or `known_auth`.
+- Every non-OAuth model has either `base_url` or `known_auth`.
+- OAuth models use `factory_provider: openai`, set the matching
+  `oauth_provider`, and do not require `api_key_env`.
 - When `client_auth.enabled: true`, at least one `api_keys` entry exists.
+- `oauth.auth_dir` is not blank and OAuth callback ports are valid TCP ports.
 - Duration and byte cap fields reject negative values; documented `0` / `0s`
   opt-outs are preserved instead of being replaced by defaults.
 

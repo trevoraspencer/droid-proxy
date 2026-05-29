@@ -89,11 +89,8 @@ func TestApplyAuthHeader_KnownAuthOpenAICompatibleBearer(t *testing.T) {
 		"xai",
 		"groq",
 		"kimi",
-		"together",
 		"fireworks",
-		"mistral",
 		"zai",
-		"iflow",
 		"ollama",
 		"vllm",
 	} {

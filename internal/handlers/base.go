@@ -11,6 +11,7 @@ import (
 
 	"droid-proxy/internal/config"
 	"droid-proxy/internal/logging"
+	"droid-proxy/internal/oauth"
 	"droid-proxy/internal/upstream"
 )
 
@@ -21,6 +22,7 @@ type Deps struct {
 	Cfg    *config.Config
 	Router *upstream.Router
 	Client *upstream.Client
+	OAuth  *oauth.Manager
 }
 
 // ErrorBody is the OpenAI-shaped error envelope. Anthropic and Responses payloads

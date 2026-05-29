@@ -6,12 +6,12 @@ vLLM's `--api-server` provides OpenAI-compatible endpoints. Default port 8000.
 
 ```yaml
 models:
-  - alias: droid-mistral-vllm
-    display_name: "Mistral 7B (vLLM)"
+  - alias: droid-llama-vllm
+    display_name: "Llama 3.1 8B (vLLM)"
     factory_provider: generic-chat-completion-api
     upstream_protocol: openai-chat
     known_auth: vllm
-    upstream_model: mistralai/Mistral-7B-Instruct-v0.3
+    upstream_model: meta-llama/Llama-3.1-8B-Instruct
 ```
 
 ## ~/.factory/settings.json
@@ -20,8 +20,8 @@ models:
 {
   "customModels": [
     {
-      "model": "droid-mistral-vllm",
-      "modelDisplayName": "Mistral (vLLM)",
+      "model": "droid-llama-vllm",
+      "modelDisplayName": "Llama 3.1 (vLLM)",
       "provider": "generic-chat-completion-api",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
@@ -35,7 +35,7 @@ models:
 
 ```bash
 python -m vllm.entrypoints.openai.api_server \
-  --model mistralai/Mistral-7B-Instruct-v0.3
+  --model meta-llama/Llama-3.1-8B-Instruct
 
 droid-proxy --config config.yaml
 ```

@@ -1,8 +1,9 @@
 # droid-proxy
 
 A localhost HTTP proxy that lets [Factory Droid](https://factory.ai) use any
-BYOK / custom model — Anthropic, OpenAI, DeepSeek, xAI, Kimi, ZAI, iFlow, Groq,
-local Ollama or vLLM, and more — from a single Go binary.
+BYOK / custom model — Anthropic, OpenAI, DeepSeek, xAI, Kimi, ZAI, Groq,
+Fireworks, local Ollama or vLLM, custom OpenAI-compatible endpoints, plus
+Codex/ChatGPT and xAI Grok Build OAuth — from a single Go binary.
 
 - **Localhost-first.** Examples use `http://127.0.0.1:8787`. No tunneling
   required unless you specifically want remote access.
@@ -14,6 +15,8 @@ local Ollama or vLLM, and more — from a single Go binary.
 - **Reasoning replay.** DeepSeek-style `reasoning_content` is captured and
   re-supplied on subsequent turns so multi-step tool conversations stay
   coherent.
+- **Focused OAuth.** Browser PKCE login is available for Codex/ChatGPT and xAI
+  Grok Build accounts, with tokens stored locally under `~/.droid-proxy/auth`.
 
 ## Endpoints
 
@@ -105,7 +108,10 @@ Every supported provider with tier classification is in
 [`docs/PROVIDERS.md`](docs/PROVIDERS.md). The short version:
 
 - **T1 native passthrough** for DeepSeek, OpenAI (`/v1/responses`), Anthropic
-  (`/v1/messages` + `count_tokens`), and any OpenAI-compatible provider.
+  (`/v1/messages` + `count_tokens`), and OpenAI-compatible providers.
+- **OAuth Responses support** for Codex/ChatGPT and xAI Grok Build through
+  `droid-proxy auth codex --config config.yaml` or
+  `droid-proxy auth xai --config config.yaml`.
 - **T3 protocol translation** for OpenAI Responses-over-Chat and Anthropic
   Messages-over-Chat is implemented for text, streaming, tools, and tool
   results over OpenAI-compatible Chat upstreams.
@@ -119,6 +125,8 @@ Full schema is in [`docs/CONFIG.md`](docs/CONFIG.md). Highlights:
   authenticate to the proxy. Off by default since localhost is trusted.
 - `reasoning_cache: { enabled: true, max_entries, ttl }` controls DeepSeek
   reasoning replay.
+- `oauth.auth_dir` controls where Codex/ChatGPT and xAI OAuth tokens are
+  stored.
 - Per-model `capabilities` overrides (streaming, tools, tool_result_safe,
   json_mode, structured_output, reasoning, prompt_caching) drive the
   `agent_ready` flag.

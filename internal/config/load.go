@@ -157,6 +157,15 @@ func (c *Config) Validate() error {
 	if c.Upstream.ErrorBodyMaxBytes < 0 {
 		errs = append(errs, "upstream.error_body_max_bytes must not be negative")
 	}
+	if strings.TrimSpace(c.OAuth.AuthDir) == "" {
+		errs = append(errs, "oauth.auth_dir must not be blank")
+	}
+	if c.OAuth.CodexCallbackPort < 0 || c.OAuth.CodexCallbackPort > 65535 {
+		errs = append(errs, fmt.Sprintf("oauth.codex_callback_port %d out of range", c.OAuth.CodexCallbackPort))
+	}
+	if c.OAuth.XAICallbackPort < 0 || c.OAuth.XAICallbackPort > 65535 {
+		errs = append(errs, fmt.Sprintf("oauth.xai_callback_port %d out of range", c.OAuth.XAICallbackPort))
+	}
 	if len(c.Models) == 0 {
 		errs = append(errs, "at least one model must be configured")
 	}
@@ -195,6 +204,9 @@ func validLogLevel(level string) bool {
 
 func requiresAPIKey(m *Model) bool {
 	if m == nil || strings.TrimSpace(m.BaseURL) == "" {
+		return false
+	}
+	if isOAuthUpstream(m.UpstreamProtocol) {
 		return false
 	}
 	if ka, ok := LookupKnownAuth(m.KnownAuth); ok && ka.NoAuth {

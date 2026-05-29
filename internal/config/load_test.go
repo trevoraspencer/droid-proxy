@@ -65,6 +65,15 @@ func TestLoad_MinimalValidDefaults(t *testing.T) {
 	if cfg.Upstream.ErrorBodyMaxBytes != 1<<20 {
 		t.Fatalf("error_body_max_bytes default wrong: %d", cfg.Upstream.ErrorBodyMaxBytes)
 	}
+	if cfg.OAuth.AuthDir != "~/.droid-proxy/auth" {
+		t.Fatalf("oauth.auth_dir default wrong: %q", cfg.OAuth.AuthDir)
+	}
+	if cfg.OAuth.CodexCallbackHost != "127.0.0.1" || cfg.OAuth.CodexCallbackPort != 1455 {
+		t.Fatalf("codex callback defaults wrong: %+v", cfg.OAuth)
+	}
+	if cfg.OAuth.XAICallbackHost != "127.0.0.1" || cfg.OAuth.XAICallbackPort != 56121 {
+		t.Fatalf("xai callback defaults wrong: %+v", cfg.OAuth)
+	}
 	if cfg.Models[0].Alias != "m1" {
 		t.Fatalf("model alias missing")
 	}
@@ -165,19 +174,142 @@ func TestLoad_AllowedCombos(t *testing.T) {
 		{"generic+chat", "generic-chat-completion-api", "openai-chat"},
 		{"openai+responses", "openai", "openai-responses"},
 		{"openai+chat", "openai", "openai-chat"},
+		{"openai+codex oauth", "openai", "codex-responses"},
+		{"openai+xai oauth", "openai", "xai-responses"},
 		{"anthropic+messages", "anthropic", "anthropic-messages"},
 		{"anthropic+chat", "anthropic", "openai-chat"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			oauthProvider := ""
+			if tc.up == "codex-responses" {
+				oauthProvider = "\n    oauth_provider: codex"
+			}
+			if tc.up == "xai-responses" {
+				oauthProvider = "\n    oauth_provider: xai"
+			}
 			in := `
 models:
   - alias: m
     factory_provider: ` + tc.fp + `
     upstream_protocol: ` + tc.up + `
-    base_url: http://127.0.0.1:1/v1
+    base_url: http://127.0.0.1:1/v1` + oauthProvider + `
 `
 			if _, err := parse([]byte(in)); err != nil {
 				t.Fatalf("expected ok, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoad_OAuthModelDoesNotRequireBaseURLOrAPIKey(t *testing.T) {
+	in := `
+models:
+  - alias: codex
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: gpt-5.3-codex
+  - alias: grok-build
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    upstream_model: grok-build-0.1
+`
+	cfg, err := parse([]byte(in))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, m := range cfg.Models {
+		if m.BaseURL != "" || m.APIKeyEnv != "" || !m.AgentReady() {
+			t.Fatalf("oauth model hydrated unexpected fields or not agent ready: %+v", m)
+		}
+	}
+}
+
+func TestLoad_OAuthModelValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name: "missing oauth_provider",
+			body: `
+models:
+  - alias: m
+    factory_provider: openai
+    upstream_protocol: codex-responses
+`,
+			wantErr: "oauth_provider is required",
+		},
+		{
+			name: "mismatched oauth_provider",
+			body: `
+models:
+  - alias: m
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: xai
+`,
+			wantErr: `requires oauth_provider "codex"`,
+		},
+		{
+			name: "oauth_provider on non oauth upstream",
+			body: `
+models:
+  - alias: m
+    factory_provider: openai
+    upstream_protocol: openai-responses
+    oauth_provider: codex
+    base_url: http://127.0.0.1:1/v1
+`,
+			wantErr: "oauth_provider is only valid",
+		},
+		{
+			name: "blank auth dir",
+			body: `
+oauth:
+  auth_dir: ""
+models:
+  - alias: m
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+`,
+			wantErr: "oauth.auth_dir must not be blank",
+		},
+		{
+			name: "bad codex callback port",
+			body: `
+oauth:
+  codex_callback_port: 70000
+models:
+  - alias: m
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+`,
+			wantErr: "oauth.codex_callback_port",
+		},
+		{
+			name: "bad xai callback port",
+			body: `
+oauth:
+  xai_callback_port: 70000
+models:
+  - alias: m
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+`,
+			wantErr: "oauth.xai_callback_port",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parse([]byte(tc.body))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", tc.wantErr, err)
 			}
 		})
 	}
@@ -377,6 +509,57 @@ models:
 	}
 }
 
+func TestLoad_KnownAuthKeptProvidersHydrateAndDroppedProvidersFail(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "secret")
+	t.Setenv("OPENAI_API_KEY", "secret")
+	t.Setenv("ANTHROPIC_API_KEY", "secret")
+	t.Setenv("XAI_API_KEY", "secret")
+	t.Setenv("MOONSHOT_API_KEY", "secret")
+	t.Setenv("GROQ_API_KEY", "secret")
+	t.Setenv("FIREWORKS_API_KEY", "secret")
+	t.Setenv("ZAI_API_KEY", "secret")
+
+	for _, knownAuth := range []string{"deepseek", "openai", "anthropic", "xai", "kimi", "groq", "fireworks", "zai", "ollama", "vllm"} {
+		t.Run("kept "+knownAuth, func(t *testing.T) {
+			fp := "generic-chat-completion-api"
+			if knownAuth == "openai" {
+				fp = "openai"
+			}
+			if knownAuth == "anthropic" {
+				fp = "anthropic"
+			}
+			in := `
+models:
+  - alias: m
+    factory_provider: ` + fp + `
+    known_auth: ` + knownAuth + `
+`
+			cfg, err := parse([]byte(in))
+			if err != nil {
+				t.Fatalf("expected kept known_auth %q to load, got: %v", knownAuth, err)
+			}
+			if cfg.Models[0].BaseURL == "" || cfg.Models[0].UpstreamProtocol == "" {
+				t.Fatalf("known_auth %q did not hydrate model: %+v", knownAuth, cfg.Models[0])
+			}
+		})
+	}
+
+	for _, knownAuth := range []string{"mistral", "iflow", "together"} {
+		t.Run("dropped "+knownAuth, func(t *testing.T) {
+			in := `
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    known_auth: ` + knownAuth + `
+`
+			_, err := parse([]byte(in))
+			if err == nil || !strings.Contains(err.Error(), "unknown known_auth") {
+				t.Fatalf("expected dropped known_auth %q to fail, got: %v", knownAuth, err)
+			}
+		})
+	}
+}
+
 func TestLoad_KnownAuthNoAuthExemptionRequiresLoopback(t *testing.T) {
 	t.Setenv("REMOTE_LOCAL_PROVIDER_KEY", "secret")
 	cases := []struct {
@@ -560,6 +743,8 @@ func TestModelAgentReadyRequiresSupportedRuntimePath(t *testing.T) {
 		{"generic chat", &Model{FactoryProvider: FactoryProviderGeneric, UpstreamProtocol: UpstreamOpenAIChat}, true},
 		{"responses native", &Model{FactoryProvider: FactoryProviderOpenAI, UpstreamProtocol: UpstreamOpenAIResponses}, true},
 		{"responses over chat", &Model{FactoryProvider: FactoryProviderOpenAI, UpstreamProtocol: UpstreamOpenAIChat}, true},
+		{"codex responses oauth", &Model{FactoryProvider: FactoryProviderOpenAI, UpstreamProtocol: UpstreamCodexResponses}, true},
+		{"xai responses oauth", &Model{FactoryProvider: FactoryProviderOpenAI, UpstreamProtocol: UpstreamXAIResponses}, true},
 		{"messages native", &Model{FactoryProvider: FactoryProviderAnthropic, UpstreamProtocol: UpstreamAnthropicMessages}, true},
 		{"messages over chat", &Model{FactoryProvider: FactoryProviderAnthropic, UpstreamProtocol: UpstreamOpenAIChat}, true},
 		{"unsupported provider protocol", &Model{FactoryProvider: FactoryProviderGeneric, UpstreamProtocol: UpstreamOpenAIResponses}, false},

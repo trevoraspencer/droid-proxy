@@ -1,0 +1,284 @@
+package oauth
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"droid-proxy/internal/config"
+)
+
+func TestGeneratePKCE(t *testing.T) {
+	pkce, err := GeneratePKCE()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkce.CodeVerifier == "" || pkce.CodeChallenge == "" {
+		t.Fatalf("pkce fields must be populated: %+v", pkce)
+	}
+	if pkce.CodeVerifier == pkce.CodeChallenge {
+		t.Fatalf("code challenge should be derived from verifier, got identical values")
+	}
+}
+
+func TestBuildAuthURL_Codex(t *testing.T) {
+	pkce := &PKCE{CodeVerifier: "verifier", CodeChallenge: "challenge"}
+	rawURL, err := BuildAuthURL(ProviderCodex, "http://127.0.0.1:1455/auth/callback", "state-1", "", pkce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := parsed.Query()
+	for key, want := range map[string]string{
+		"client_id":             CodexClientID,
+		"response_type":         "code",
+		"redirect_uri":          "http://127.0.0.1:1455/auth/callback",
+		"state":                 "state-1",
+		"code_challenge":        "challenge",
+		"code_challenge_method": "S256",
+	} {
+		if got := q.Get(key); got != want {
+			t.Fatalf("%s=%q want %q in %s", key, got, want, rawURL)
+		}
+	}
+	if !strings.Contains(q.Get("scope"), "offline_access") {
+		t.Fatalf("scope should request refresh capability, got %q", q.Get("scope"))
+	}
+}
+
+func TestCallbackHandler(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		out := make(chan CallbackResult, 1)
+		handler := callbackHandler("/auth/callback", "state-ok", out)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=code-ok&state=state-ok", nil)
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		result := <-out
+		if result.Code != "code-ok" || result.State != "state-ok" || result.Err != "" {
+			t.Fatalf("bad callback result: %+v", result)
+		}
+	})
+
+	t.Run("state mismatch", func(t *testing.T) {
+		out := make(chan CallbackResult, 1)
+		handler := callbackHandler("/auth/callback", "state-ok", out)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=code-ok&state=wrong", nil)
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		result := <-out
+		if !strings.Contains(result.Err, "state mismatch") {
+			t.Fatalf("expected state mismatch, got %+v", result)
+		}
+	})
+}
+
+func TestSaveAndLoadTokenPermissionsAndAccountSelection(t *testing.T) {
+	authDir := t.TempDir()
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})
+	path, err := manager.SaveToken(&Token{
+		Type:         string(ProviderCodex),
+		AccessToken:  "access-secret",
+		RefreshToken: "refresh-secret",
+		Email:        "user@example.com",
+		AccountID:    "account-123",
+		Expired:      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(path) != authDir {
+		t.Fatalf("token path %q not under auth dir %q", path, authDir)
+	}
+	assertPerm(t, authDir, 0o700)
+	assertPerm(t, path, 0o600)
+
+	token, err := manager.LoadToken(ProviderCodex, "user@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.AccessToken != "access-secret" || token.AccountID != "account-123" {
+		t.Fatalf("loaded wrong token: %+v", token)
+	}
+	if _, err := manager.LoadToken(ProviderXAI, "user@example.com"); err == nil {
+		t.Fatal("expected no xai token")
+	}
+}
+
+func TestRefreshCodexSavesRefreshedToken(t *testing.T) {
+	authDir := t.TempDir()
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if values.Get("grant_type") != "refresh_token" || values.Get("refresh_token") != "refresh-secret" {
+			t.Fatalf("bad refresh form: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "new-access",
+			"refresh_token": "new-refresh",
+			"expires_in":    3600,
+		})
+	}))
+	defer srv.Close()
+
+	oldTokenURL := codexTokenURL
+	codexTokenURL = srv.URL
+	t.Cleanup(func() { codexTokenURL = oldTokenURL })
+
+	refreshed, err := manager.RefreshIfNeeded(context.Background(), &Token{
+		Type:         string(ProviderCodex),
+		RefreshToken: "refresh-secret",
+		Email:        "user@example.com",
+		Expired:      time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.AccessToken != "new-access" || refreshed.RefreshToken != "new-refresh" {
+		t.Fatalf("bad refreshed token: %+v", refreshed)
+	}
+	loaded, err := manager.LoadToken(ProviderCodex, "user@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.AccessToken != "new-access" {
+		t.Fatalf("refreshed token was not saved: %+v", loaded)
+	}
+}
+
+func TestTokenRequestErrorDoesNotLeakResponseBody(t *testing.T) {
+	secret := "refresh-secret-that-must-not-leak"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"` + secret + `"}`))
+	}))
+	defer srv.Close()
+
+	oldTokenURL := codexTokenURL
+	codexTokenURL = srv.URL
+	t.Cleanup(func() { codexTokenURL = oldTokenURL })
+
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: t.TempDir()}})
+	_, err := manager.RefreshIfNeeded(context.Background(), &Token{
+		Type:         string(ProviderCodex),
+		RefreshToken: secret,
+		Expired:      time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+	})
+	if err == nil {
+		t.Fatal("expected refresh error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("refresh error leaked token/response body: %v", err)
+	}
+}
+
+func TestExchangeXAICode(t *testing.T) {
+	pkce := &PKCE{CodeVerifier: "verifier", CodeChallenge: "challenge"}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if values.Get("grant_type") != "authorization_code" ||
+			values.Get("client_id") != XAIClientID ||
+			values.Get("code") != "code-123" ||
+			values.Get("code_verifier") != "verifier" {
+			t.Fatalf("bad exchange form: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "xai-access",
+			"refresh_token": "xai-refresh",
+			"expires_in":    1800,
+		})
+	}))
+	defer srv.Close()
+
+	token, err := exchangeXAICode(context.Background(), "code-123", "http://127.0.0.1:56121/callback", pkce, srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.Provider() != ProviderXAI || token.BaseURL != XAIDefaultBaseURL || token.TokenEndpoint != srv.URL {
+		t.Fatalf("bad xai token metadata: %+v", token)
+	}
+}
+
+func TestValidateXAIEndpoint(t *testing.T) {
+	for _, good := range []string{
+		"https://auth.x.ai/oauth/authorize",
+		"https://x.ai/oauth/token",
+	} {
+		if _, err := validateXAIEndpoint(good, "endpoint"); err != nil {
+			t.Fatalf("expected %q to validate: %v", good, err)
+		}
+	}
+	for _, bad := range []string{
+		"http://auth.x.ai/oauth/authorize",
+		"https://example.com/oauth/token",
+	} {
+		if _, err := validateXAIEndpoint(bad, "endpoint"); err == nil {
+			t.Fatalf("expected %q to fail", bad)
+		}
+	}
+}
+
+func TestParseCodexIdentityFallsBackToAccessToken(t *testing.T) {
+	accessToken := testJWT(t, map[string]any{
+		"sub": "sub-access",
+		"https://api.openai.com/auth": map[string]any{
+			"chatgpt_account_id": "acct_access",
+			"chatgpt_email":      "user@example.com",
+		},
+	})
+	email, subject, accountID := parseCodexIdentity("", accessToken)
+	if email != "user@example.com" || subject != "sub-access" || accountID != "acct_access" {
+		t.Fatalf("bad codex identity email=%q subject=%q account=%q", email, subject, accountID)
+	}
+}
+
+func assertPerm(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("%s mode=%#o want %#o", path, got, want)
+	}
+}
+
+func testJWT(t *testing.T, claims map[string]any) string {
+	t.Helper()
+	header, err := json.Marshal(map[string]any{"alg": "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload) + "."
+}

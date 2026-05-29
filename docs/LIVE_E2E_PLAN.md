@@ -1,0 +1,547 @@
+# Live E2E provider test plan
+
+This plan verifies `droid-proxy` against the live providers that matter for this
+repo and removes local `CLIProxyAPIPlus` / `VibeProxy` copies from the test
+machine so they cannot mask failures, bind the same ports, or leave stale
+Factory Droid settings behind.
+
+Target date: 2026-05-29
+
+## Goals
+
+- Prove live end-to-end behavior for:
+  - ChatGPT/Codex OAuth through `codex-responses`
+  - xAI Grok Build OAuth through `xai-responses`
+  - Z.AI GLM coding plan through OpenAI-compatible chat
+  - Fireworks through OpenAI-compatible chat
+  - DeepSeek through OpenAI-compatible chat with reasoning replay
+- Exercise direct HTTP proxy calls and real Factory Droid coding-agent flows.
+- Confirm old local `CLIProxyAPIPlus` and `VibeProxy` installs are removed or
+  quarantined before testing begins.
+- Capture reproducible pass/fail evidence without committing secrets, token
+  files, or private logs.
+
+## Non-goals
+
+- No image, video, websocket, quota dashboard, multi-account balancing, or UI
+  parity testing.
+- No benchmarking beyond basic latency notes.
+- No attempt to make droid-proxy match every behavior of CLIProxyAPIPlus or
+  VibeProxy.
+
+## References to confirm before spending tokens
+
+Provider model names and account entitlements drift. Before the live run, verify
+the exact model IDs in the provider dashboard or docs and adjust `config.local.yaml`.
+
+- OpenAI Codex/ChatGPT sign-in: https://help.openai.com/en/articles/11381614-api-codex-cli-and-sign-in-with-chatgpt
+- OpenAI Codex CLI overview: https://help.openai.com/en/articles/11096431
+- xAI Grok Build model docs: https://docs.x.ai/developers/models/grok-build-0.1
+- xAI Grok Build API announcement: https://x.ai/news/grok-build-0-1
+- Z.AI GLM-4.6 docs: https://docs.z.ai/guides/llm/glm-4.6
+- Z.AI chat completions API: https://docs.z.ai/api-reference/llm/chat-completion
+- Fireworks chat completions API: https://docs.fireworks.ai/api-reference/post-chatcompletions
+- DeepSeek chat completions API: https://api-docs.deepseek.com/api/create-chat-completion
+- DeepSeek model/pricing page: https://api-docs.deepseek.com/quick_start/pricing
+
+## Phase 0: Decommission local donor proxies
+
+Do this before any live test. The point is to make `droid-proxy` the only proxy
+that Factory Droid can reach.
+
+### 0.1 Record current state
+
+```bash
+mkdir -p .factory/validation/live-e2e/$(date +%Y%m%d-%H%M%S)
+
+pgrep -af 'CLIProxyAPIPlus|CLIProxyAPI|cliproxy|VibeProxy|vibeproxy|droid-proxy|cursor-proxy' \
+  | tee .factory/validation/live-e2e/processes.before.txt || true
+
+lsof -nP -iTCP -sTCP:LISTEN \
+  | rg 'CLIProxy|cliproxy|VibeProxy|vibeproxy|droid-proxy|cursor-proxy|:8787|:1455|:56121|:8000|:11434' \
+  | tee .factory/validation/live-e2e/listeners.before.txt || true
+
+cp ~/.factory/settings.json \
+  ~/.factory/settings.json.pre-droid-proxy-live-e2e.$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+
+jq '.customModels[]? | {model, modelDisplayName, provider, baseUrl}' \
+  ~/.factory/settings.json 2>/dev/null \
+  | tee .factory/validation/live-e2e/factory-models.before.json || true
+```
+
+### 0.2 Stop old proxy processes
+
+```bash
+pkill -f 'CLIProxyAPIPlus|CLIProxyAPI|cliproxy|VibeProxy|vibeproxy' || true
+```
+
+Do not kill `cursor-proxy` unless it is binding a port needed by this run. If it
+is active on `127.0.0.1:8787`, stop it for the duration of the test or move
+`droid-proxy` to a different port and update Factory settings accordingly.
+
+### 0.3 Locate, archive, then remove local donor repos
+
+Review the printed directories before removal.
+
+```bash
+for root in "$HOME/code" "$HOME/Developer" "$HOME/Documents/GitHub"; do
+  [ -d "$root" ] || continue
+  find "$root" \
+    \( -name .git -o -name node_modules -o -name vendor \) -prune -o \
+    -type d \
+    \( -iname 'CLIProxyAPIPlus' -o -iname 'CLIProxyAPI' -o -iname 'cliproxyapi' -o -iname 'VibeProxy' -o -iname 'vibeproxy' \) \
+    -print 2>/dev/null
+done
+```
+
+For each matching donor repo that is not `droid-proxy` or `cursor-proxy`:
+
+```bash
+archive_dir="$HOME/.local/share/droid-proxy-archives/$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$archive_dir"
+
+# Replace /path/to/donor with the reviewed path.
+donor=/path/to/donor
+tar -C "$(dirname "$donor")" -czf "$archive_dir/$(basename "$donor").tgz" "$(basename "$donor")"
+rm -rf "$donor"
+```
+
+Also remove stale shell aliases, launch agents, npm globals, or symlinks that
+start those donor proxies:
+
+```bash
+type -a cliproxy cliproxyapi CLIProxyAPIPlus vibeproxy VibeProxy 2>/dev/null || true
+launchctl list | rg -i 'cliproxy|vibeproxy' || true
+npm ls -g --depth=0 2>/dev/null | rg -i 'cliproxy|vibeproxy' || true
+pipx list 2>/dev/null | rg -i 'cliproxy|vibeproxy' || true
+```
+
+### 0.4 Confirm clean slate
+
+```bash
+pgrep -af 'CLIProxyAPIPlus|CLIProxyAPI|cliproxy|VibeProxy|vibeproxy' && exit 1 || true
+
+lsof -nP -iTCP:8787 -sTCP:LISTEN
+lsof -nP -iTCP:1455 -sTCP:LISTEN
+lsof -nP -iTCP:56121 -sTCP:LISTEN
+```
+
+Expected result:
+
+- No CLIProxyAPIPlus/VibeProxy process is running.
+- Port `8787` is free before starting `droid-proxy`.
+- Ports `1455` and `56121` are free before OAuth login.
+- Factory custom models no longer point to old proxy base URLs.
+
+## Phase 1: Build and create live config
+
+Run static verification first:
+
+```bash
+test -z "$(gofmt -l .)"
+go test ./...
+go vet ./...
+make build
+```
+
+Create `config.local.yaml` from `config.example.yaml`. This file is gitignored.
+Use real API keys from the environment; never paste secrets into the YAML.
+
+```bash
+cp config.example.yaml config.local.yaml
+```
+
+Minimum live model block:
+
+```yaml
+listen:
+  host: 127.0.0.1
+  port: 8787
+
+logging:
+  level: info
+  format: text
+  redact: true
+  trace_requests: true
+
+oauth:
+  auth_dir: "~/.droid-proxy/auth"
+  codex_callback_host: 127.0.0.1
+  codex_callback_port: 1455
+  xai_callback_host: 127.0.0.1
+  xai_callback_port: 56121
+
+models:
+  - alias: droid-codex-oauth
+    display_name: "Codex OAuth"
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: "${CODEX_UPSTREAM_MODEL:-gpt-5.2-codex}"
+    max_output_tokens: 16384
+    max_context_tokens: 400000
+
+  - alias: droid-grok-build-oauth
+    display_name: "Grok Build OAuth"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    upstream_model: "${XAI_GROK_BUILD_MODEL:-grok-build-0.1}"
+    max_output_tokens: 32768
+    max_context_tokens: 256000
+
+  - alias: droid-zai-glm
+    display_name: "Z.AI GLM Coding"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: zai
+    upstream_model: "${ZAI_GLM_MODEL:-glm-4.6}"
+    max_output_tokens: 32768
+    max_context_tokens: 200000
+    extra_args:
+      thinking:
+        type: enabled
+
+  - alias: droid-fireworks
+    display_name: "Fireworks Coding"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: fireworks
+    upstream_model: "${FIREWORKS_MODEL}"
+    max_output_tokens: 8192
+    max_context_tokens: 131072
+
+  - alias: droid-deepseek-v4-flash
+    display_name: "DeepSeek V4 Flash"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: deepseek
+    upstream_model: "${DEEPSEEK_MODEL:-deepseek-v4-flash}"
+    max_output_tokens: 8192
+    max_context_tokens: 64000
+    capabilities:
+      reasoning: deepseek
+```
+
+Required environment:
+
+```bash
+export DEEPSEEK_API_KEY=...
+export ZAI_API_KEY=...
+export FIREWORKS_API_KEY=...
+export FIREWORKS_MODEL=...
+
+# Optional overrides after checking current account/model availability.
+export CODEX_UPSTREAM_MODEL=gpt-5.2-codex
+export XAI_GROK_BUILD_MODEL=grok-build-0.1
+export ZAI_GLM_MODEL=glm-4.6
+export DEEPSEEK_MODEL=deepseek-v4-flash
+```
+
+Config acceptance gate:
+
+```bash
+go test ./internal/config
+```
+
+Then start the proxy:
+
+```bash
+./droid-proxy --config config.local.yaml 2>&1 \
+  | tee .factory/validation/live-e2e/proxy.log
+```
+
+In another terminal:
+
+```bash
+curl -sS http://127.0.0.1:8787/health | jq .
+curl -sS http://127.0.0.1:8787/v1/models \
+  | jq '.data[] | {id, factory_provider, upstream_protocol, agent_ready}'
+```
+
+## Phase 2: OAuth login
+
+Run OAuth login after Phase 0 confirms callback ports are free.
+
+```bash
+./droid-proxy auth codex --config config.local.yaml
+./droid-proxy auth xai --config config.local.yaml
+```
+
+Token storage checks:
+
+```bash
+stat -f '%A %N' ~/.droid-proxy/auth
+for f in ~/.droid-proxy/auth/*; do
+  [ -f "$f" ] && stat -f '%A %N' "$f"
+done
+```
+
+Expected result:
+
+- Auth dir is `700`.
+- Token JSON files are `600`.
+- Command output never contains access tokens, refresh tokens, ID tokens, or
+  Authorization header values.
+
+## Phase 3: Direct proxy HTTP tests
+
+Create an output directory per run:
+
+```bash
+run_dir=".factory/validation/live-e2e/$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$run_dir"
+```
+
+### 3.1 Chat providers: DeepSeek, Z.AI, Fireworks
+
+Run each alias through the same contract:
+
+```bash
+for model in droid-deepseek-v4-flash droid-zai-glm droid-fireworks; do
+  curl -sS http://127.0.0.1:8787/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d "{
+      \"model\": \"$model\",
+      \"stream\": false,
+      \"messages\": [{\"role\":\"user\",\"content\":\"Reply exactly: droid-proxy-ok\"}]
+    }" | tee "$run_dir/$model.nonstream.json" | jq .
+
+  curl -sS -N http://127.0.0.1:8787/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d "{
+      \"model\": \"$model\",
+      \"stream\": true,
+      \"messages\": [{\"role\":\"user\",\"content\":\"Count from 1 to 5, one number per line.\"}]
+    }" | tee "$run_dir/$model.stream.sse"
+
+  curl -sS http://127.0.0.1:8787/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d "{
+      \"model\": \"$model\",
+      \"messages\": [{\"role\":\"user\",\"content\":\"Use the get_weather tool for Indianapolis.\"}],
+      \"tools\": [{
+        \"type\": \"function\",
+        \"function\": {
+          \"name\": \"get_weather\",
+          \"description\": \"Get weather for a city.\",
+          \"parameters\": {
+            \"type\": \"object\",
+            \"properties\": {\"city\": {\"type\":\"string\"}},
+            \"required\": [\"city\"]
+          }
+        }
+      }],
+      \"tool_choice\": \"auto\"
+    }" | tee "$run_dir/$model.tool-call.json" | jq .
+done
+```
+
+Pass criteria:
+
+- Non-stream response contains the exact phrase or a clearly valid model answer.
+- Stream output contains multiple `data:` chunks and terminates cleanly.
+- Tool-call response includes a valid OpenAI-compatible `tool_calls` array when
+  the provider supports tools.
+- No API key or bearer token appears in `$run_dir` or
+  `.factory/validation/live-e2e/proxy.log`.
+
+DeepSeek-specific checks:
+
+- Confirm the configured upstream model is accepted (`deepseek-v4-flash` or the
+  current model ID from DeepSeek docs/account).
+- Confirm reasoning output does not break the final `message.content`.
+- Confirm a second turn with a tool result does not lose tool-call state.
+
+Z.AI-specific checks:
+
+- Confirm `glm-4.6` is available on the GLM coding plan account, or replace it
+  with the current account-specific coding model.
+- Confirm `extra_args.thinking.type: enabled` is accepted. If the account rejects
+  it, remove the extra arg and retest before changing code.
+
+Fireworks-specific checks:
+
+- Use a Fireworks model that explicitly supports function calling/tool use.
+- If the first selected model fails tools, retest with a known tool-capable
+  Fireworks model before marking the provider broken.
+
+### 3.2 OAuth Responses providers: Codex and Grok Build
+
+Run each OAuth alias through the Responses contract:
+
+```bash
+for model in droid-codex-oauth droid-grok-build-oauth; do
+  curl -sS http://127.0.0.1:8787/v1/responses \
+    -H 'Content-Type: application/json' \
+    -d "{
+      \"model\": \"$model\",
+      \"stream\": false,
+      \"input\": \"Reply exactly: droid-proxy-ok\"
+    }" | tee "$run_dir/$model.responses.nonstream.json" | jq .
+
+  curl -sS -N http://127.0.0.1:8787/v1/responses \
+    -H 'Content-Type: application/json' \
+    -d "{
+      \"model\": \"$model\",
+      \"stream\": true,
+      \"input\": \"Count from 1 to 5, one number per line.\"
+    }" | tee "$run_dir/$model.responses.stream.sse"
+
+  curl -sS http://127.0.0.1:8787/v1/responses \
+    -H 'Content-Type: application/json' \
+    -H "X-Client-Request-Id: live-e2e-$model-tool" \
+    -d "{
+      \"model\": \"$model\",
+      \"stream\": false,
+      \"input\": [{\"role\":\"user\",\"content\":\"Use the get_weather tool for Indianapolis.\"}],
+      \"tools\": [{
+        \"type\": \"function\",
+        \"name\": \"get_weather\",
+        \"description\": \"Get weather for a city.\",
+        \"parameters\": {
+          \"type\": \"object\",
+          \"properties\": {\"city\": {\"type\":\"string\"}},
+          \"required\": [\"city\"]
+        }
+      }],
+      \"tool_choice\": \"auto\"
+    }" | tee "$run_dir/$model.responses.tool-call.json" | jq .
+done
+```
+
+Pass criteria:
+
+- Non-stream request succeeds even though the proxy asks the OAuth upstream for
+  SSE internally.
+- Stream request emits valid SSE and terminates with the provider's terminal
+  Responses event.
+- Tool-call response includes `function_call` output items or provider-equivalent
+  tool-call events.
+- xAI requests use a stable conversation/session ID when one is supplied.
+- Token refresh happens without exposing token values in logs.
+
+OAuth refresh test:
+
+1. Back up the token file in `~/.droid-proxy/auth`.
+2. Temporarily set the token expiry in the JSON to a near-past value.
+3. Run a single `/v1/responses` request.
+4. Confirm the request succeeds and the token file timestamp changes.
+5. Restore the backup if the provider rejects refresh.
+
+## Phase 4: Error and redaction tests
+
+Run one intentional failure per provider:
+
+- Temporarily set an invalid model ID and confirm the upstream error maps through
+  with the original HTTP status or a clear proxy error.
+- Temporarily unset each BYOK env var and confirm the proxy returns an auth error
+  without leaking env var values.
+- Temporarily move one OAuth token file aside and confirm the proxy returns a
+  redacted authentication error.
+
+Secret scan:
+
+```bash
+rg -n 'sk-|xai-|Bearer |refresh_token|access_token|id_token|DEEPSEEK_API_KEY|ZAI_API_KEY|FIREWORKS_API_KEY' \
+  .factory/validation/live-e2e 2>/dev/null
+```
+
+Expected result: no literal secret values. Field names may appear in JSON only if
+the value is redacted or absent.
+
+## Phase 5: Factory Droid E2E
+
+Update `~/.factory/settings.json` so every tested model points at
+`http://127.0.0.1:8787` and uses the matching Factory provider mode:
+
+| droid-proxy alias | Factory provider | Factory baseUrl |
+| --- | --- | --- |
+| `droid-codex-oauth` | `openai` | `http://127.0.0.1:8787` |
+| `droid-grok-build-oauth` | `openai` | `http://127.0.0.1:8787` |
+| `droid-zai-glm` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
+| `droid-fireworks` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
+| `droid-deepseek-v4-flash` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
+
+For each model in Factory Droid:
+
+1. Select the model.
+2. Ask: `Reply exactly: droid-proxy-ok`.
+3. Ask it to inspect this repo: `Read README.md and summarize the proxy purpose in one sentence.`
+4. Ask it to perform a harmless tool-using file task:
+
+   ```text
+   Create .factory/validation/live-e2e/<model-alias>/result.txt with the exact
+   text "<model-alias> ok", then read it back and report the file contents.
+   ```
+
+5. Verify the file exists and contains the expected text.
+6. Confirm proxy logs show requests for the selected alias and no calls to old
+   proxy ports or old base URLs.
+
+Pass criteria:
+
+- Factory Droid can complete the text and file-tool workflow for each model.
+- Streaming does not stall.
+- Tool calls and tool results complete without malformed-message errors.
+- `~/.factory/settings.json` contains no active custom model pointing at old
+  CLIProxyAPIPlus or VibeProxy URLs.
+
+## Phase 6: Result matrix
+
+Fill this table during the live run.
+
+| Provider | Alias | Direct non-stream | Direct stream | Tool call | Tool result | OAuth refresh | Factory text | Factory file task | Status | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ChatGPT/Codex OAuth | `droid-codex-oauth` |  |  |  |  |  |  |  |  |  |
+| xAI Grok Build OAuth | `droid-grok-build-oauth` |  |  |  |  |  |  |  |  |  |
+| Z.AI GLM coding | `droid-zai-glm` |  |  |  |  | N/A |  |  |  |  |
+| Fireworks | `droid-fireworks` |  |  |  |  | N/A |  |  |  |  |
+| DeepSeek | `droid-deepseek-v4-flash` |  |  |  |  | N/A |  |  |  |  |
+
+Use these status values:
+
+- `PASS`: all required checks passed.
+- `CONFIG`: provider failed because of account entitlement, model ID, base URL,
+  or plan mismatch.
+- `PROXY-BUG`: request shape, streaming, translation, refresh, or header handling
+  needs a code fix.
+- `PROVIDER-LIMIT`: provider lacks a required feature for Factory Droid agent use.
+
+## Phase 7: Fix loop
+
+For each `PROXY-BUG`:
+
+1. Save the smallest redacted request/response fixture under a test package
+   `testdata/` directory.
+2. Add or update a unit/integration test that fails on the captured behavior.
+3. Patch the proxy.
+4. Run:
+
+   ```bash
+   go test ./...
+   go vet ./...
+   ```
+
+5. Rerun the single failed provider case.
+6. Rerun the corresponding Factory Droid workflow.
+
+For each `CONFIG` issue:
+
+1. Update `config.local.yaml` with the provider-approved model ID or base URL.
+2. Document the working value in this plan's result notes if it is safe to share.
+3. Do not change code unless the provider requires a request shape the current
+   config model cannot express.
+
+## Final acceptance criteria
+
+- Local CLIProxyAPIPlus and VibeProxy repos are archived/removed from the Mac.
+- No CLIProxyAPIPlus or VibeProxy process is running.
+- `droid-proxy` owns the configured Factory Droid base URL.
+- `go test ./...` and `go vet ./...` pass after any fixes.
+- All target providers are either `PASS` or have a clear `CONFIG` /
+  `PROVIDER-LIMIT` reason.
+- Factory Droid successfully completes at least one text task and one file/tool
+  task for every provider marked `PASS`.
+- Logs and saved evidence contain no literal API keys, bearer tokens, OAuth
+  refresh tokens, or ID tokens.

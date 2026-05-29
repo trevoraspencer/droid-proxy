@@ -64,6 +64,21 @@ func (c *Config) applyDefaults() {
 	if !c.wasPresent("upstream.error_body_max_bytes") && c.Upstream.ErrorBodyMaxBytes == 0 {
 		c.Upstream.ErrorBodyMaxBytes = 1 << 20
 	}
+	if !c.wasPresent("oauth.auth_dir") && c.OAuth.AuthDir == "" {
+		c.OAuth.AuthDir = "~/.droid-proxy/auth"
+	}
+	if c.OAuth.CodexCallbackHost == "" {
+		c.OAuth.CodexCallbackHost = "127.0.0.1"
+	}
+	if c.OAuth.CodexCallbackPort == 0 {
+		c.OAuth.CodexCallbackPort = 1455
+	}
+	if c.OAuth.XAICallbackHost == "" {
+		c.OAuth.XAICallbackHost = "127.0.0.1"
+	}
+	if c.OAuth.XAICallbackPort == 0 {
+		c.OAuth.XAICallbackPort = 56121
+	}
 }
 
 func (c *Config) wasPresent(path string) bool {

@@ -54,25 +54,13 @@ var knownAuthRegistry = map[string]KnownAuth{
 		Name: "groq", BaseURL: "https://api.groq.com/openai/v1",
 		APIKeyEnv: "GROQ_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
 	},
-	"together": {
-		Name: "together", BaseURL: "https://api.together.xyz/v1",
-		APIKeyEnv: "TOGETHER_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
-	},
 	"fireworks": {
 		Name: "fireworks", BaseURL: "https://api.fireworks.ai/inference/v1",
 		APIKeyEnv: "FIREWORKS_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
 	},
-	"mistral": {
-		Name: "mistral", BaseURL: "https://api.mistral.ai/v1",
-		APIKeyEnv: "MISTRAL_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
-	},
 	"zai": {
 		Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4",
 		APIKeyEnv: "ZAI_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
-	},
-	"iflow": {
-		Name: "iflow", BaseURL: "https://apis.iflow.cn/v1",
-		APIKeyEnv: "IFLOW_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
 	},
 	"ollama": {
 		Name: "ollama", BaseURL: "http://127.0.0.1:11434/v1",

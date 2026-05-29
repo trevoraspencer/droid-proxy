@@ -39,6 +39,13 @@ upstream:
   response_body_max_bytes: 104857600
   error_body_max_bytes: 1048576
 
+oauth:
+  auth_dir: "~/.droid-proxy/auth"
+  codex_callback_host: 127.0.0.1
+  codex_callback_port: 1455
+  xai_callback_host: 127.0.0.1
+  xai_callback_port: 56121
+
 models:
   # Example: DeepSeek via Factory's generic-chat-completion-api mode.
   - alias: droid-deepseek-v4-flash
@@ -75,3 +82,21 @@ models:
   #   upstream_protocol: openai-responses
   #   base_url: "https://api.openai.com/v1"
   #   api_key_env: OPENAI_API_KEY
+
+  # Example: Codex/ChatGPT OAuth via Factory's OpenAI mode.
+  # Run first: droid-proxy auth codex --config config.yaml
+  # - alias: droid-codex
+  #   display_name: "Codex OAuth"
+  #   factory_provider: openai
+  #   upstream_protocol: codex-responses
+  #   oauth_provider: codex
+  #   upstream_model: gpt-5.3-codex
+
+  # Example: xAI Grok Build OAuth via Factory's OpenAI mode.
+  # Run first: droid-proxy auth xai --config config.yaml
+  # - alias: droid-grok-build
+  #   display_name: "Grok Build OAuth"
+  #   factory_provider: openai
+  #   upstream_protocol: xai-responses
+  #   oauth_provider: xai
+  #   upstream_model: grok-build-0.1

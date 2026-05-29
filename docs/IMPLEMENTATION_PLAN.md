@@ -8,7 +8,7 @@
 
 > **For agentic workers:** Use `superpowers:executing-plans` to execute task-by-task. Steps use `- [ ]` for tracking.
 
-**Goal:** A Factory Droid-only downstream proxy in Go that lets Droid use BYOK / custom models from any upstream provider (Anthropic, OpenAI, DeepSeek, Kimi, xAI, ZAI, iFlow, Copilot-style, local Ollama/vLLM, etc.) via plain localhost endpoints.
+**Goal:** A Factory Droid-only downstream proxy in Go that lets Droid use focused BYOK / custom models from upstream providers (Anthropic, OpenAI, DeepSeek, Kimi, xAI, ZAI, Groq, Fireworks, Copilot-style, local Ollama/vLLM, etc.) plus selected OAuth accounts via plain localhost endpoints.
 
 **Architecture:** Single binary HTTP server (gin) that accepts the three Factory Droid endpoint protocols (`anthropic` / `openai` / `generic-chat-completion-api`) and forwards each request to a configured upstream, translating between protocols where needed. Models are declared in `config.yaml` with explicit Factory provider mode + upstream protocol so the proxy knows which translation path applies. DeepSeek reasoning replay is ported narrowly from the reference codebase.
 
@@ -68,7 +68,7 @@ Droid reads `~/.factory/settings.json` `customModels[]`. Each model entry declar
 We classify every configured model into one of four tiers. Tier appears in `/v1/models` metadata and in `docs/PROVIDERS.md`.
 
 - **T1 — Direct reuse**: Upstream is the canonical provider and Droid's protocol matches it natively. Examples: OpenAI key → openai mode; Anthropic key → anthropic mode; DeepSeek key → generic-chat-completion-api. Streaming, tools, structured output, multimodal all work as-is.
-- **T2 — OpenAI-compatible config**: Upstream exposes OpenAI Chat Completions; Droid uses generic-chat-completion-api or openai mode (we translate Chat→Responses for the Responses endpoint). Streaming + tools tested. Examples: local Ollama, vLLM, LiteLLM, Together, Fireworks, Groq.
+- **T2 — OpenAI-compatible config**: Upstream exposes OpenAI Chat Completions; Droid uses generic-chat-completion-api or openai mode (we translate Chat→Responses for the Responses endpoint). Streaming + tools tested. Examples: local Ollama, vLLM, LiteLLM, Fireworks, Groq.
 - **T3 — Protocol translation**: We translate between protocols on the fly. Streaming + tools work but may have minor delta-event timing differences. Examples: Chat→Anthropic, Anthropic→Chat, Chat→Responses.
 - **T4 — Best effort**: Chat-only support; tool calls / structured output / multimodal may not survive translation reliably. Examples: any provider exposed via Chat that does not implement OpenAI tool-calls correctly. We mark these `agent_ready: false`.
 
@@ -580,7 +580,7 @@ Invalid combinations fail loud at startup.
 - Modify: `internal/upstream/auth.go`
 - Create: `docs/PROVIDERS.md`
 
-- [ ] `KnownAuth` table maps a short string (e.g. `deepseek`, `anthropic`, `openai`, `xai`, `kimi`, `zai`, `iflow`, `groq`, `fireworks`, `together`, `ollama`, `openrouter-ignored`) to:
+- [ ] `KnownAuth` table maps a short string (e.g. `deepseek`, `anthropic`, `openai`, `xai`, `kimi`, `zai`, `groq`, `fireworks`, `ollama`, `vllm`) to:
   - default base_url (when not overridden in config).
   - env var name for API key (`DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, etc.).
   - default capabilities (tools/streaming/reasoning).
@@ -594,7 +594,7 @@ Invalid combinations fail loud at startup.
 - [ ] One section per supported provider. Columns: tier, default base URL, env var, factory_provider modes, capabilities, known limitations.
 - [ ] Honest tier classification:
   - **T1**: openai, anthropic, deepseek, xai, kimi.
-  - **T2**: ollama, vllm, groq, fireworks, together, iflow, zai, copilot-like OpenAI-compat.
+  - **T2**: ollama, vllm, groq, fireworks, zai, copilot-like OpenAI-compat.
   - **T3**: any model serving anthropic mode off openai-chat upstream; openai responses off openai-chat upstream.
   - **T4**: providers with broken tool-call semantics in chat completions (call out by name with reproducible test case).
 

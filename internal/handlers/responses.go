@@ -50,6 +50,8 @@ func (a *API) Responses(c *gin.Context) {
 		a.responsesNative(c, m, body)
 	case config.UpstreamOpenAIChat:
 		a.responsesViaChat(c, m, body)
+	case config.UpstreamCodexResponses, config.UpstreamXAIResponses:
+		a.responsesViaOAuth(c, m, body)
 	default:
 		WriteJSONError(c, http.StatusNotImplemented, "not_implemented",
 			"unsupported upstream_protocol "+string(m.UpstreamProtocol))

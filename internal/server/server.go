@@ -15,6 +15,7 @@ import (
 
 	"droid-proxy/internal/config"
 	"droid-proxy/internal/handlers"
+	"droid-proxy/internal/oauth"
 	"droid-proxy/internal/upstream"
 )
 
@@ -36,6 +37,7 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Server, error) {
 		Cfg:    cfg,
 		Router: router,
 		Client: upstream.NewClient(cfg),
+		OAuth:  oauth.NewManager(cfg),
 	}
 	api := handlers.NewAPI(deps, logger)
 
