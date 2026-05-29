@@ -7,8 +7,8 @@ calls when configured in `openai` mode.
 
 ```yaml
 models:
-  - alias: droid-gpt-4o
-    display_name: "GPT-4o"
+  - alias: gpt-4o
+    display_name: "GPT-4o (OpenAI)"
     factory_provider: openai
     upstream_protocol: openai-responses
     known_auth: openai
@@ -22,12 +22,12 @@ models:
 {
   "customModels": [
     {
-      "model": "droid-gpt-4o",
-      "modelDisplayName": "GPT-4o (via droid-proxy)",
+      "model": "gpt-4o",
+      "displayName": "GPT-4o (OpenAI)",
       "provider": "openai",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxTokens": 16000
+      "maxOutputTokens": 16000
     }
   ]
 }

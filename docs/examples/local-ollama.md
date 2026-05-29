@@ -7,8 +7,8 @@ Any model you've pulled with `ollama pull <name>` can be wired up.
 
 ```yaml
 models:
-  - alias: droid-llama3
-    display_name: "Llama3 8B (local)"
+  - alias: llama3
+    display_name: "Llama 3 8B (Ollama local)"
     factory_provider: generic-chat-completion-api
     upstream_protocol: openai-chat
     known_auth: ollama
@@ -25,12 +25,12 @@ models:
 {
   "customModels": [
     {
-      "model": "droid-llama3",
-      "modelDisplayName": "Llama3 (local)",
+      "model": "llama3",
+      "displayName": "Llama 3 8B (Ollama local)",
       "provider": "generic-chat-completion-api",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxTokens": 4096
+      "maxOutputTokens": 4096
     }
   ]
 }

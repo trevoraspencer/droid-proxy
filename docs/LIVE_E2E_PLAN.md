@@ -42,11 +42,45 @@ the exact model IDs in the provider dashboard or docs and adjust `config.local.y
 - xAI Grok Build API announcement: https://x.ai/news/grok-build-0-1
 - Z.AI GLM-4.6 docs: https://docs.z.ai/guides/llm/glm-4.6
 - Z.AI chat completions API: https://docs.z.ai/api-reference/llm/chat-completion
+- Z.AI GLM Coding Plan quick start: https://docs.z.ai/devpack/quick-start
 - Fireworks chat completions API: https://docs.fireworks.ai/api-reference/post-chatcompletions
 - DeepSeek chat completions API: https://api-docs.deepseek.com/api/create-chat-completion
 - DeepSeek model/pricing page: https://api-docs.deepseek.com/quick_start/pricing
 - Xiaomi MiMo repo example: [`docs/examples/mimo.md`](examples/mimo.md)
 - Xiaomi MiMo provider matrix: [`docs/PROVIDERS.md`](PROVIDERS.md#xiaomi-mimo)
+
+## Scaffolded run
+
+The commands in this document are also available as secret-free local scaffolding
+under [`scripts/live-e2e/`](../scripts/live-e2e/). Use this path when preparing
+the full live run:
+
+```bash
+scripts/live-e2e/00-preflight.sh
+scripts/live-e2e/01-clean-old-proxies.sh
+scripts/live-e2e/02-generate-config.sh
+```
+
+Then fill `.env.live-e2e.local` and complete both OAuth logins using
+[`docs/live-e2e/DONE.md`](live-e2e/DONE.md). The OAuth helpers load that env
+file before invoking `./droid-proxy auth`, so manual shell exports are not
+required. After that, run:
+
+```bash
+scripts/live-e2e/run-all-after-secrets.sh
+```
+
+The final runner keeps one exported run id across child scripts, restarts any
+previous live `droid-proxy` process from this repo/config, runs direct provider
+checks plus OAuth refresh and redaction checks, writes Factory settings, and
+generates a Factory Droid manual evidence checklist.
+
+Generated local files are intentionally gitignored:
+
+- `config.local.yaml`
+- `.env.live-e2e.local`
+- `.factory/validation/live-e2e/<run-id>/`
+- OAuth tokens under `~/.droid-proxy/auth`
 
 ## Phase 0: Decommission local donor proxies
 
@@ -68,7 +102,7 @@ lsof -nP -iTCP -sTCP:LISTEN \
 cp ~/.factory/settings.json \
   ~/.factory/settings.json.pre-droid-proxy-live-e2e.$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
 
-jq '.customModels[]? | {model, modelDisplayName, provider, baseUrl}' \
+jq '.customModels[]? | {model, displayName, provider, baseUrl}' \
   ~/.factory/settings.json 2>/dev/null \
   | tee .factory/validation/live-e2e/factory-models.before.json || true
 ```
@@ -170,14 +204,14 @@ logging:
 
 oauth:
   auth_dir: "~/.droid-proxy/auth"
-  codex_callback_host: 127.0.0.1
+  codex_callback_host: localhost
   codex_callback_port: 1455
   xai_callback_host: 127.0.0.1
   xai_callback_port: 56121
 
 models:
-  - alias: droid-codex-oauth
-    display_name: "Codex OAuth"
+  - alias: gpt-5.2-codex
+    display_name: "GPT-5.2 Codex (ChatGPT OAuth)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
@@ -185,8 +219,8 @@ models:
     max_output_tokens: 16384
     max_context_tokens: 400000
 
-  - alias: droid-grok-build-oauth
-    display_name: "Grok Build OAuth"
+  - alias: grok-build-0.1
+    display_name: "Grok Build 0.1 (xAI OAuth)"
     factory_provider: openai
     upstream_protocol: xai-responses
     oauth_provider: xai
@@ -194,20 +228,20 @@ models:
     max_output_tokens: 32768
     max_context_tokens: 256000
 
-  - alias: droid-zai-glm
-    display_name: "Z.AI GLM Coding"
+  - alias: glm-5.1
+    display_name: "GLM 5.1 (Z.AI GLM Coding Plan)"
     factory_provider: generic-chat-completion-api
     upstream_protocol: openai-chat
-    known_auth: zai
-    upstream_model: "${ZAI_GLM_MODEL:-glm-4.6}"
+    known_auth: zai-coding-api
+    upstream_model: "${ZAI_GLM_MODEL:-glm-5.1}"
     max_output_tokens: 32768
     max_context_tokens: 200000
     extra_args:
       thinking:
         type: enabled
 
-  - alias: droid-mimo-v2.5-pro
-    display_name: "MiMo V2.5 Pro"
+  - alias: mimo-v2.5-pro
+    display_name: "MiMo V2.5 Pro (Xiaomi MiMo)"
     factory_provider: generic-chat-completion-api
     upstream_protocol: openai-chat
     known_auth: "${MIMO_KNOWN_AUTH:-mimo}"
@@ -218,8 +252,8 @@ models:
       thinking:
         type: enabled
 
-  - alias: droid-fireworks
-    display_name: "Fireworks Coding"
+  - alias: "${FIREWORKS_MODEL}"
+    display_name: "DeepSeek V4 Pro (Fireworks)"
     factory_provider: generic-chat-completion-api
     upstream_protocol: openai-chat
     known_auth: fireworks
@@ -227,8 +261,8 @@ models:
     max_output_tokens: 8192
     max_context_tokens: 131072
 
-  - alias: droid-deepseek-v4-flash
-    display_name: "DeepSeek V4 Flash"
+  - alias: deepseek-v4-flash
+    display_name: "DeepSeek V4 Flash (DeepSeek)"
     factory_provider: generic-chat-completion-api
     upstream_protocol: openai-chat
     known_auth: deepseek
@@ -243,15 +277,15 @@ Required environment:
 
 ```bash
 export DEEPSEEK_API_KEY=...
-export ZAI_API_KEY=...
+export ZAI_CODING_API_KEY=...
 export MIMO_API_KEY=...
 export FIREWORKS_API_KEY=...
-export FIREWORKS_MODEL=...
+export FIREWORKS_MODEL=accounts/fireworks/models/deepseek-v4-pro
 
 # Optional overrides after checking current account/model availability.
 export CODEX_UPSTREAM_MODEL=gpt-5.2-codex
 export XAI_GROK_BUILD_MODEL=grok-build-0.1
-export ZAI_GLM_MODEL=glm-4.6
+export ZAI_GLM_MODEL=glm-5.1
 export MIMO_KNOWN_AUTH=mimo
 export MIMO_MODEL=mimo-v2.5-pro
 export DEEPSEEK_MODEL=deepseek-v4-flash
@@ -289,9 +323,13 @@ curl -sS http://127.0.0.1:8787/v1/models \
 Run OAuth login after Phase 0 confirms callback ports are free.
 
 ```bash
-./droid-proxy auth codex --config config.local.yaml
-./droid-proxy auth xai --config config.local.yaml
+scripts/live-e2e/auth-codex.sh
+scripts/live-e2e/auth-xai.sh
 ```
+
+If invoking `./droid-proxy auth ...` directly, source `.env.live-e2e.local`
+first in that terminal so config validation can see the provider API key
+environment variables.
 
 Token storage checks:
 
@@ -323,7 +361,7 @@ mkdir -p "$run_dir"
 Run each alias through the same contract:
 
 ```bash
-for model in droid-deepseek-v4-flash droid-zai-glm droid-mimo-v2.5-pro droid-fireworks; do
+for model in deepseek-v4-flash glm-5.1 mimo-v2.5-pro "$FIREWORKS_MODEL"; do
   curl -sS http://127.0.0.1:8787/v1/chat/completions \
     -H 'Content-Type: application/json' \
     -d "{
@@ -380,8 +418,10 @@ DeepSeek-specific checks:
 
 Z.AI-specific checks:
 
-- Confirm `glm-4.6` is available on the GLM coding plan account, or replace it
+- Confirm `glm-5.1` is available on the GLM coding plan account, or replace it
   with the current account-specific coding model.
+- Confirm the live model uses `known_auth: zai-coding-api`, which maps Coding
+  Plan keys to `https://api.z.ai/api/coding/paas/v4`.
 - Confirm `extra_args.thinking.type: enabled` is accepted. If the account rejects
   it, remove the extra arg and retest before changing code.
 
@@ -409,7 +449,7 @@ Fireworks-specific checks:
 Run each OAuth alias through the Responses contract:
 
 ```bash
-for model in droid-codex-oauth droid-grok-build-oauth; do
+for model in gpt-5.2-codex grok-build-0.1; do
   curl -sS http://127.0.0.1:8787/v1/responses \
     -H 'Content-Type: application/json' \
     -d "{
@@ -481,7 +521,7 @@ Run one intentional failure per provider:
 Secret scan:
 
 ```bash
-rg -n 'sk-|xai-|Bearer |refresh_token|access_token|id_token|DEEPSEEK_API_KEY|ZAI_API_KEY|MIMO_API_KEY|MIMO_TOKEN_PLAN|FIREWORKS_API_KEY' \
+rg -n 'sk-|xai-|Bearer |refresh_token|access_token|id_token|DEEPSEEK_API_KEY|ZAI_CODING_API_KEY|ZAI_MAIN_API_KEY|ZAI_API_KEY|MIMO_API_KEY|MIMO_TOKEN_PLAN|FIREWORKS_API_KEY' \
   .factory/validation/live-e2e 2>/dev/null
 ```
 
@@ -495,12 +535,12 @@ Update `~/.factory/settings.json` so every tested model points at
 
 | droid-proxy alias | Factory provider | Factory baseUrl |
 | --- | --- | --- |
-| `droid-codex-oauth` | `openai` | `http://127.0.0.1:8787` |
-| `droid-grok-build-oauth` | `openai` | `http://127.0.0.1:8787` |
-| `droid-zai-glm` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
-| `droid-mimo-v2.5-pro` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
-| `droid-fireworks` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
-| `droid-deepseek-v4-flash` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
+| `gpt-5.2-codex` | `openai` | `http://127.0.0.1:8787` |
+| `grok-build-0.1` | `openai` | `http://127.0.0.1:8787` |
+| `glm-5.1` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
+| `mimo-v2.5-pro` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
+| `${FIREWORKS_MODEL}` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
+| `deepseek-v4-flash` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
 
 For each model in Factory Droid:
 
@@ -532,12 +572,12 @@ Fill this table during the live run.
 
 | Provider | Alias | Direct non-stream | Direct stream | Tool call | Tool result | OAuth refresh | Factory text | Factory file task | Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ChatGPT/Codex OAuth | `droid-codex-oauth` |  |  |  |  |  |  |  |  |  |
-| xAI Grok Build OAuth | `droid-grok-build-oauth` |  |  |  |  |  |  |  |  |  |
-| Z.AI GLM coding | `droid-zai-glm` |  |  |  |  | N/A |  |  |  |  |
-| Xiaomi MiMo | `droid-mimo-v2.5-pro` |  |  |  |  | N/A |  |  |  |  |
-| Fireworks | `droid-fireworks` |  |  |  |  | N/A |  |  |  |  |
-| DeepSeek | `droid-deepseek-v4-flash` |  |  |  |  | N/A |  |  |  |  |
+| ChatGPT/Codex OAuth | `gpt-5.2-codex` |  |  |  |  |  |  |  |  |  |
+| xAI Grok Build OAuth | `grok-build-0.1` |  |  |  |  |  |  |  |  |  |
+| Z.AI GLM coding | `glm-5.1` |  |  |  |  | N/A |  |  |  |  |
+| Xiaomi MiMo | `mimo-v2.5-pro` |  |  |  |  | N/A |  |  |  |  |
+| Fireworks | `${FIREWORKS_MODEL}` |  |  |  |  | N/A |  |  |  |  |
+| DeepSeek | `deepseek-v4-flash` |  |  |  |  | N/A |  |  |  |  |
 
 Use these status values:
 

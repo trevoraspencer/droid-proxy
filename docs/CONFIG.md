@@ -102,7 +102,7 @@ permissions and token values are never logged by the auth commands.
 | key | type | default | description |
 |---|---|---|---|
 | `auth_dir` | string | `~/.droid-proxy/auth` | Directory for saved OAuth token JSON files. |
-| `codex_callback_host` | string | `127.0.0.1` | Loopback host for Codex/ChatGPT OAuth login. |
+| `codex_callback_host` | string | `localhost` | Loopback host for Codex/ChatGPT OAuth login. |
 | `codex_callback_port` | int | `1455` | Loopback port for Codex/ChatGPT OAuth login. |
 | `xai_callback_host` | string | `127.0.0.1` | Loopback host for xAI Grok Build OAuth login. |
 | `xai_callback_port` | int | `56121` | Loopback port for xAI Grok Build OAuth login. |
@@ -121,14 +121,14 @@ specific upstream configuration.
 
 | key | type | required | description |
 |---|---|---|---|
-| `alias` | string | ✅ | Identifier Droid sends as `model`. |
-| `display_name` | string |  | Human-readable name surfaced in `/v1/models`. |
+| `alias` | string | ✅ | Provider-native model ID that Droid sends as `model` (e.g. `deepseek-v4-flash`, `glm-5.1`). |
+| `display_name` | string |  | Human-readable name surfaced in `/v1/models`. Use `{Model name} ({Provider label})`. |
 | `factory_provider` | enum | ✅ | One of `anthropic`, `openai`, `generic-chat-completion-api`. Picks which Droid endpoint protocol the proxy serves. |
 | `upstream_protocol` | enum | ✅ | One of `anthropic-messages`, `openai-responses`, `openai-chat`, `codex-responses`, `xai-responses`. Picks how the proxy talks to the real provider. See the matrix in [PROVIDERS.md](PROVIDERS.md). |
 | `oauth_provider` | enum | for OAuth upstreams | `codex` for `codex-responses`, or `xai` for `xai-responses`. |
 | `oauth_account` | string |  | Optional stored OAuth account selector. Matches saved email, subject, account id, or token filename stem. |
 | `base_url` | string | one of `base_url`, `known_auth`, or OAuth upstream required | Upstream root URL. e.g. `https://api.deepseek.com/v1`. OAuth upstreams use their provider default when omitted. |
-| `known_auth` | string |  | Shortcut: looks up base_url, env var, auth header, version headers from a built-in registry. See PROVIDERS.md. |
+| `known_auth` | string |  | Shortcut: looks up base_url, env var, auth header, version headers from a built-in registry. See PROVIDERS.md. Use `zai-coding-api` for Z.AI GLM Coding Plan keys and `zai-main-api` for normal Z.AI API keys. |
 | `upstream_model` | string |  | Forwarded `model` field on the upstream call. If unset, the alias itself is sent. |
 | `api_key_env` | string |  | Env var holding the API key. If unset, the env var declared by `known_auth` is used. Not required for OAuth upstreams. |
 | `max_output_tokens` | int |  | Informational; surfaced in `/v1/models`. |
@@ -155,6 +155,52 @@ All optional. Defaults are reasonable for most OpenAI-compatible providers.
 A model is reported as `agent_ready: true` in `/v1/models` iff
 `streaming && tools && tool_result_safe` are all true.
 
+### Model slug and display name convention
+
+Use the **exact model ID the upstream provider expects** as the slug (`alias` /
+Factory `customModels[].model`). Put provider context in the display name only:
+
+- **Slug**: provider-native ID — `glm-5.1`, `deepseek-v4-flash`, `gpt-5.2-codex`,
+  Fireworks paths like `accounts/fireworks/models/deepseek-v4-pro`
+- **Display name**: `{Readable model name} ({Provider label})` — e.g.
+  `GLM 5.1 (Z.AI GLM Coding Plan)`, `DeepSeek V4 Flash (DeepSeek)`
+
+Do not use `droid-` prefixes or `(via droid-proxy)` suffixes in documented
+defaults. Set `upstream_model` to the same value as `alias` (or omit it).
+
+#### Multi-provider example
+
+The same logical model can be available through different providers. Slugs
+usually differ because providers use different model ID strings:
+
+```yaml
+models:
+  - alias: deepseek-v4-pro
+    display_name: "DeepSeek V4 Pro (DeepSeek)"
+    known_auth: deepseek
+    upstream_model: deepseek-v4-pro
+
+  - alias: accounts/fireworks/models/deepseek-v4-pro
+    display_name: "DeepSeek V4 Pro (Fireworks)"
+    known_auth: fireworks
+    upstream_model: accounts/fireworks/models/deepseek-v4-pro
+```
+
+Both entries can coexist on one proxy. Droid sends each slug unchanged; the
+proxy routes by alias and forwards the matching `upstream_model`.
+
+**Collision note:** If two providers used the identical model ID string, only
+one `alias` could exist per config. In practice provider IDs usually differ
+(especially Fireworks path-style IDs).
+
+#### Migration from `droid-*` slugs
+
+Older examples used proxy-local aliases such as `droid-deepseek-v4-flash`.
+Update **both** `config.yaml` `alias` values and `~/.factory/settings.json`
+`customModels[].model` to the provider-native IDs, then re-select the model in
+Droid. Factory settings must use `displayName` and `maxOutputTokens` (not the
+legacy `modelDisplayName` / `maxTokens` fields).
+
 ### OAuth model examples
 
 ```yaml
@@ -162,15 +208,15 @@ oauth:
   auth_dir: "~/.droid-proxy/auth"
 
 models:
-  - alias: droid-codex
-    display_name: "Codex OAuth"
+  - alias: gpt-5.2-codex
+    display_name: "GPT-5.2 Codex (ChatGPT OAuth)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: gpt-5.3-codex
+    upstream_model: gpt-5.2-codex
 
-  - alias: droid-grok-build
-    display_name: "Grok Build OAuth"
+  - alias: grok-build-0.1
+    display_name: "Grok Build 0.1 (xAI OAuth)"
     factory_provider: openai
     upstream_protocol: xai-responses
     oauth_provider: xai

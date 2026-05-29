@@ -31,7 +31,7 @@ func BuildAuthURL(provider config.OAuthProvider, redirectURI, state, nonce strin
 			"client_id":                  {CodexClientID},
 			"response_type":              {"code"},
 			"redirect_uri":               {redirectURI},
-			"scope":                      {"openid email profile offline_access"},
+			"scope":                      {CodexScope},
 			"state":                      {state},
 			"code_challenge":             {pkce.CodeChallenge},
 			"code_challenge_method":      {"S256"},

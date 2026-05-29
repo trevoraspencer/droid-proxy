@@ -27,7 +27,7 @@ Non-streaming:
 curl -sS http://127.0.0.1:8787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "droid-deepseek-v4-flash",
+    "model": "deepseek-v4-flash",
     "stream": false,
     "messages": [{"role":"user","content":"say hi in one word"}]
   }' | jq -r '.choices[0].message.content'
@@ -39,7 +39,7 @@ Streaming:
 curl -sS -N http://127.0.0.1:8787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "droid-deepseek-v4-flash",
+    "model": "deepseek-v4-flash",
     "stream": true,
     "messages": [{"role":"user","content":"count to three"}]
   }'
@@ -53,7 +53,7 @@ You should see `data: {...}` chunks ending with `data: [DONE]`.
 curl -sS http://127.0.0.1:8787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "droid-deepseek-v4-flash",
+    "model": "deepseek-v4-flash",
     "messages": [{"role":"user","content":"What is the weather in SF?"}],
     "tools": [{
       "type": "function",
@@ -74,7 +74,7 @@ The response should include a `tool_calls` array with a function call request.
 curl -sS http://127.0.0.1:8787/v1/messages \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "droid-claude-sonnet",
+    "model": "claude-sonnet-4-5-20250929",
     "max_tokens": 256,
     "messages": [{"role":"user","content":"hi"}]
   }' | jq -r '.content[0].text'
@@ -86,7 +86,7 @@ curl -sS http://127.0.0.1:8787/v1/messages \
 curl -sS http://127.0.0.1:8787/v1/messages/count_tokens \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "droid-claude-sonnet",
+    "model": "claude-sonnet-4-5-20250929",
     "messages": [{"role":"user","content":"hello world"}]
   }' | jq '.input_tokens'
 ```
@@ -97,7 +97,7 @@ curl -sS http://127.0.0.1:8787/v1/messages/count_tokens \
 curl -sS http://127.0.0.1:8787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "droid-gpt-4o",
+    "model": "gpt-4o",
     "input": "hello"
   }' | jq '.output[].content'
 ```

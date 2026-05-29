@@ -41,35 +41,36 @@ upstream:
 
 oauth:
   auth_dir: "~/.droid-proxy/auth"
-  codex_callback_host: 127.0.0.1
+  codex_callback_host: localhost
   codex_callback_port: 1455
   xai_callback_host: 127.0.0.1
   xai_callback_port: 56121
 
 models:
   # Example: DeepSeek via Factory's generic-chat-completion-api mode.
-  - alias: droid-deepseek-v4-flash
-    display_name: "DeepSeek V4 Flash"
+  - alias: deepseek-v4-flash
+    display_name: "DeepSeek V4 Flash (DeepSeek)"
     factory_provider: generic-chat-completion-api
     upstream_protocol: openai-chat
-    base_url: "https://api.deepseek.com/v1"
-    api_key_env: DEEPSEEK_API_KEY
+    known_auth: deepseek
+    upstream_model: deepseek-v4-flash
     max_output_tokens: 8192
     max_context_tokens: 64000
     capabilities:
       reasoning: deepseek
 
   # Example: Local Ollama, exposed to Droid as generic chat completions.
-  # - alias: droid-llama3
-  #   display_name: "Llama3 (local)"
+  # - alias: llama3
+  #   display_name: "Llama 3 8B (Ollama local)"
   #   factory_provider: generic-chat-completion-api
   #   upstream_protocol: openai-chat
   #   known_auth: ollama
+  #   upstream_model: llama3:8b
   #   # No API key is required for local Ollama by default.
 
   # Example: Xiaomi MiMo via Factory's generic-chat-completion-api mode.
-  # - alias: droid-mimo-v2.5-pro
-  #   display_name: "MiMo V2.5 Pro"
+  # - alias: mimo-v2.5-pro
+  #   display_name: "MiMo V2.5 Pro (Xiaomi MiMo)"
   #   factory_provider: generic-chat-completion-api
   #   upstream_protocol: openai-chat
   #   known_auth: mimo
@@ -83,16 +84,16 @@ models:
   #       type: enabled
 
   # Example: Anthropic native pass-through.
-  # - alias: droid-claude-sonnet
-  #   display_name: "Claude Sonnet"
+  # - alias: claude-sonnet-4-5-20250929
+  #   display_name: "Claude Sonnet 4.5 (Anthropic)"
   #   factory_provider: anthropic
   #   upstream_protocol: anthropic-messages
   #   base_url: "https://api.anthropic.com"
   #   api_key_env: ANTHROPIC_API_KEY
 
   # Example: OpenAI via Responses API.
-  # - alias: droid-gpt-4o
-  #   display_name: "GPT-4o"
+  # - alias: gpt-4o
+  #   display_name: "GPT-4o (OpenAI)"
   #   factory_provider: openai
   #   upstream_protocol: openai-responses
   #   base_url: "https://api.openai.com/v1"
@@ -100,17 +101,17 @@ models:
 
   # Example: Codex/ChatGPT OAuth via Factory's OpenAI mode.
   # Run first: droid-proxy auth codex --config config.yaml
-  # - alias: droid-codex
-  #   display_name: "Codex OAuth"
+  # - alias: gpt-5.2-codex
+  #   display_name: "GPT-5.2 Codex (ChatGPT OAuth)"
   #   factory_provider: openai
   #   upstream_protocol: codex-responses
   #   oauth_provider: codex
-  #   upstream_model: gpt-5.3-codex
+  #   upstream_model: gpt-5.2-codex
 
   # Example: xAI Grok Build OAuth via Factory's OpenAI mode.
   # Run first: droid-proxy auth xai --config config.yaml
-  # - alias: droid-grok-build
-  #   display_name: "Grok Build OAuth"
+  # - alias: grok-build-0.1
+  #   display_name: "Grok Build 0.1 (xAI OAuth)"
   #   factory_provider: openai
   #   upstream_protocol: xai-responses
   #   oauth_provider: xai

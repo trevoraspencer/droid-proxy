@@ -68,7 +68,7 @@ func TestLoad_MinimalValidDefaults(t *testing.T) {
 	if cfg.OAuth.AuthDir != "~/.droid-proxy/auth" {
 		t.Fatalf("oauth.auth_dir default wrong: %q", cfg.OAuth.AuthDir)
 	}
-	if cfg.OAuth.CodexCallbackHost != "127.0.0.1" || cfg.OAuth.CodexCallbackPort != 1455 {
+	if cfg.OAuth.CodexCallbackHost != "localhost" || cfg.OAuth.CodexCallbackPort != 1455 {
 		t.Fatalf("codex callback defaults wrong: %+v", cfg.OAuth)
 	}
 	if cfg.OAuth.XAICallbackHost != "127.0.0.1" || cfg.OAuth.XAICallbackPort != 56121 {
@@ -558,6 +558,46 @@ models:
 	}
 }
 
+func TestLoad_KnownAuthZAIProfilesHydrate(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "legacy-secret")
+	t.Setenv("ZAI_MAIN_API_KEY", "main-secret")
+	t.Setenv("ZAI_CODING_API_KEY", "coding-secret")
+
+	cases := []struct {
+		knownAuth string
+		baseURL   string
+		apiEnv    string
+	}{
+		{"zai", "https://api.z.ai/api/paas/v4", "ZAI_API_KEY"},
+		{"zai-main-api", "https://api.z.ai/api/paas/v4", "ZAI_MAIN_API_KEY"},
+		{"zai-coding-api", "https://api.z.ai/api/coding/paas/v4", "ZAI_CODING_API_KEY"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.knownAuth, func(t *testing.T) {
+			in := `
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    known_auth: ` + tc.knownAuth + `
+`
+			cfg, err := parse([]byte(in))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			m := cfg.Models[0]
+			if m.BaseURL != tc.baseURL {
+				t.Fatalf("base_url = %q, want %q", m.BaseURL, tc.baseURL)
+			}
+			if m.APIKeyEnv != tc.apiEnv {
+				t.Fatalf("api_key_env = %q, want %q", m.APIKeyEnv, tc.apiEnv)
+			}
+			if m.UpstreamProtocol != UpstreamOpenAIChat {
+				t.Fatalf("upstream_protocol = %q, want %q", m.UpstreamProtocol, UpstreamOpenAIChat)
+			}
+		})
+	}
+}
+
 func TestLoad_KnownAuthMimoReasoningOverridePreserved(t *testing.T) {
 	t.Setenv("MIMO_API_KEY", "secret")
 	in := `
@@ -586,12 +626,14 @@ func TestLoad_KnownAuthKeptProvidersHydrateAndDroppedProvidersFail(t *testing.T)
 	t.Setenv("GROQ_API_KEY", "secret")
 	t.Setenv("FIREWORKS_API_KEY", "secret")
 	t.Setenv("ZAI_API_KEY", "secret")
+	t.Setenv("ZAI_MAIN_API_KEY", "secret")
+	t.Setenv("ZAI_CODING_API_KEY", "secret")
 	t.Setenv("MIMO_API_KEY", "secret")
 	t.Setenv("MIMO_TOKEN_PLAN_CN_API_KEY", "secret")
 	t.Setenv("MIMO_TOKEN_PLAN_SGP_API_KEY", "secret")
 	t.Setenv("MIMO_TOKEN_PLAN_AMS_API_KEY", "secret")
 
-	for _, knownAuth := range []string{"deepseek", "openai", "anthropic", "xai", "kimi", "groq", "fireworks", "zai", "mimo", "mimo-token-plan-cn", "mimo-token-plan-sgp", "mimo-token-plan-ams", "ollama", "vllm"} {
+	for _, knownAuth := range []string{"deepseek", "openai", "anthropic", "xai", "kimi", "groq", "fireworks", "zai", "zai-main-api", "zai-coding-api", "mimo", "mimo-token-plan-cn", "mimo-token-plan-sgp", "mimo-token-plan-ams", "ollama", "vllm"} {
 		t.Run("kept "+knownAuth, func(t *testing.T) {
 			fp := "generic-chat-completion-api"
 			if knownAuth == "openai" {

@@ -32,7 +32,7 @@ func TestGeneratePKCE(t *testing.T) {
 
 func TestBuildAuthURL_Codex(t *testing.T) {
 	pkce := &PKCE{CodeVerifier: "verifier", CodeChallenge: "challenge"}
-	rawURL, err := BuildAuthURL(ProviderCodex, "http://127.0.0.1:1455/auth/callback", "state-1", "", pkce)
+	rawURL, err := BuildAuthURL(ProviderCodex, "http://localhost:1455/auth/callback", "state-1", "", pkce)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestBuildAuthURL_Codex(t *testing.T) {
 	for key, want := range map[string]string{
 		"client_id":             CodexClientID,
 		"response_type":         "code",
-		"redirect_uri":          "http://127.0.0.1:1455/auth/callback",
+		"redirect_uri":          "http://localhost:1455/auth/callback",
 		"state":                 "state-1",
 		"code_challenge":        "challenge",
 		"code_challenge_method": "S256",
@@ -55,6 +55,17 @@ func TestBuildAuthURL_Codex(t *testing.T) {
 	}
 	if !strings.Contains(q.Get("scope"), "offline_access") {
 		t.Fatalf("scope should request refresh capability, got %q", q.Get("scope"))
+	}
+	for _, wantScope := range []string{"api.connectors.read", "api.connectors.invoke"} {
+		if !strings.Contains(q.Get("scope"), wantScope) {
+			t.Fatalf("scope should include %q, got %q", wantScope, q.Get("scope"))
+		}
+	}
+}
+
+func TestCodexRedirectURIUsesRegisteredLocalhost(t *testing.T) {
+	if got, want := codexRedirectURI("127.0.0.1:1455"), "http://localhost:1455/auth/callback"; got != want {
+		t.Fatalf("codexRedirectURI=%q want %q", got, want)
 	}
 }
 

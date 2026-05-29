@@ -14,8 +14,8 @@ mode for agent workflows.
 
 ```yaml
 models:
-  - alias: droid-mimo-v2.5-pro
-    display_name: "MiMo V2.5 Pro"
+  - alias: mimo-v2.5-pro
+    display_name: "MiMo V2.5 Pro (Xiaomi MiMo)"
     factory_provider: generic-chat-completion-api
     upstream_protocol: openai-chat
     known_auth: mimo
@@ -51,12 +51,12 @@ Token Plan profiles:
 {
   "customModels": [
     {
-      "model": "droid-mimo-v2.5-pro",
-      "modelDisplayName": "MiMo V2.5 Pro (via droid-proxy)",
+      "model": "mimo-v2.5-pro",
+      "displayName": "MiMo V2.5 Pro (Xiaomi MiMo)",
       "provider": "generic-chat-completion-api",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxTokens": 131072
+      "maxOutputTokens": 131072
     }
   ]
 }

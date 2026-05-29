@@ -299,10 +299,10 @@ func TestWorkflowValidation_RuntimeSmokeBinaryStartReadinessShutdownCleanup(t *t
 			modelsBody = string(b)
 		}
 	}
-	if !strings.Contains(modelsBody, `"id":"droid-deepseek-v4-flash"`) {
+	if !strings.Contains(modelsBody, `"id":"deepseek-v4-flash"`) {
 		t.Fatalf("models response missing example-derived alias: %s", modelsBody)
 	}
-	smokeReq, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:8787/v1/chat/completions", strings.NewReader(`{"model":"droid-deepseek-v4-flash","messages":[{"role":"user","content":"first run"}]}`))
+	smokeReq, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:8787/v1/chat/completions", strings.NewReader(`{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"first run"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1284,12 +1284,12 @@ type factorySettingsExample struct {
 }
 
 type factorySettingsCustomModel struct {
-	Model            string `json:"model"`
-	ModelDisplayName string `json:"modelDisplayName"`
-	Provider         string `json:"provider"`
-	BaseURL          string `json:"baseUrl"`
-	APIKey           string `json:"apiKey"`
-	MaxTokens        int    `json:"maxTokens"`
+	Model           string `json:"model"`
+	DisplayName     string `json:"displayName"`
+	Provider        string `json:"provider"`
+	BaseURL         string `json:"baseUrl"`
+	APIKey          string `json:"apiKey"`
+	MaxOutputTokens int    `json:"maxOutputTokens"`
 }
 
 func loadFactorySettingsExamples(t *testing.T) []factorySettingsExample {
@@ -1355,7 +1355,7 @@ models:
     upstream_protocol: %s
 %s    base_url: %s
     api_key_env: %s
-`, cm.Model, cm.ModelDisplayName, cm.Provider, protocol, knownAuth, upstreamURL, keyEnv)
+`, cm.Model, cm.DisplayName, cm.Provider, protocol, knownAuth, upstreamURL, keyEnv)
 		}
 	}
 	cfg, err := configFromYAMLForWorkflow([]byte(b.String()))
@@ -1390,7 +1390,9 @@ func exampleDerivedRuntimeSmokeConfigYAML(t *testing.T, upstreamURL string) stri
 	}
 	text := string(raw)
 	text = strings.Replace(text, `base_url: "https://api.deepseek.com/v1"`, `base_url: `+upstreamURL, 1)
-	text = strings.Replace(text, "  port: 8787", "  port: 8787", 1)
+	if strings.Contains(text, "known_auth: deepseek") {
+		text = strings.Replace(text, "    known_auth: deepseek", fmt.Sprintf("    base_url: %s\n    api_key_env: DEEPSEEK_API_KEY", upstreamURL), 1)
+	}
 	return text
 }
 

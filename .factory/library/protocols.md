@@ -6,7 +6,7 @@ Distilled protocol compatibility notes for workers.
 
 ## Factory BYOK
 
-Current Factory custom model settings use camelCase fields such as `model`, `modelDisplayName`, `provider`, `baseUrl`, `apiKey`, and `maxTokens`. Supported providers are `anthropic`, `openai`, and `generic-chat-completion-api`.
+Current Factory custom model settings use camelCase fields such as `model`, `displayName`, `provider`, `baseUrl`, `apiKey`, and `maxOutputTokens`. Supported providers are `anthropic`, `openai`, and `generic-chat-completion-api`.
 
 ## OpenAI
 

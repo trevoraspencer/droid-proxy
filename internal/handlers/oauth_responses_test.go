@@ -116,6 +116,12 @@ func TestResponses_OAuthCodexNonStreamReconstructsResponsesAndPreservesTools(t *
 	if captured["model"] != "oauth-upstream-model" || captured["stream"] != true {
 		t.Fatalf("bad oauth upstream payload: %#v", captured)
 	}
+	if captured["instructions"] != codexDefaultInstructions {
+		t.Fatalf("missing default codex instructions: %#v", captured)
+	}
+	if captured["store"] != false {
+		t.Fatalf("codex store must be false: %#v", captured)
+	}
 	if _, exists := captured["previous_response_id"]; exists {
 		t.Fatalf("previous_response_id should be removed for oauth upstream: %#v", captured)
 	}
@@ -136,6 +142,38 @@ func TestResponses_OAuthCodexNonStreamReconstructsResponsesAndPreservesTools(t *
 	}
 	if output[0].(map[string]any)["type"] != "message" || output[1].(map[string]any)["type"] != "function_call" {
 		t.Fatalf("bad reconstructed output: %#v", output)
+	}
+}
+
+func TestResponses_OAuthCodexPreservesCallerInstructions(t *testing.T) {
+	var captured map[string]any
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("captured request JSON: %v body=%s", err, body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(w, `event: response.completed`)
+		_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[]}}`)
+		_, _ = fmt.Fprintln(w)
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","instructions":"Use caller instructions.","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if captured["instructions"] != "Use caller instructions." {
+		t.Fatalf("caller instructions were not preserved: %#v", captured)
+	}
+	input, ok := captured["input"].([]any)
+	if !ok || len(input) != 1 {
+		t.Fatalf("string input was not normalized to list: %#v", captured["input"])
+	}
+	msg, ok := input[0].(map[string]any)
+	if !ok || msg["role"] != "user" || msg["content"] != "hi" {
+		t.Fatalf("bad normalized input: %#v", captured["input"])
 	}
 }
 
@@ -163,7 +201,7 @@ func TestResponses_OAuthXAIStreamingForwardsSSEAndConversationID(t *testing.T) {
 	}, nil)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true,"previous_response_id":"resp_old"}`))
 	req.Header.Set("X-Session-ID", "session-123")
 	api.engine.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -174,6 +212,9 @@ func TestResponses_OAuthXAIStreamingForwardsSSEAndConversationID(t *testing.T) {
 	}
 	if captured["model"] != "oauth-upstream-model" || captured["stream"] != true {
 		t.Fatalf("bad xai oauth payload: %#v", captured)
+	}
+	if _, exists := captured["previous_response_id"]; exists {
+		t.Fatalf("xai previous_response_id should be removed: %#v", captured)
 	}
 	events := parseHandlerSSE(t, w.Body.String())
 	assertEventCount(t, events, "response.completed", 1)

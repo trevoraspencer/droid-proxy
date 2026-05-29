@@ -1,12 +1,12 @@
 {
   "customModels": [
     {
-      "model": "droid-claude-sonnet",
-      "modelDisplayName": "Claude Sonnet (via droid-proxy)",
+      "model": "claude-sonnet-4-5-20250929",
+      "displayName": "Claude Sonnet 4.5 (Anthropic)",
       "provider": "anthropic",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "not-required-when-client-auth-disabled",
-      "maxTokens": 8192
+      "maxOutputTokens": 8192
     }
   ]
 }

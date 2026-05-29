@@ -19,7 +19,10 @@ import (
 	"droid-proxy/internal/stream"
 )
 
-const codexUserAgent = "codex_cli_rs/0.118.0 (Mac OS 26.3.1; arm64) droid-proxy"
+const (
+	codexUserAgent           = "codex_cli_rs/0.118.0 (Mac OS 26.3.1; arm64) droid-proxy"
+	codexDefaultInstructions = "You are Codex, a concise coding assistant."
+)
 
 func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 	if a.OAuth == nil {
@@ -126,8 +129,34 @@ func prepareOAuthResponsesPayload(body []byte, m *config.Model, stream bool) []b
 	if next, err := sjson.SetBytes(out, "stream", stream); err == nil {
 		out = next
 	}
+	if m.OAuthProvider == config.OAuthProviderCodex {
+		out = prepareCodexResponsesPayload(out)
+	}
 	for _, field := range []string{"previous_response_id", "prompt_cache_retention", "safety_identifier", "stream_options"} {
 		if next, err := sjson.DeleteBytes(out, field); err == nil {
+			out = next
+		}
+	}
+	return out
+}
+
+func prepareCodexResponsesPayload(body []byte) []byte {
+	out := body
+	if strings.TrimSpace(gjson.GetBytes(out, "instructions").String()) == "" {
+		if next, err := sjson.SetBytes(out, "instructions", codexDefaultInstructions); err == nil {
+			out = next
+		}
+	}
+	if next, err := sjson.SetBytes(out, "store", false); err == nil {
+		out = next
+	}
+	input := gjson.GetBytes(out, "input")
+	if input.Type == gjson.String {
+		normalized := []map[string]string{{
+			"role":    "user",
+			"content": input.String(),
+		}}
+		if next, err := sjson.SetBytes(out, "input", normalized); err == nil {
 			out = next
 		}
 	}

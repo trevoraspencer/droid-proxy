@@ -40,6 +40,38 @@ go build -o droid-proxy ./cmd/droid-proxy
 
 Requires Go 1.26.3 or newer in the Go 1.26 line. The build produces a single static binary.
 
+## Run in the background (like VibeProxy)
+
+You should not need a terminal open while using Factory Droid. Use the daemon
+commands (same idea as `vibe start` / `vibe service install` in VibeProxy):
+
+```bash
+# One-time: load API keys into your shell, then start a background daemon
+set -a && source .env.live-e2e.local && set +a   # or export keys manually
+./droid-proxy start --config config.local.yaml
+
+./droid-proxy status
+./droid-proxy stop
+./droid-proxy logs
+```
+
+For **auto-start on login** and **auto-restart on crash**, install the macOS
+launchd user agent (reads API keys from `.env.live-e2e.local`, `.env.local`, or
+`~/.droid-proxy/env` in that order):
+
+```bash
+./droid-proxy service install --config /absolute/path/to/config.local.yaml
+./droid-proxy service uninstall
+```
+
+Logs: `~/.droid-proxy/stdout.log` and `~/.droid-proxy/stderr.log`.
+
+Foreground mode (debugging only):
+
+```bash
+./droid-proxy --config config.local.yaml
+```
+
 ## Quickstart: DeepSeek via Droid
 
 1. **Configure droid-proxy.** Copy `config.example.yaml` to `config.yaml`.
@@ -51,8 +83,8 @@ Requires Go 1.26.3 or newer in the Go 1.26 line. The build produces a single sta
      port: 8787
 
    models:
-     - alias: droid-deepseek-v4-flash
-       display_name: "DeepSeek V4 Flash"
+     - alias: deepseek-v4-flash
+       display_name: "DeepSeek V4 Flash (DeepSeek)"
        factory_provider: generic-chat-completion-api
        upstream_protocol: openai-chat
        known_auth: deepseek
@@ -61,12 +93,14 @@ Requires Go 1.26.3 or newer in the Go 1.26 line. The build produces a single sta
          reasoning: deepseek
    ```
 
-2. **Run the proxy.**
+2. **Run the proxy** (pick one):
 
    ```bash
    export DEEPSEEK_API_KEY=sk-...
-   ./droid-proxy --config config.yaml
+   ./droid-proxy start --config config.yaml
    ```
+
+   Or install as a background service: `./droid-proxy service install --config "$(pwd)/config.yaml"`
 
 3. **Tell Droid about it.** Edit `~/.factory/settings.json`:
 
@@ -74,12 +108,12 @@ Requires Go 1.26.3 or newer in the Go 1.26 line. The build produces a single sta
    {
      "customModels": [
        {
-         "model": "droid-deepseek-v4-flash",
-         "modelDisplayName": "DeepSeek V4 Flash (via droid-proxy)",
+         "model": "deepseek-v4-flash",
+         "displayName": "DeepSeek V4 Flash (DeepSeek)",
          "provider": "generic-chat-completion-api",
          "baseUrl": "http://127.0.0.1:8787",
          "apiKey": "x",
-         "maxTokens": 8192
+         "maxOutputTokens": 8192
        }
      ]
    }

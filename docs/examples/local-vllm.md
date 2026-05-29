@@ -6,7 +6,7 @@ vLLM's `--api-server` provides OpenAI-compatible endpoints. Default port 8000.
 
 ```yaml
 models:
-  - alias: droid-llama-vllm
+  - alias: meta-llama/Llama-3.1-8B-Instruct
     display_name: "Llama 3.1 8B (vLLM)"
     factory_provider: generic-chat-completion-api
     upstream_protocol: openai-chat
@@ -20,12 +20,12 @@ models:
 {
   "customModels": [
     {
-      "model": "droid-llama-vllm",
-      "modelDisplayName": "Llama 3.1 (vLLM)",
+      "model": "meta-llama/Llama-3.1-8B-Instruct",
+      "displayName": "Llama 3.1 8B (vLLM)",
       "provider": "generic-chat-completion-api",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxTokens": 4096
+      "maxOutputTokens": 4096
     }
   ]
 }

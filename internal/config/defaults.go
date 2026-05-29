@@ -68,7 +68,7 @@ func (c *Config) applyDefaults() {
 		c.OAuth.AuthDir = "~/.droid-proxy/auth"
 	}
 	if c.OAuth.CodexCallbackHost == "" {
-		c.OAuth.CodexCallbackHost = "127.0.0.1"
+		c.OAuth.CodexCallbackHost = "localhost"
 	}
 	if c.OAuth.CodexCallbackPort == 0 {
 		c.OAuth.CodexCallbackPort = 1455

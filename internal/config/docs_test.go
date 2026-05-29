@@ -102,8 +102,8 @@ func validateFactorySettingsJSON(t *testing.T, raw []byte) {
 	if len(doc.CustomModels) == 0 {
 		t.Fatalf("customModels must contain at least one model: %s", raw)
 	}
-	required := []string{"model", "modelDisplayName", "provider", "baseUrl", "apiKey", "maxTokens"}
-	stale := []string{"id", "model_display_name", "base_url", "api_key", "max_tokens"}
+	required := []string{"model", "displayName", "provider", "baseUrl", "apiKey", "maxOutputTokens"}
+	stale := []string{"id", "model_display_name", "base_url", "api_key", "max_tokens", "modelDisplayName", "maxTokens"}
 	for i, model := range doc.CustomModels {
 		for _, key := range required {
 			if _, ok := model[key]; !ok {
@@ -188,7 +188,7 @@ func TestDocsExamplesParseAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.example.yaml must load with dummy DeepSeek key: %v", err)
 	}
-	if len(cfg.Models) == 0 || cfg.Models[0].Alias != "droid-deepseek-v4-flash" {
+	if len(cfg.Models) == 0 || cfg.Models[0].Alias != "deepseek-v4-flash" {
 		t.Fatalf("config.example.yaml should default to current DeepSeek alias, got %+v", cfg.Models)
 	}
 

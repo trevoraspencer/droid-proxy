@@ -21,6 +21,7 @@ const (
 	CodexAuthURL        = "https://auth.openai.com/oauth/authorize"
 	CodexTokenURL       = "https://auth.openai.com/oauth/token"
 	CodexClientID       = "app_EMoamEEZ73f0CkXaXp7hrann"
+	CodexScope          = "openid profile email offline_access api.connectors.read api.connectors.invoke"
 	CodexDefaultBaseURL = "https://chatgpt.com/backend-api/codex"
 
 	XAIIssuer         = "https://auth.x.ai"
@@ -131,7 +132,7 @@ func (m *Manager) CallbackAddr(provider config.OAuthProvider) string {
 	if m != nil && m.cfg != nil {
 		switch provider {
 		case ProviderCodex:
-			host = firstNonEmpty(m.cfg.OAuth.CodexCallbackHost, "127.0.0.1")
+			host = firstNonEmpty(m.cfg.OAuth.CodexCallbackHost, "localhost")
 			port = m.cfg.OAuth.CodexCallbackPort
 		case ProviderXAI:
 			host = firstNonEmpty(m.cfg.OAuth.XAICallbackHost, "127.0.0.1")
@@ -174,7 +175,11 @@ func firstNonEmpty(values ...string) string {
 }
 
 func codexRedirectURI(addr string) string {
-	return "http://" + addr + "/auth/callback"
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil || strings.TrimSpace(port) == "" {
+		return "http://" + addr + "/auth/callback"
+	}
+	return "http://localhost:" + port + "/auth/callback"
 }
 
 func xaiRedirectURI(addr string) string {

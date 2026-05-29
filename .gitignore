@@ -19,8 +19,10 @@
 # Local config
 config.yaml
 config.local.yaml
+config.local.yaml.live-e2e-backup.*
 .env
 .env.local
+.env.live-e2e.local
 
 # Factory validation reports
 /.factory/validation/

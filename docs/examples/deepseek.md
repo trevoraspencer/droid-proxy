@@ -6,16 +6,17 @@ follow-up turns with tool results carry the prior reasoning forward — required
 by DeepSeek to keep tool-using conversations coherent.
 
 The examples below use the current 2026 `deepseek-v4-flash` naming. Older
-aliases such as `deepseek-chat`, `deepseek-reasoner`, and example proxy aliases
-like `droid-deepseek-v3` may still work for existing configs, but treat them as
-legacy compatibility names rather than new defaults.
+aliases such as `deepseek-chat`, `deepseek-reasoner`, and legacy proxy aliases
+like `droid-deepseek-v3` or `droid-deepseek-v4-flash` may still work for
+existing configs, but treat them as legacy compatibility names rather than new
+defaults.
 
 ## config.yaml
 
 ```yaml
 models:
-  - alias: droid-deepseek-v4-flash
-    display_name: "DeepSeek V4 Flash"
+  - alias: deepseek-v4-flash
+    display_name: "DeepSeek V4 Flash (DeepSeek)"
     factory_provider: generic-chat-completion-api
     upstream_protocol: openai-chat
     known_auth: deepseek
@@ -37,12 +38,12 @@ models:
 {
   "customModels": [
     {
-      "model": "droid-deepseek-v4-flash",
-      "modelDisplayName": "DeepSeek V4 Flash (via droid-proxy)",
+      "model": "deepseek-v4-flash",
+      "displayName": "DeepSeek V4 Flash (DeepSeek)",
       "provider": "generic-chat-completion-api",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxTokens": 8192
+      "maxOutputTokens": 8192
     }
   ]
 }
@@ -61,7 +62,7 @@ droid-proxy --config config.yaml
 curl -sS http://127.0.0.1:8787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "droid-deepseek-v4-flash",
+    "model": "deepseek-v4-flash",
     "messages": [{"role":"user","content":"hello"}],
     "stream": false
   }' | jq .

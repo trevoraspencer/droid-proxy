@@ -64,6 +64,14 @@ var knownAuthRegistry = map[string]KnownAuth{
 		Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4",
 		APIKeyEnv: "ZAI_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
 	},
+	"zai-main-api": {
+		Name: "zai-main-api", BaseURL: "https://api.z.ai/api/paas/v4",
+		APIKeyEnv: "ZAI_MAIN_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
+	},
+	"zai-coding-api": {
+		Name: "zai-coding-api", BaseURL: "https://api.z.ai/api/coding/paas/v4",
+		APIKeyEnv: "ZAI_CODING_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
+	},
 	"mimo": {
 		Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1",
 		APIKeyEnv: "MIMO_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,

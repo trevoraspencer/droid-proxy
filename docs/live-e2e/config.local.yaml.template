@@ -1,0 +1,101 @@
+listen:
+  host: 127.0.0.1
+  port: 8787
+
+server:
+  request_body_max_bytes: 10485760
+  read_header_timeout: 30s
+  read_timeout: 60s
+  write_timeout: 600s
+  idle_timeout: 120s
+  shutdown_timeout: 5s
+
+client_auth:
+  enabled: false
+
+logging:
+  level: info
+  format: text
+  redact: true
+  trace_requests: true
+
+reasoning_cache:
+  enabled: true
+  max_entries: 1024
+  ttl: 30m
+
+upstream:
+  http_timeout: 600s
+  stream_keep_alive: 15s
+  response_body_max_bytes: 104857600
+  error_body_max_bytes: 1048576
+
+oauth:
+  auth_dir: "~/.droid-proxy/auth"
+  codex_callback_host: localhost
+  codex_callback_port: 1455
+  xai_callback_host: 127.0.0.1
+  xai_callback_port: 56121
+
+models:
+  - alias: gpt-5.2-codex
+    display_name: "GPT-5.2 Codex (ChatGPT OAuth)"
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: "${CODEX_UPSTREAM_MODEL:-gpt-5.2-codex}"
+    max_output_tokens: 16384
+    max_context_tokens: 400000
+
+  - alias: grok-build-0.1
+    display_name: "Grok Build 0.1 (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    upstream_model: "${XAI_GROK_BUILD_MODEL:-grok-build-0.1}"
+    max_output_tokens: 32768
+    max_context_tokens: 256000
+
+  - alias: glm-5.1
+    display_name: "GLM 5.1 (Z.AI GLM Coding Plan)"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: zai-coding-api
+    upstream_model: "${ZAI_GLM_MODEL:-glm-5.1}"
+    max_output_tokens: 32768
+    max_context_tokens: 200000
+    extra_args:
+      thinking:
+        type: enabled
+
+  - alias: mimo-v2.5-pro
+    display_name: "MiMo V2.5 Pro (Xiaomi MiMo)"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: "${MIMO_KNOWN_AUTH:-mimo}"
+    upstream_model: "${MIMO_MODEL:-mimo-v2.5-pro}"
+    max_output_tokens: 131072
+    max_context_tokens: 1048576
+    extra_args:
+      thinking:
+        type: enabled
+
+  - alias: "${FIREWORKS_MODEL}"
+    display_name: "DeepSeek V4 Pro (Fireworks)"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: fireworks
+    upstream_model: "${FIREWORKS_MODEL}"
+    max_output_tokens: 8192
+    max_context_tokens: 131072
+
+  - alias: deepseek-v4-flash
+    display_name: "DeepSeek V4 Flash (DeepSeek)"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: deepseek
+    upstream_model: "${DEEPSEEK_MODEL:-deepseek-v4-flash}"
+    max_output_tokens: 8192
+    max_context_tokens: 64000
+    capabilities:
+      reasoning: deepseek

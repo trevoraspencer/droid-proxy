@@ -52,7 +52,9 @@ in `config.yaml` always wins.
 | `kimi` | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | `openai-chat` | T2 |
 | `groq` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | `openai-chat` | T2 |
 | `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | `openai-chat` | T2 |
-| `zai` | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` | `openai-chat` | T2 |
+| `zai` | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` | `openai-chat` | T2 (legacy main API alias) |
+| `zai-main-api` | `https://api.z.ai/api/paas/v4` | `ZAI_MAIN_API_KEY` | `openai-chat` | T2 |
+| `zai-coding-api` | `https://api.z.ai/api/coding/paas/v4` | `ZAI_CODING_API_KEY` | `openai-chat` | T2 (GLM Coding Plan) |
 | `mimo` | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` | `openai-chat` | T2 (reasoning replay) |
 | `mimo-token-plan-cn` | `https://token-plan-cn.xiaomimimo.com/v1` | `MIMO_TOKEN_PLAN_CN_API_KEY` | `openai-chat` | T2 (reasoning replay) |
 | `mimo-token-plan-sgp` | `https://token-plan-sgp.xiaomimimo.com/v1` | `MIMO_TOKEN_PLAN_SGP_API_KEY` | `openai-chat` | T2 (reasoning replay) |
@@ -63,6 +65,10 @@ in `config.yaml` always wins.
 Custom OpenAI-compatible upstreams (LiteLLM, custom self-hosted gateways, etc.)
 work the same as the above — set `base_url`, `api_key_env`, and
 `upstream_protocol: openai-chat`. No `known_auth` needed.
+
+For Z.AI, use `zai-coding-api` with GLM Coding Plan keys. Use `zai-main-api`
+with normal Z.AI API keys. The older `zai` profile remains as a compatibility
+alias for the main API and still reads `ZAI_API_KEY`.
 
 ## Xiaomi MiMo
 
@@ -93,7 +99,7 @@ Run `droid-proxy auth codex --config config.yaml` or
 
 | oauth_provider | upstream_protocol | Default upstream | Callback default | Notes |
 |---|---|---|---|---|
-| `codex` | `codex-responses` | `https://chatgpt.com/backend-api/codex` | `127.0.0.1:1455/auth/callback` | Codex/ChatGPT OAuth for text, streaming, tools, and tool outputs. |
+| `codex` | `codex-responses` | `https://chatgpt.com/backend-api/codex` | `localhost:1455/auth/callback` | Codex/ChatGPT OAuth for text, streaming, tools, and tool outputs. |
 | `xai` | `xai-responses` | `https://api.x.ai/v1` | `127.0.0.1:56121/callback` | xAI Grok Build OAuth through xAI's Responses API. |
 
 OAuth token files live under `oauth.auth_dir` (default
