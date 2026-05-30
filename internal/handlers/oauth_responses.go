@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -44,7 +46,7 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 	}
 
 	downstreamStream := gjson.GetBytes(body, "stream").Bool()
-	payload := prepareOAuthResponsesPayload(body, m, true)
+	payload := prepareOAuthResponsesPayload(body, m, true, c.Request.Header)
 	installationID := ""
 	codexConversation := ""
 	if m.OAuthProvider == config.OAuthProviderCodex {
@@ -111,10 +113,16 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 			a.Logger.Warn("response writer does not support flushing")
 			return
 		}
-		if err := stream.Forward(c.Request.Context(), c.Writer, flusher, resp.Body, stream.Options{
+		dst := io.Writer(c.Writer)
+		var repair *responsesSSERepairWriter
+		if m.OAuthProvider == config.OAuthProviderXAI {
+			repair = newResponsesSSERepairWriter(c.Writer)
+			dst = repair
+		}
+		if err := stream.Forward(c.Request.Context(), dst, flusher, resp.Body, stream.Options{
 			KeepAlive:   a.Cfg.Upstream.StreamKeepAlive,
 			IdleTimeout: a.Cfg.Upstream.HTTPTimeout,
-			IsTerminal:  stream.ResponsesTerminal,
+			IsTerminal:  oauthResponsesTerminal,
 			OnLine: func(line []byte) {
 				if quota := codexQuotaFromSSELine(line); quota != nil {
 					a.recordCodexUsage(token, quota, nil)
@@ -123,6 +131,11 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 			WriteTruncationError: a.responsesTruncationWriter(http.StatusBadGateway, "upstream stream ended before terminal marker"),
 		}); err != nil && !errors.Is(err, c.Request.Context().Err()) {
 			a.Logger.WithError(err).Warn("oauth responses stream terminated abnormally")
+		}
+		if repair != nil {
+			if err := repair.Flush(); err != nil && !errors.Is(err, c.Request.Context().Err()) {
+				a.Logger.WithError(err).Warn("could not flush repaired oauth responses stream")
+			}
 		}
 		return
 	}
@@ -145,7 +158,7 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 	c.Data(http.StatusOK, "application/json", translated)
 }
 
-func prepareOAuthResponsesPayload(body []byte, m *config.Model, stream bool) []byte {
+func prepareOAuthResponsesPayload(body []byte, m *config.Model, stream bool, downstream http.Header) []byte {
 	out := body
 	if strings.TrimSpace(m.UpstreamModel) != "" {
 		if next, err := sjson.SetBytes(out, "model", m.UpstreamModel); err == nil {
@@ -167,6 +180,9 @@ func prepareOAuthResponsesPayload(body []byte, m *config.Model, stream bool) []b
 		if next, err := sjson.DeleteBytes(out, field); err == nil {
 			out = next
 		}
+	}
+	if m.OAuthProvider == config.OAuthProviderXAI {
+		out = prepareXAIResponsesPayload(out, downstream)
 	}
 	return out
 }
@@ -192,6 +208,273 @@ func prepareCodexResponsesPayload(body []byte) []byte {
 		}
 	}
 	return out
+}
+
+const xaiEncryptedReasoningInclude = "reasoning.encrypted_content"
+
+func prepareXAIResponsesPayload(body []byte, downstream http.Header) []byte {
+	var root map[string]any
+	if err := json.Unmarshal(body, &root); err != nil {
+		return body
+	}
+	delete(root, "service_tier")
+	if strings.TrimSpace(stringValue(root["prompt_cache_key"])) == "" {
+		if sessionID := xaiSessionID(downstream, root); sessionID != "" {
+			root["prompt_cache_key"] = sessionID
+		}
+	}
+	if tools, ok := root["tools"].([]any); ok {
+		root["tools"] = normalizeXAITools(tools)
+	}
+	if xaiReasoningPresent(root) {
+		root["include"] = includeXAIEncryptedReasoning(root["include"])
+	}
+	out, err := json.Marshal(root)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+func xaiSessionID(h http.Header, root map[string]any) string {
+	for _, v := range []string{
+		h.Get("X-Session-ID"),
+		h.Get("Session_id"),
+		h.Get("session_id"),
+		h.Get("X-Client-Request-Id"),
+		stringValue(root["prompt_cache_key"]),
+	} {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func normalizeXAITools(tools []any) []any {
+	out := make([]any, 0, len(tools))
+	for _, rawTool := range tools {
+		tool, ok := rawTool.(map[string]any)
+		if !ok {
+			continue
+		}
+		toolType := strings.ToLower(strings.TrimSpace(stringValue(tool["type"])))
+		if toolType == "namespace" || toolType == "namespace_tool" {
+			if nested, ok := tool["tools"].([]any); ok {
+				out = append(out, normalizeXAITools(nested)...)
+			}
+			continue
+		}
+		normalized, keep := normalizeXAITool(tool)
+		if keep {
+			out = append(out, normalized)
+		}
+	}
+	return out
+}
+
+func normalizeXAITool(tool map[string]any) (map[string]any, bool) {
+	toolType := strings.ToLower(strings.TrimSpace(stringValue(tool["type"])))
+	name := xaiToolName(tool)
+	if unsupportedXAITool(toolType, name) {
+		return nil, false
+	}
+	if strings.HasPrefix(toolType, "web_search") || toolType == "web_search" {
+		stripXAIWebSearchFields(tool)
+		return sanitizeXAIToolFields(tool), true
+	}
+	if toolType == "custom" {
+		tool["type"] = "function"
+		toolType = "function"
+		if _, ok := tool["parameters"]; !ok {
+			if schema, ok := tool["input_schema"]; ok {
+				tool["parameters"] = schema
+			}
+		}
+		delete(tool, "input_schema")
+	}
+	if toolType == "function" {
+		ensureXAIFunctionParameters(tool)
+	}
+	return sanitizeXAIToolFields(tool), true
+}
+
+func xaiToolName(tool map[string]any) string {
+	if name := strings.TrimSpace(stringValue(tool["name"])); name != "" {
+		return strings.ToLower(name)
+	}
+	if function, ok := tool["function"].(map[string]any); ok {
+		return strings.ToLower(strings.TrimSpace(stringValue(function["name"])))
+	}
+	return ""
+}
+
+func unsupportedXAITool(toolType, name string) bool {
+	switch toolType {
+	case "tool_search", "image_generation", "apply_patch":
+		return true
+	}
+	switch name {
+	case "tool_search", "image_generation", "apply_patch":
+		return true
+	}
+	return strings.HasSuffix(name, ".apply_patch") || strings.HasSuffix(name, "/apply_patch")
+}
+
+func stripXAIWebSearchFields(tool map[string]any) {
+	for _, field := range []string{
+		"allowed_domains",
+		"blocked_domains",
+		"filters",
+		"ranking_options",
+		"search_context_size",
+		"site_search",
+		"user_location",
+	} {
+		delete(tool, field)
+	}
+}
+
+func ensureXAIFunctionParameters(tool map[string]any) {
+	if function, ok := tool["function"].(map[string]any); ok {
+		if _, ok := function["parameters"].(map[string]any); !ok {
+			function["parameters"] = map[string]any{}
+		}
+		function["parameters"] = sanitizeXAIToolSchema(function["parameters"])
+		return
+	}
+	if _, ok := tool["parameters"].(map[string]any); !ok {
+		tool["parameters"] = map[string]any{}
+	}
+	tool["parameters"] = sanitizeXAIToolSchema(tool["parameters"])
+}
+
+func sanitizeXAIToolFields(tool map[string]any) map[string]any {
+	for key, value := range tool {
+		switch key {
+		case "parameters", "input_schema":
+			tool[key] = sanitizeXAIToolSchema(value)
+		case "function":
+			if function, ok := value.(map[string]any); ok {
+				for fk, fv := range function {
+					if fk == "parameters" {
+						function[fk] = sanitizeXAIToolSchema(fv)
+					}
+				}
+			}
+		}
+	}
+	return tool
+}
+
+func sanitizeXAIToolSchema(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, child := range v {
+			switch key {
+			case "pattern", "format":
+				delete(v, key)
+			case "enum":
+				filtered := sanitizeXAIEnum(child)
+				if len(filtered) == 0 {
+					delete(v, key)
+				} else {
+					v[key] = filtered
+				}
+			default:
+				v[key] = sanitizeXAIToolSchema(child)
+			}
+		}
+		return v
+	case []any:
+		for i, child := range v {
+			v[i] = sanitizeXAIToolSchema(child)
+		}
+		return v
+	default:
+		return value
+	}
+}
+
+func sanitizeXAIEnum(value any) []any {
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]any, 0, len(values))
+	for _, v := range values {
+		if s, ok := v.(string); ok && strings.Contains(s, "/") {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+func xaiReasoningPresent(root map[string]any) bool {
+	if _, ok := root["reasoning"]; ok {
+		return true
+	}
+	return xaiValueContainsReasoning(root["input"])
+}
+
+func xaiValueContainsReasoning(value any) bool {
+	switch v := value.(type) {
+	case map[string]any:
+		if strings.EqualFold(stringValue(v["type"]), "reasoning") {
+			return true
+		}
+		if strings.TrimSpace(stringValue(v["encrypted_content"])) != "" {
+			return true
+		}
+		for _, child := range v {
+			if xaiValueContainsReasoning(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if xaiValueContainsReasoning(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func includeXAIEncryptedReasoning(value any) any {
+	appendIfMissing := func(values []any) []any {
+		for _, v := range values {
+			if stringValue(v) == xaiEncryptedReasoningInclude {
+				return values
+			}
+		}
+		return append(values, xaiEncryptedReasoningInclude)
+	}
+	switch v := value.(type) {
+	case nil:
+		return []string{xaiEncryptedReasoningInclude}
+	case []any:
+		return appendIfMissing(v)
+	case []string:
+		values := make([]any, 0, len(v)+1)
+		for _, s := range v {
+			values = append(values, s)
+		}
+		return appendIfMissing(values)
+	case string:
+		values := []any{v}
+		return appendIfMissing(values)
+	default:
+		return []string{xaiEncryptedReasoningInclude}
+	}
+}
+
+func stringValue(value any) string {
+	if s, ok := value.(string); ok {
+		return s
+	}
+	return ""
 }
 
 func oauthResponsesURL(m *config.Model, token *oauth.Token) (string, error) {
@@ -336,6 +619,161 @@ func oauthSessionID(h http.Header, payload []byte) string {
 		}
 	}
 	return ""
+}
+
+type responsesSSERepairWriter struct {
+	dst    io.Writer
+	framer responsesSSERepairFramer
+}
+
+func newResponsesSSERepairWriter(dst io.Writer) *responsesSSERepairWriter {
+	return &responsesSSERepairWriter{dst: dst, framer: responsesSSERepairFramer{
+		outputItemsByIndex: map[int64][]byte{},
+	}}
+}
+
+func (w *responsesSSERepairWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if err := w.framer.WriteChunk(w.dst, p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (w *responsesSSERepairWriter) Flush() error {
+	return w.framer.Flush(w.dst)
+}
+
+type responsesSSERepairFramer struct {
+	pending             []byte
+	outputItemsByIndex  map[int64][]byte
+	outputItemsFallback [][]byte
+}
+
+func (f *responsesSSERepairFramer) WriteChunk(dst io.Writer, chunk []byte) error {
+	f.pending = append(f.pending, chunk...)
+	for {
+		frameEnd, ok := responsesSSEFrameEnd(f.pending)
+		if !ok {
+			return nil
+		}
+		frame := append([]byte(nil), f.pending[:frameEnd]...)
+		f.pending = f.pending[frameEnd:]
+		if err := writeAll(dst, f.repairFrame(frame)); err != nil {
+			return err
+		}
+	}
+}
+
+func (f *responsesSSERepairFramer) Flush(dst io.Writer) error {
+	if len(f.pending) == 0 {
+		return nil
+	}
+	frame := append([]byte(nil), f.pending...)
+	f.pending = nil
+	if !bytes.HasSuffix(frame, []byte("\n\n")) && !bytes.HasSuffix(frame, []byte("\r\n\r\n")) {
+		frame = append(frame, '\n', '\n')
+	}
+	return writeAll(dst, f.repairFrame(frame))
+}
+
+func (f *responsesSSERepairFramer) repairFrame(frame []byte) []byte {
+	data := responsesSSEData(frame)
+	if len(data) == 0 || bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		return frame
+	}
+	switch gjson.GetBytes(data, "type").String() {
+	case "response.output_item.done":
+		collectOAuthOutputItem(data, f.outputItemsByIndex, &f.outputItemsFallback)
+	case "response.completed":
+		patched := patchOAuthCompletedOutput(data, f.outputItemsByIndex, f.outputItemsFallback)
+		if !bytes.Equal(patched, data) {
+			return responsesSSEReplaceData(frame, patched)
+		}
+	}
+	return frame
+}
+
+func responsesSSEFrameEnd(data []byte) (int, bool) {
+	lf := bytes.Index(data, []byte("\n\n"))
+	crlf := bytes.Index(data, []byte("\r\n\r\n"))
+	switch {
+	case lf < 0 && crlf < 0:
+		return 0, false
+	case lf < 0:
+		return crlf + len("\r\n\r\n"), true
+	case crlf < 0:
+		return lf + len("\n\n"), true
+	case lf < crlf:
+		return lf + len("\n\n"), true
+	default:
+		return crlf + len("\r\n\r\n"), true
+	}
+}
+
+func responsesSSEData(frame []byte) []byte {
+	var parts [][]byte
+	for _, line := range bytes.Split(frame, []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
+		line = bytes.TrimSpace(line)
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		parts = append(parts, bytes.TrimSpace(line[len("data:"):]))
+	}
+	return bytes.Join(parts, []byte("\n"))
+}
+
+func responsesSSEEvent(frame []byte) string {
+	for _, line := range bytes.Split(frame, []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
+		line = bytes.TrimSpace(line)
+		if bytes.HasPrefix(line, []byte("event:")) {
+			return strings.TrimSpace(string(line[len("event:"):]))
+		}
+	}
+	return ""
+}
+
+func responsesSSEReplaceData(frame, data []byte) []byte {
+	var buf bytes.Buffer
+	if event := responsesSSEEvent(frame); event != "" {
+		buf.WriteString("event: ")
+		buf.WriteString(event)
+		buf.WriteByte('\n')
+	}
+	buf.WriteString("data: ")
+	buf.Write(data)
+	buf.WriteString("\n\n")
+	return buf.Bytes()
+}
+
+func oauthResponsesTerminal(ev stream.Event) bool {
+	if stream.ResponsesTerminal(ev) {
+		return true
+	}
+	switch gjson.Get(ev.Data, "type").String() {
+	case "response.completed", "response.failed", "response.incomplete", "error":
+		return true
+	default:
+		return false
+	}
+}
+
+func writeAll(dst io.Writer, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	n, err := dst.Write(data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func codexQuotaFromSSEBody(body []byte) *oauth.CodexQuota {

@@ -103,6 +103,28 @@ func (t *Token) Expiry() (time.Time, bool) {
 	return time.Time{}, false
 }
 
+func (t *Token) Path() string {
+	if t == nil {
+		return ""
+	}
+	return t.path
+}
+
+func (t *Token) AccountSelector() string {
+	if t == nil {
+		return ""
+	}
+	for _, v := range []string{t.Email, t.Subject, t.AccountID} {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	if strings.TrimSpace(t.path) != "" {
+		return strings.TrimSuffix(filepath.Base(t.path), filepath.Ext(t.path))
+	}
+	return ""
+}
+
 func (t *Token) NeedsRefresh(now time.Time) bool {
 	exp, ok := t.Expiry()
 	return ok && now.Add(refreshLead).After(exp)

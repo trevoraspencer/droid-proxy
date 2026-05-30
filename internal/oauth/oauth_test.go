@@ -136,6 +136,65 @@ func TestSaveAndLoadTokenPermissionsAndAccountSelection(t *testing.T) {
 	}
 }
 
+func TestTokenStoreDisableEnableAndLogout(t *testing.T) {
+	authDir := t.TempDir()
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})
+	path, err := manager.SaveToken(&Token{
+		Type:         string(ProviderXAI),
+		AccessToken:  "access-secret",
+		RefreshToken: "refresh-secret",
+		Email:        "user@example.com",
+		Subject:      "sub-123",
+		AccountID:    "acct_123",
+		Expired:      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.LoadToken(ProviderXAI, "acct_123"); err != nil {
+		t.Fatalf("expected account_id selector to match: %v", err)
+	}
+
+	disabled, err := manager.SetTokenDisabled(ProviderXAI, "user@example.com", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !disabled.Disabled {
+		t.Fatalf("token not disabled: %+v", disabled)
+	}
+	if _, err := manager.LoadToken(ProviderXAI, "user@example.com"); err == nil {
+		t.Fatal("disabled token should be filtered from LoadToken")
+	}
+	found, err := manager.FindToken(ProviderXAI, "sub-123", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found.Disabled {
+		t.Fatalf("FindToken(includeDisabled) should return disabled token: %+v", found)
+	}
+
+	enabled, err := manager.SetTokenDisabled(ProviderXAI, filepath.Base(path), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled.Disabled {
+		t.Fatalf("token not enabled: %+v", enabled)
+	}
+	if _, err := manager.LoadToken(ProviderXAI, "user@example.com"); err != nil {
+		t.Fatalf("enabled token should load: %v", err)
+	}
+	deletedPath, err := manager.DeleteToken(ProviderXAI, "acct_123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deletedPath != path {
+		t.Fatalf("deleted path=%q want %q", deletedPath, path)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("token file should be deleted, stat err=%v", err)
+	}
+}
+
 func TestRefreshCodexSavesRefreshedToken(t *testing.T) {
 	authDir := t.TempDir()
 	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})

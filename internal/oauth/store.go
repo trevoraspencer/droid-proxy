@@ -30,6 +30,55 @@ func (m *Manager) LoadToken(provider config.OAuthProvider, account string) (*Tok
 	return nil, fmt.Errorf("no %s OAuth accounts found; run droid-proxy auth %s", provider, provider)
 }
 
+func (m *Manager) FindToken(provider config.OAuthProvider, account string, includeDisabled bool) (*Token, error) {
+	if !provider.IsValid() {
+		return nil, fmt.Errorf("unsupported oauth provider %q", provider)
+	}
+	if strings.TrimSpace(account) == "" {
+		return nil, fmt.Errorf("%s OAuth account selector is required", provider)
+	}
+	tokens, err := m.LoadTokens(provider)
+	if err != nil {
+		return nil, err
+	}
+	for _, token := range tokens {
+		if !includeDisabled && token.Disabled {
+			continue
+		}
+		if token.MatchesAccount(account) {
+			return token, nil
+		}
+	}
+	return nil, fmt.Errorf("no %s OAuth account %q found", provider, account)
+}
+
+func (m *Manager) SetTokenDisabled(provider config.OAuthProvider, account string, disabled bool) (*Token, error) {
+	token, err := m.FindToken(provider, account, true)
+	if err != nil {
+		return nil, err
+	}
+	token.Disabled = disabled
+	if _, err := m.SaveToken(token); err != nil {
+		return nil, err
+	}
+	return token, nil
+}
+
+func (m *Manager) DeleteToken(provider config.OAuthProvider, account string) (string, error) {
+	token, err := m.FindToken(provider, account, true)
+	if err != nil {
+		return "", err
+	}
+	path := token.Path()
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("%s OAuth account %q has no token path", provider, account)
+	}
+	if err := os.Remove(path); err != nil {
+		return "", fmt.Errorf("delete auth token: %w", err)
+	}
+	return path, nil
+}
+
 func (m *Manager) LoadTokens(provider config.OAuthProvider) ([]*Token, error) {
 	dir, err := m.AuthDir()
 	if err != nil {

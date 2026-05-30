@@ -304,6 +304,143 @@ func TestResponses_OAuthXAIStreamingForwardsSSEAndConversationID(t *testing.T) {
 	}
 }
 
+func TestResponses_OAuthXAISanitizesPayloadForAgentCompatibility(t *testing.T) {
+	var captured map[string]any
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("captured request JSON: %v body=%s", err, body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(w, `event: response.completed`)
+		_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[]}}`)
+		_, _ = fmt.Fprintln(w)
+	}, nil)
+
+	body := `{
+		"model":"droid-oauth",
+		"input":[{"role":"user","content":"hi"},{"type":"reasoning","encrypted_content":"ciphertext"}],
+		"stream":false,
+		"service_tier":"auto",
+		"previous_response_id":"resp_old",
+		"prompt_cache_retention":"24h",
+		"safety_identifier":"user-1",
+		"stream_options":{"include_usage":true},
+		"reasoning":{"effort":"high"},
+		"include":["output_text"],
+		"tools":[
+			{"type":"namespace","tools":[
+				{"type":"function","name":"lookup","parameters":{"type":"object","properties":{"mode":{"type":"string","format":"uri","pattern":"^ok$","enum":["ok","bad/value"]},"empty":{"type":"string","enum":["bad/value"]}}}},
+				{"type":"tool_search","name":"tool_search"},
+				{"type":"image_generation","name":"image_generation"},
+				{"type":"custom","name":"custom_tool","input_schema":{"type":"object","properties":{"url":{"type":"string","format":"uri"}}}},
+				{"type":"custom","name":"apply_patch","input_schema":{"type":"object"}}
+			]},
+			{"type":"web_search_preview","search_context_size":"high","user_location":{"type":"approximate"}}
+		]
+	}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	req.Header.Set("X-Session-ID", "session-123")
+	api.engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	for _, field := range []string{"service_tier", "previous_response_id", "prompt_cache_retention", "safety_identifier", "stream_options"} {
+		if _, exists := captured[field]; exists {
+			t.Fatalf("%s should be removed: %#v", field, captured)
+		}
+	}
+	if captured["prompt_cache_key"] != "session-123" {
+		t.Fatalf("prompt_cache_key not set from session header: %#v", captured)
+	}
+	if !containsString(captured["include"], "reasoning.encrypted_content") {
+		t.Fatalf("encrypted reasoning include missing: %#v", captured["include"])
+	}
+	tools, ok := captured["tools"].([]any)
+	if !ok || len(tools) != 3 {
+		t.Fatalf("expected flattened supported tools only, got %#v", captured["tools"])
+	}
+	lookup := findCapturedTool(t, tools, "lookup")
+	mode := lookup["parameters"].(map[string]any)["properties"].(map[string]any)["mode"].(map[string]any)
+	if _, exists := mode["format"]; exists {
+		t.Fatalf("format should be stripped from schema: %#v", mode)
+	}
+	if _, exists := mode["pattern"]; exists {
+		t.Fatalf("pattern should be stripped from schema: %#v", mode)
+	}
+	if enum, ok := mode["enum"].([]any); !ok || len(enum) != 1 || enum[0] != "ok" {
+		t.Fatalf("slash enum values should be removed, got %#v", mode["enum"])
+	}
+	empty := lookup["parameters"].(map[string]any)["properties"].(map[string]any)["empty"].(map[string]any)
+	if _, exists := empty["enum"]; exists {
+		t.Fatalf("empty enum should be removed: %#v", empty)
+	}
+	custom := findCapturedTool(t, tools, "custom_tool")
+	if custom["type"] != "function" {
+		t.Fatalf("custom tool should be converted to function: %#v", custom)
+	}
+	customURL := custom["parameters"].(map[string]any)["properties"].(map[string]any)["url"].(map[string]any)
+	if _, exists := customURL["format"]; exists {
+		t.Fatalf("custom tool schema format should be stripped: %#v", customURL)
+	}
+	webSearch := findCapturedToolByType(t, tools, "web_search_preview")
+	if _, exists := webSearch["search_context_size"]; exists {
+		t.Fatalf("web search search_context_size should be stripped: %#v", webSearch)
+	}
+	if _, exists := webSearch["user_location"]; exists {
+		t.Fatalf("web search user_location should be stripped: %#v", webSearch)
+	}
+}
+
+func TestResponses_OAuthXAISSERepairPatchesSplitCompletedOutputAndDone(t *testing.T) {
+	var buf strings.Builder
+	framer := responsesSSERepairFramer{outputItemsByIndex: map[int64][]byte{}}
+	for _, chunk := range []string{
+		"event: response.output_item.done\n",
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","content":[{"type":"output_text","text":"hi"}]}}` + "\n\n",
+		"event: response.completed\n" + `data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]`,
+		`}}` + "\n\n",
+		"data: [DONE]\n\n",
+	} {
+		if err := framer.WriteChunk(&buf, []byte(chunk)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := framer.Flush(&buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"output":[{"type":"message","id":"msg_1"`) {
+		t.Fatalf("completed output was not patched from tracked items: %s", out)
+	}
+	if !strings.Contains(out, "data: [DONE]") {
+		t.Fatalf("[DONE] frame should be preserved: %s", out)
+	}
+}
+
+func TestResponses_OAuthXAIStreamingSurfacesProviderErrorFrame(t *testing.T) {
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		_, _ = w.Write([]byte(`data: {"type":"error","error":{"message":"Grok subscription tier required","code":"forbidden"}}` + "\n\n"))
+		flusher.Flush()
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	api.engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Grok subscription tier required") {
+		t.Fatalf("provider error message was not preserved: %s", w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "upstream stream ended before terminal marker") {
+		t.Fatalf("provider error frame should be terminal, got truncation frame: %s", w.Body.String())
+	}
+}
+
 func TestResponses_OAuthUpstreamErrorMapping(t *testing.T) {
 	api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -320,4 +457,41 @@ func TestResponses_OAuthUpstreamErrorMapping(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "rate_limit_exceeded") {
 		t.Fatalf("expected upstream error body preserved, got %s", w.Body.String())
 	}
+}
+
+func findCapturedTool(t *testing.T, tools []any, name string) map[string]any {
+	t.Helper()
+	for _, raw := range tools {
+		tool, ok := raw.(map[string]any)
+		if ok && tool["name"] == name {
+			return tool
+		}
+	}
+	t.Fatalf("tool %q not found in %#v", name, tools)
+	return nil
+}
+
+func findCapturedToolByType(t *testing.T, tools []any, typ string) map[string]any {
+	t.Helper()
+	for _, raw := range tools {
+		tool, ok := raw.(map[string]any)
+		if ok && tool["type"] == typ {
+			return tool
+		}
+	}
+	t.Fatalf("tool type %q not found in %#v", typ, tools)
+	return nil
+}
+
+func containsString(value any, want string) bool {
+	values, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, v := range values {
+		if s, ok := v.(string); ok && s == want {
+			return true
+		}
+	}
+	return false
 }
