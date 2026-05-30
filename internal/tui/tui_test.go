@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"droid-proxy/internal/config"
+	"droid-proxy/internal/factory"
 )
 
 func TestDefaultAlias(t *testing.T) {
@@ -100,7 +101,7 @@ func TestModelRouteSummaryShowsActualProvider(t *testing.T) {
 		FactoryProvider:  config.FactoryProviderOpenAI,
 		UpstreamProtocol: config.UpstreamXAIResponses,
 	})
-	want = "xAI Grok Build OAuth · xai-responses"
+	want = "xAI OAuth · xai-responses"
 	if got != want {
 		t.Fatalf("oauth route summary = %q, want %q", got, want)
 	}
@@ -171,7 +172,7 @@ func TestBuildModelFromFormKnownAuth(t *testing.T) {
 
 func TestBuildModelFromFormOAuth(t *testing.T) {
 	m := newFormModel(t, providerChoice{kind: pkOAuth, oauth: config.OAuthProviderXAI, label: "xAI"}, map[string]string{
-		"upstream_model": "grok-4",
+		"upstream_model": "grok-4.3",
 		"alias":          "grok",
 		"oauth_account":  "me@example.com",
 	})
@@ -190,6 +191,62 @@ func TestBuildModelFromFormOAuth(t *testing.T) {
 	}
 	if built.OAuthAccount != "me@example.com" {
 		t.Errorf("OAuthAccount = %q", built.OAuthAccount)
+	}
+	if built.Capabilities.FactoryReasoning != config.FactoryReasoningPassthrough {
+		t.Errorf("FactoryReasoning = %q, want passthrough", built.Capabilities.FactoryReasoning)
+	}
+}
+
+func TestXAIOAuthPresets(t *testing.T) {
+	items := xaiOAuthPickItems()
+	if len(items) != 3 || items[0] != manualEntryLabel || items[1] != "Grok Build 0.1" || items[2] != "Grok 4.3" {
+		t.Fatalf("xaiOAuthPickItems = %#v", items)
+	}
+
+	build, ok := xaiOAuthPresetByLabel("Grok Build 0.1")
+	if !ok {
+		t.Fatal("missing Grok Build preset")
+	}
+	m := newFormModel(t, providerChoice{kind: pkOAuth, oauth: config.OAuthProviderXAI, label: "xAI OAuth"}, nil)
+	m.applyOAuthPreset(build)
+	built, err := m.buildModelFromForm()
+	if err != nil {
+		t.Fatalf("build Grok Build preset: %v", err)
+	}
+	if built.Alias != "grok-build-0.1" || built.UpstreamModel != "grok-build-0.1" || built.DisplayName != "Grok Build 0.1 (xAI OAuth)" {
+		t.Fatalf("bad Grok Build preset model: %#v", built)
+	}
+	if built.MaxContextTokens != 256000 {
+		t.Fatalf("Grok Build context = %d", built.MaxContextTokens)
+	}
+	if built.MaxOutputTokens != factory.DefaultMaxOutputTokens {
+		t.Fatalf("Grok Build max output = %d", built.MaxOutputTokens)
+	}
+	if built.Capabilities.FactoryReasoning != config.FactoryReasoningDrop {
+		t.Fatalf("Grok Build factory_reasoning = %q", built.Capabilities.FactoryReasoning)
+	}
+
+	grok43, ok := xaiOAuthPresetByLabel("Grok 4.3")
+	if !ok {
+		t.Fatal("missing Grok 4.3 preset")
+	}
+	m = newFormModel(t, providerChoice{kind: pkOAuth, oauth: config.OAuthProviderXAI, label: "xAI OAuth"}, nil)
+	m.applyOAuthPreset(grok43)
+	built, err = m.buildModelFromForm()
+	if err != nil {
+		t.Fatalf("build Grok 4.3 preset: %v", err)
+	}
+	if built.Alias != "grok-4.3" || built.UpstreamModel != "grok-4.3" || built.DisplayName != "Grok 4.3 (xAI OAuth)" {
+		t.Fatalf("bad Grok 4.3 preset model: %#v", built)
+	}
+	if built.MaxContextTokens != 1000000 {
+		t.Fatalf("Grok 4.3 context = %d", built.MaxContextTokens)
+	}
+	if built.MaxOutputTokens != factory.DefaultMaxOutputTokens {
+		t.Fatalf("Grok 4.3 max output = %d", built.MaxOutputTokens)
+	}
+	if built.Capabilities.FactoryReasoning != config.FactoryReasoningPassthrough {
+		t.Fatalf("Grok 4.3 factory_reasoning = %q", built.Capabilities.FactoryReasoning)
 	}
 }
 

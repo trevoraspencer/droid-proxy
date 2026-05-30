@@ -14,7 +14,7 @@ import (
 	"droid-proxy/internal/config"
 )
 
-const defaultMaxOutputTokens = 8192
+const DefaultMaxOutputTokens = 128000
 
 // DefaultSettingsPath returns ~/.factory/settings.json.
 func DefaultSettingsPath() string {
@@ -38,7 +38,7 @@ type Entry struct {
 func EntryFromModel(m *config.Model, baseURL, apiKey string) Entry {
 	maxOut := m.MaxOutputTokens
 	if maxOut <= 0 {
-		maxOut = defaultMaxOutputTokens
+		maxOut = DefaultMaxOutputTokens
 	}
 	display := m.DisplayName
 	if strings.TrimSpace(display) == "" {

@@ -6,7 +6,7 @@ providers:
 | Provider | Command | Factory mode | Upstream protocol |
 |----------|---------|--------------|-------------------|
 | Codex / ChatGPT | `auth codex` | `openai` | `codex-responses` |
-| xAI Grok Build | `auth xai` | `openai` | `xai-responses` |
+| xAI | `auth xai` | `openai` | `xai-responses` |
 
 OAuth models do not use API keys in your environment. Tokens are stored locally
 and refreshed automatically.
@@ -14,12 +14,12 @@ and refreshed automatically.
 Full example pages:
 
 - [Codex / ChatGPT OAuth](examples/codex-oauth.md)
-- [xAI Grok Build OAuth](examples/xai-oauth.md)
+- [xAI OAuth](examples/xai-oauth.md)
 
 ## Prerequisites
 
 - **Codex:** ChatGPT account with Codex access (typically ChatGPT Plus or Pro).
-- **xAI:** xAI Grok Build subscription.
+- **xAI:** subscription access for the xAI OAuth model you configure.
 - A working `config.yaml` with OAuth callback settings (defaults in
   `config.example.yaml` are usually fine).
 - Port available for the local callback server:
@@ -71,7 +71,7 @@ models:
     upstream_model: gpt-5.2-codex
 ```
 
-### xAI Grok Build
+### xAI
 
 ```yaml
 models:
@@ -81,9 +81,26 @@ models:
     upstream_protocol: xai-responses
     oauth_provider: xai
     upstream_model: grok-build-0.1
+    max_context_tokens: 256000
+    capabilities:
+      factory_reasoning: drop
+
+  - alias: grok-4.3
+    display_name: "Grok 4.3 (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    upstream_model: grok-4.3
+    max_context_tokens: 1000000
+    capabilities:
+      factory_reasoning: passthrough
 ```
 
-Replace `upstream_model` with the model ID your account supports.
+`grok-build-0.1` is the Grok Build coding model. `grok-4.3` is broader xAI
+OAuth model support and is not described as Grok Build CLI parity. See xAI's
+docs for [Grok Build 0.1](https://docs.x.ai/developers/models/grok-build-0.1),
+[Grok 4.3](https://docs.x.ai/developers/models/grok-4.3), and
+[reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning).
 
 ## Step 3: Configure Factory Droid
 
@@ -98,7 +115,7 @@ Use `provider: "openai"` and point `baseUrl` at the proxy:
       "provider": "openai",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxOutputTokens": 8192
+      "maxOutputTokens": 128000
     }
   ]
 }
@@ -255,13 +272,27 @@ Codex clients, including `x-codex-installation-id`, `x-client-request-id`,
 window identifiers are merged into `client_metadata` without overwriting caller
 provided metadata keys.
 
+The proxy also applies small Codex compatibility fixes automatically:
+
+- Rewrites the Factory-facing model alias to `upstream_model`.
+- Forces `store: false` and adds default Codex instructions only when the
+  caller did not provide instructions.
+- Preserves Factory's `reasoning` object, so the reasoning level selected in
+  Droid can flow through on the same custom model.
+- Drops `max_output_tokens`, which Factory may send from custom-model settings
+  but the Codex OAuth endpoint rejects.
+
 ## xAI request handling
 
-For xAI Grok Build OAuth requests, the proxy adjusts the outbound `/v1/responses`
-payload so it stays compatible with the Grok agent endpoint. These changes are
-applied automatically — you do not configure them:
+For xAI OAuth requests, the proxy adjusts the outbound `/v1/responses` payload
+so it stays compatible with xAI's Responses endpoint. These changes are applied
+automatically:
 
 - Drops `service_tier` (not accepted on the OAuth endpoint).
+- Drops Factory's top-level `reasoning` object when
+  `capabilities.factory_reasoning: drop` is set or implied.
+- Preserves Factory's top-level `reasoning` object when
+  `capabilities.factory_reasoning: passthrough` is set, as with `grok-4.3`.
 - Sets `prompt_cache_key` from the downstream session header (`X-Session-ID`,
   `Session_id`, or `X-Client-Request-Id`) when the caller did not provide one.
 - Normalizes `tools` for agent compatibility: flattens namespace/grouped tools,
@@ -275,6 +306,21 @@ applied automatically — you do not configure them:
 For streamed responses the proxy also repairs `response.completed` events whose
 `output` arrives empty or split, reconstructing it from the preceding
 `response.output_item.done` events so Droid receives a complete final message.
+
+## Reasoning and fast mode
+
+Use Factory Droid's reasoning selector when the upstream supports it. Codex
+OAuth accepts the top-level `reasoning` object, so one custom model can cover
+multiple reasoning levels. xAI OAuth is model-specific: `grok-build-0.1`
+currently rejects that top-level effort parameter, so configure
+`capabilities.factory_reasoning: drop`; `grok-4.3` supports configurable
+reasoning, so configure `capabilities.factory_reasoning: passthrough`.
+Encrypted reasoning round-trip fields are still preserved where needed.
+
+Use a separate alias for provider fast/speed modes once the provider-specific
+request field is verified. For example, keep `gpt-5.5-chatgpt` and
+`gpt-5.5-chatgpt-fast` as separate custom models, with the fast alias carrying
+only the additional `extra_args` needed by that upstream.
 
 ## Verify
 

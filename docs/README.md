@@ -27,7 +27,7 @@ Guides for running `droid-proxy` with [Factory Droid](https://factory.ai).
 | [CONFIG.md](CONFIG.md) | Full YAML schema |
 | [FACTORY.md](FACTORY.md) | `~/.factory/settings.json` integration |
 | [PROVIDERS.md](PROVIDERS.md) | Provider matrix, tiers, OAuth summary |
-| [OAUTH.md](OAUTH.md) | Codex/ChatGPT and xAI Grok Build OAuth walkthrough |
+| [OAUTH.md](OAUTH.md) | Codex/ChatGPT and xAI OAuth walkthrough |
 | [SMOKE.md](SMOKE.md) | Verify your setup with curl |
 
 ## Provider examples
@@ -48,7 +48,7 @@ Each guide includes `config.yaml`, Factory settings, run commands, and a curl ch
 | Ollama (local) | [examples/local-ollama.md](examples/local-ollama.md) | T2 |
 | vLLM (local) | [examples/local-vllm.md](examples/local-vllm.md) | T2 |
 | Codex/ChatGPT OAuth | [examples/codex-oauth.md](examples/codex-oauth.md) | T1 OAuth |
-| xAI Grok Build OAuth | [examples/xai-oauth.md](examples/xai-oauth.md) | T1 OAuth |
+| xAI OAuth | [examples/xai-oauth.md](examples/xai-oauth.md) | T1 OAuth |
 
 Factory settings snippets: [`factory-settings/`](factory-settings/).
 

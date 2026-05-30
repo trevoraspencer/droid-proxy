@@ -38,7 +38,7 @@ models:
     upstream_protocol: openai-chat
     known_auth: deepseek
     upstream_model: deepseek-v4-flash
-    max_output_tokens: 8192
+    max_output_tokens: 128000
     max_context_tokens: 64000
     capabilities:
       reasoning: deepseek
@@ -58,7 +58,7 @@ See [PROVIDERS.md](../PROVIDERS.md) for tier details.
       "provider": "generic-chat-completion-api",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxOutputTokens": 8192
+      "maxOutputTokens": 128000
     }
   ]
 }

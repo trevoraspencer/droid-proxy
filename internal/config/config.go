@@ -73,6 +73,21 @@ func (m ReasoningMode) IsValid() bool {
 	return false
 }
 
+type FactoryReasoningMode string
+
+const (
+	FactoryReasoningDrop        FactoryReasoningMode = "drop"
+	FactoryReasoningPassthrough FactoryReasoningMode = "passthrough"
+)
+
+func (m FactoryReasoningMode) IsValid() bool {
+	switch m {
+	case FactoryReasoningDrop, FactoryReasoningPassthrough:
+		return true
+	}
+	return false
+}
+
 type Config struct {
 	Listen         Listen         `yaml:"listen"`
 	Server         Server         `yaml:"server"`
@@ -154,14 +169,15 @@ type Model struct {
 }
 
 type Capabilities struct {
-	Streaming        *bool         `yaml:"streaming"`
-	Tools            *bool         `yaml:"tools"`
-	ToolResultSafe   *bool         `yaml:"tool_result_safe"`
-	Images           *bool         `yaml:"images"`
-	JSONMode         *bool         `yaml:"json_mode"`
-	StructuredOutput *bool         `yaml:"structured_output"`
-	Reasoning        ReasoningMode `yaml:"reasoning"`
-	PromptCaching    *bool         `yaml:"prompt_caching"`
+	Streaming        *bool                `yaml:"streaming"`
+	Tools            *bool                `yaml:"tools"`
+	ToolResultSafe   *bool                `yaml:"tool_result_safe"`
+	Images           *bool                `yaml:"images"`
+	JSONMode         *bool                `yaml:"json_mode"`
+	StructuredOutput *bool                `yaml:"structured_output"`
+	Reasoning        ReasoningMode        `yaml:"reasoning"`
+	FactoryReasoning FactoryReasoningMode `yaml:"factory_reasoning"`
+	PromptCaching    *bool                `yaml:"prompt_caching"`
 }
 
 func boolPtr(b bool) *bool { return &b }
@@ -178,10 +194,14 @@ func (m *Model) ResolvedCapabilities() ResolvedCapabilities {
 		JSONMode:         true,
 		StructuredOutput: false,
 		Reasoning:        c.Reasoning,
+		FactoryReasoning: defaultFactoryReasoning(m.UpstreamProtocol),
 		PromptCaching:    false,
 	}
 	if r.Reasoning == "" {
 		r.Reasoning = ReasoningNone
+	}
+	if c.FactoryReasoning != "" {
+		r.FactoryReasoning = c.FactoryReasoning
 	}
 	if c.Streaming != nil {
 		r.Streaming = *c.Streaming
@@ -209,14 +229,15 @@ func (m *Model) ResolvedCapabilities() ResolvedCapabilities {
 
 // ResolvedCapabilities is the fully-resolved capability set with all defaults applied.
 type ResolvedCapabilities struct {
-	Streaming        bool          `json:"streaming"`
-	Tools            bool          `json:"tools"`
-	ToolResultSafe   bool          `json:"tool_result_safe"`
-	Images           bool          `json:"images"`
-	JSONMode         bool          `json:"json_mode"`
-	StructuredOutput bool          `json:"structured_output"`
-	Reasoning        ReasoningMode `json:"reasoning"`
-	PromptCaching    bool          `json:"prompt_caching"`
+	Streaming        bool                 `json:"streaming"`
+	Tools            bool                 `json:"tools"`
+	ToolResultSafe   bool                 `json:"tool_result_safe"`
+	Images           bool                 `json:"images"`
+	JSONMode         bool                 `json:"json_mode"`
+	StructuredOutput bool                 `json:"structured_output"`
+	Reasoning        ReasoningMode        `json:"reasoning"`
+	FactoryReasoning FactoryReasoningMode `json:"factory_reasoning"`
+	PromptCaching    bool                 `json:"prompt_caching"`
 }
 
 // AgentReady reports whether a model is safe for agentic tool-using workflows.
@@ -232,6 +253,13 @@ func (m *Model) AgentReady() bool {
 		return false
 	}
 	return m.ResolvedCapabilities().AgentReady()
+}
+
+func defaultFactoryReasoning(up UpstreamProtocol) FactoryReasoningMode {
+	if up == UpstreamXAIResponses {
+		return FactoryReasoningDrop
+	}
+	return FactoryReasoningPassthrough
 }
 
 func supportsAgentWorkflow(fp FactoryProvider, up UpstreamProtocol) bool {
@@ -288,6 +316,9 @@ func (m *Model) Validate() error {
 	}
 	if m.Capabilities.Reasoning != "" && !m.Capabilities.Reasoning.IsValid() {
 		return fmt.Errorf("model %q: invalid capabilities.reasoning %q (must be one of: none, deepseek, anthropic-thinking)", m.Alias, m.Capabilities.Reasoning)
+	}
+	if m.Capabilities.FactoryReasoning != "" && !m.Capabilities.FactoryReasoning.IsValid() {
+		return fmt.Errorf("model %q: invalid capabilities.factory_reasoning %q (must be one of: drop, passthrough)", m.Alias, m.Capabilities.FactoryReasoning)
 	}
 	if err := validateBaseURL(m); err != nil {
 		return err

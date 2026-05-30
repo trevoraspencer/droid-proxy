@@ -36,7 +36,7 @@ models:
     upstream_protocol: openai-chat
     known_auth: zai-main-api
     upstream_model: glm-5.1
-    max_output_tokens: 8192
+    max_output_tokens: 131072
 ```
 
 ### GLM Coding Plan
@@ -49,7 +49,7 @@ models:
     upstream_protocol: openai-chat
     known_auth: zai-coding-api
     upstream_model: glm-5.1
-    max_output_tokens: 8192
+    max_output_tokens: 131072
 ```
 
 ### Legacy alias
@@ -80,7 +80,7 @@ models:
       "provider": "generic-chat-completion-api",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxOutputTokens": 8192
+      "maxOutputTokens": 131072
     }
   ]
 }

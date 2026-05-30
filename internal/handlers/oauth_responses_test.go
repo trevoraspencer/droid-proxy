@@ -107,7 +107,7 @@ func TestResponses_OAuthCodexNonStreamReconstructsResponsesAndPreservesTools(t *
 		}
 	}, nil)
 
-	body := `{"model":"droid-oauth","input":[{"role":"user","content":"hi"},{"type":"function_call_output","call_id":"call_1","output":"tool ok"}],"stream":false,"previous_response_id":"resp_old","stream_options":{"include_usage":true}}`
+	body := `{"model":"droid-oauth","input":[{"role":"user","content":"hi"},{"type":"function_call_output","call_id":"call_1","output":"tool ok"}],"stream":false,"previous_response_id":"resp_old","stream_options":{"include_usage":true},"max_output_tokens":16,"reasoning":{"effort":"low"}}`
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
 	api.engine.ServeHTTP(w, req)
@@ -144,6 +144,13 @@ func TestResponses_OAuthCodexNonStreamReconstructsResponsesAndPreservesTools(t *
 	}
 	if _, exists := captured["stream_options"]; exists {
 		t.Fatalf("stream_options should be removed for oauth upstream: %#v", captured)
+	}
+	if _, exists := captured["max_output_tokens"]; exists {
+		t.Fatalf("max_output_tokens should be removed for codex oauth upstream: %#v", captured)
+	}
+	reasoning, ok := captured["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "low" {
+		t.Fatalf("reasoning should be passed through for codex oauth upstream: %#v", captured)
 	}
 	if !strings.Contains(fmt.Sprint(captured["input"]), "function_call_output") {
 		t.Fatalf("function_call_output was not preserved: %#v", captured["input"])
@@ -346,7 +353,7 @@ func TestResponses_OAuthXAISanitizesPayloadForAgentCompatibility(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
-	for _, field := range []string{"service_tier", "previous_response_id", "prompt_cache_retention", "safety_identifier", "stream_options"} {
+	for _, field := range []string{"service_tier", "reasoning", "previous_response_id", "prompt_cache_retention", "safety_identifier", "stream_options"} {
 		if _, exists := captured[field]; exists {
 			t.Fatalf("%s should be removed: %#v", field, captured)
 		}
@@ -390,6 +397,45 @@ func TestResponses_OAuthXAISanitizesPayloadForAgentCompatibility(t *testing.T) {
 	}
 	if _, exists := webSearch["user_location"]; exists {
 		t.Fatalf("web search user_location should be stripped: %#v", webSearch)
+	}
+}
+
+func TestResponses_OAuthXAIPassesFactoryReasoningWhenConfigured(t *testing.T) {
+	var captured map[string]any
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("captured request JSON: %v body=%s", err, body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(w, `event: response.completed`)
+		_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[]}}`)
+		_, _ = fmt.Fprintln(w)
+	}, nil)
+	api.api.Cfg.Models[0].Capabilities.FactoryReasoning = config.FactoryReasoningPassthrough
+
+	body := `{
+		"model":"droid-oauth",
+		"input":"hi",
+		"stream":false,
+		"service_tier":"auto",
+		"reasoning":{"effort":"high"}
+	}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	api.engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if _, exists := captured["service_tier"]; exists {
+		t.Fatalf("service_tier should still be removed: %#v", captured)
+	}
+	reasoning, ok := captured["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "high" {
+		t.Fatalf("reasoning should be passed through when configured: %#v", captured)
+	}
+	if !containsString(captured["include"], "reasoning.encrypted_content") {
+		t.Fatalf("encrypted reasoning include missing: %#v", captured["include"])
 	}
 }
 

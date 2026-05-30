@@ -240,6 +240,7 @@ func TestDocsConfigDocumentsCapsAndServerTimeouts(t *testing.T) {
 		"shutdown_timeout",
 		"response_body_max_bytes",
 		"error_body_max_bytes",
+		"factory_reasoning",
 		"0s` opts out",
 		"`0` opts out",
 	} {
@@ -299,6 +300,7 @@ func TestDocsCLIDocumented(t *testing.T) {
 		"start",
 		"stop",
 		"status",
+		"restart",
 		"logs",
 		"service install",
 		"service uninstall",

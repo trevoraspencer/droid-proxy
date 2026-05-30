@@ -14,7 +14,8 @@ FACTORY_DIR="$LIVE_E2E_RUN_DIR/factory"
 typeset -a rows
 rows=(
   "ChatGPT/Codex OAuth|gpt-5.2-codex"
-  "xAI Grok Build OAuth|grok-build-0.1"
+  "xAI OAuth (Grok Build)|grok-build-0.1"
+  "xAI Grok 4.3 OAuth|grok-4.3"
   "Z.AI GLM coding|glm-5.1"
   "Xiaomi MiMo|mimo-v2.5-pro"
   "Fireworks|${FIREWORKS_MODEL}"

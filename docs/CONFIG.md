@@ -150,8 +150,8 @@ permissions and token values are never logged by the auth commands.
 | `auth_dir` | string | `~/.droid-proxy/auth` | Directory for saved OAuth token JSON files. |
 | `codex_callback_host` | string | `localhost` | Loopback host for Codex/ChatGPT OAuth login. |
 | `codex_callback_port` | int | `1455` | Loopback port for Codex/ChatGPT OAuth login. |
-| `xai_callback_host` | string | `127.0.0.1` | Loopback host for xAI Grok Build OAuth login. |
-| `xai_callback_port` | int | `56121` | Loopback port for xAI Grok Build OAuth login. |
+| `xai_callback_host` | string | `127.0.0.1` | Loopback host for xAI OAuth login. |
+| `xai_callback_port` | int | `56121` | Loopback port for xAI OAuth login. |
 
 Authenticate before starting the proxy:
 
@@ -177,7 +177,7 @@ specific upstream configuration.
 | `known_auth` | string |  | Shortcut: looks up base_url, env var, auth header, version headers from a built-in registry. See PROVIDERS.md. Use `zai-coding-api` for Z.AI GLM Coding Plan keys and `zai-main-api` for normal Z.AI API keys. |
 | `upstream_model` | string |  | Forwarded `model` field on the upstream call. If unset, the alias itself is sent. |
 | `api_key_env` | string |  | Env var holding the API key. If unset, the env var declared by `known_auth` is used. Not required for OAuth upstreams. |
-| `max_output_tokens` | int |  | Informational; surfaced in `/v1/models`. |
+| `max_output_tokens` | int |  | Factory-facing output-token setting; surfaced in `/v1/models`. When omitted, Factory sync writes `128000`. Set an explicit lower value for upstreams with lower hard caps. |
 | `max_context_tokens` | int |  | Informational; surfaced in `/v1/models`. |
 | `extra_headers` | map[string]string |  | Headers appended to every upstream request for this model. |
 | `extra_args` | map[string]any |  | Top-level fields merged into every outgoing request body (e.g. `temperature`, `stream_options`). |
@@ -196,6 +196,7 @@ All optional. Defaults are reasonable for most OpenAI-compatible providers.
 | `json_mode` | bool | `true` | Whether `response_format: {"type":"json_object"}` works. |
 | `structured_output` | bool | `false` | Whether JSON-Schema-constrained output (`response_format: {"type":"json_schema"}`) works. |
 | `reasoning` | enum | `none` | `none`, `deepseek`, or `anthropic-thinking`. `deepseek` enables reasoning replay. |
+| `factory_reasoning` | enum | protocol default | `drop` removes Factory's top-level `reasoning` object before upstream; `passthrough` preserves it. Defaults to `drop` for `xai-responses` and `passthrough` elsewhere. |
 | `prompt_caching` | bool | `false` | Whether the model supports cache_control breakpoints. |
 
 A model is reported as `agent_ready: true` in `/v1/models` iff
@@ -267,6 +268,19 @@ models:
     upstream_protocol: xai-responses
     oauth_provider: xai
     upstream_model: grok-build-0.1
+    max_context_tokens: 256000
+    capabilities:
+      factory_reasoning: drop
+
+  - alias: grok-4.3
+    display_name: "Grok 4.3 (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    upstream_model: grok-4.3
+    max_context_tokens: 1000000
+    capabilities:
+      factory_reasoning: passthrough
 ```
 
 ## Environment variables

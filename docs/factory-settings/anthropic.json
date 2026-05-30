@@ -6,7 +6,7 @@
       "provider": "anthropic",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "not-required-when-client-auth-disabled",
-      "maxOutputTokens": 8192
+      "maxOutputTokens": 128000
     }
   ]
 }

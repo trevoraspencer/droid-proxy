@@ -113,6 +113,6 @@ run_missing_oauth_token_check() {
 run_invalid_alias_check
 run_missing_env_check
 run_missing_oauth_token_check "codex" "gpt-5.2-codex" "ChatGPT/Codex OAuth"
-run_missing_oauth_token_check "xai" "grok-build-0.1" "xAI Grok Build OAuth"
+run_missing_oauth_token_check "xai" "grok-build-0.1" "xAI OAuth"
 
 info "Error and redaction checks complete. Results: $LIVE_E2E_RESULTS_NDJSON"

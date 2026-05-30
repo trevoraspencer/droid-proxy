@@ -29,8 +29,7 @@ This release ships:
 - ✅ **T1 / T2** paths: `generic-chat-completion-api` over `openai-chat`,
   `openai` over `openai-responses`, `anthropic` over `anthropic-messages`.
 - ✅ **OAuth Responses paths**: `openai` over `codex-responses` for
-  Codex/ChatGPT OAuth and `openai` over `xai-responses` for xAI Grok Build
-  OAuth.
+  Codex/ChatGPT OAuth and `openai` over `xai-responses` for xAI OAuth.
 - ✅ **DeepSeek reasoning replay** (T1) for upstreams identified as DeepSeek or
   any model with `capabilities.reasoning: deepseek`, including Xiaomi MiMo.
 - ✅ **T3** translation paths: `openai` over `openai-chat` and `anthropic`
@@ -103,6 +102,11 @@ Run `droid-proxy auth codex --config config.yaml` or
 | `xai` | `xai-responses` | `https://api.x.ai/v1` | `127.0.0.1:56121/callback` | [xai-oauth.md](examples/xai-oauth.md) |
 
 See [OAUTH.md](OAUTH.md) for the full OAuth walkthrough.
+
+For xAI OAuth, use `grok-build-0.1` for Grok Build coding behavior and
+`grok-4.3` for the broader xAI reasoning model. Configure
+`capabilities.factory_reasoning: drop` for Grok Build and
+`capabilities.factory_reasoning: passthrough` for Grok 4.3.
 
 OAuth token files live under `oauth.auth_dir` (default
 `~/.droid-proxy/auth`) with `0700` directory and `0600` file permissions. If a

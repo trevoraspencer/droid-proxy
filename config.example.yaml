@@ -59,7 +59,7 @@ models:
     upstream_protocol: openai-chat
     known_auth: deepseek
     upstream_model: deepseek-v4-flash
-    max_output_tokens: 8192
+    max_output_tokens: 128000
     max_context_tokens: 64000
     capabilities:
       reasoning: deepseek
@@ -113,7 +113,7 @@ models:
   #   oauth_provider: codex
   #   upstream_model: gpt-5.2-codex
 
-  # Example: xAI Grok Build OAuth via Factory's OpenAI mode.
+  # Example: xAI OAuth via Factory's OpenAI mode.
   # Run first: droid-proxy auth xai --config config.yaml
   # - alias: grok-build-0.1
   #   display_name: "Grok Build 0.1 (xAI OAuth)"
@@ -121,6 +121,18 @@ models:
   #   upstream_protocol: xai-responses
   #   oauth_provider: xai
   #   upstream_model: grok-build-0.1
+  #   max_context_tokens: 256000
+  #   capabilities:
+  #     factory_reasoning: drop
+  # - alias: grok-4.3
+  #   display_name: "Grok 4.3 (xAI OAuth)"
+  #   factory_provider: openai
+  #   upstream_protocol: xai-responses
+  #   oauth_provider: xai
+  #   upstream_model: grok-4.3
+  #   max_context_tokens: 1000000
+  #   capabilities:
+  #     factory_reasoning: passthrough
 
   # Example: xAI API key (generic chat mode). See docs/examples/xai.md.
   # - alias: grok-3

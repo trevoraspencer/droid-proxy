@@ -85,6 +85,6 @@ run_refresh_check() {
 }
 
 run_refresh_check "codex" "gpt-5.2-codex" "ChatGPT/Codex OAuth"
-run_refresh_check "xai" "grok-build-0.1" "xAI Grok Build OAuth"
+run_refresh_check "xai" "grok-build-0.1" "xAI OAuth"
 
 info "OAuth refresh checks complete. Results: $LIVE_E2E_RESULTS_NDJSON"

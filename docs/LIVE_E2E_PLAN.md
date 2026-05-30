@@ -11,7 +11,7 @@ Target date: 2026-05-29
 
 - Prove live end-to-end behavior for:
   - ChatGPT/Codex OAuth through `codex-responses`
-  - xAI Grok Build OAuth through `xai-responses`
+  - xAI OAuth through `xai-responses` (`grok-build-0.1` and `grok-4.3`)
   - Z.AI GLM coding plan through OpenAI-compatible chat
   - Fireworks through OpenAI-compatible chat
   - DeepSeek through OpenAI-compatible chat with reasoning replay
@@ -39,7 +39,8 @@ the exact model IDs in the provider dashboard or docs and adjust `config.local.y
 - OpenAI Codex/ChatGPT sign-in: https://help.openai.com/en/articles/11381614-api-codex-cli-and-sign-in-with-chatgpt
 - OpenAI Codex CLI overview: https://help.openai.com/en/articles/11096431
 - xAI Grok Build model docs: https://docs.x.ai/developers/models/grok-build-0.1
-- xAI Grok Build API announcement: https://x.ai/news/grok-build-0-1
+- xAI Grok 4.3 model docs: https://docs.x.ai/developers/models/grok-4.3
+- xAI reasoning docs: https://docs.x.ai/developers/model-capabilities/text/reasoning
 - Z.AI GLM-4.6 docs: https://docs.z.ai/guides/llm/glm-4.6
 - Z.AI chat completions API: https://docs.z.ai/api-reference/llm/chat-completion
 - Z.AI GLM Coding Plan quick start: https://docs.z.ai/devpack/quick-start
@@ -218,7 +219,7 @@ models:
     upstream_protocol: codex-responses
     oauth_provider: codex
     upstream_model: "${CODEX_UPSTREAM_MODEL:-gpt-5.2-codex}"
-    max_output_tokens: 16384
+    max_output_tokens: 128000
     max_context_tokens: 400000
 
   - alias: grok-build-0.1
@@ -227,8 +228,21 @@ models:
     upstream_protocol: xai-responses
     oauth_provider: xai
     upstream_model: "${XAI_GROK_BUILD_MODEL:-grok-build-0.1}"
-    max_output_tokens: 32768
+    max_output_tokens: 128000
     max_context_tokens: 256000
+    capabilities:
+      factory_reasoning: drop
+
+  - alias: grok-4.3
+    display_name: "Grok 4.3 (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    upstream_model: "${XAI_GROK_MODEL:-grok-4.3}"
+    max_output_tokens: 128000
+    max_context_tokens: 1000000
+    capabilities:
+      factory_reasoning: passthrough
 
   - alias: glm-5.1
     display_name: "GLM 5.1 (Z.AI GLM Coding Plan)"
@@ -236,7 +250,7 @@ models:
     upstream_protocol: openai-chat
     known_auth: zai-coding-api
     upstream_model: "${ZAI_GLM_MODEL:-glm-5.1}"
-    max_output_tokens: 32768
+    max_output_tokens: 131072
     max_context_tokens: 200000
     extra_args:
       thinking:
@@ -260,7 +274,7 @@ models:
     upstream_protocol: openai-chat
     known_auth: fireworks
     upstream_model: "${FIREWORKS_MODEL}"
-    max_output_tokens: 8192
+    max_output_tokens: 128000
     max_context_tokens: 131072
 
   - alias: deepseek-v4-flash
@@ -269,7 +283,7 @@ models:
     upstream_protocol: openai-chat
     known_auth: deepseek
     upstream_model: "${DEEPSEEK_MODEL:-deepseek-v4-flash}"
-    max_output_tokens: 8192
+    max_output_tokens: 128000
     max_context_tokens: 64000
     capabilities:
       reasoning: deepseek
@@ -287,6 +301,7 @@ export FIREWORKS_MODEL=accounts/fireworks/models/deepseek-v4-pro
 # Optional overrides after checking current account/model availability.
 export CODEX_UPSTREAM_MODEL=gpt-5.2-codex
 export XAI_GROK_BUILD_MODEL=grok-build-0.1
+export XAI_GROK_MODEL=grok-4.3
 export ZAI_GLM_MODEL=glm-5.1
 export MIMO_KNOWN_AUTH=mimo
 export MIMO_MODEL=mimo-v2.5-pro
@@ -446,12 +461,12 @@ Fireworks-specific checks:
 - If the first selected model fails tools, retest with a known tool-capable
   Fireworks model before marking the provider broken.
 
-### 3.2 OAuth Responses providers: Codex and Grok Build
+### 3.2 OAuth Responses providers: Codex and xAI
 
 Run each OAuth alias through the Responses contract:
 
 ```bash
-for model in gpt-5.2-codex grok-build-0.1; do
+for model in gpt-5.2-codex grok-build-0.1 grok-4.3; do
   curl -sS http://127.0.0.1:8787/v1/responses \
     -H 'Content-Type: application/json' \
     -d "{
@@ -539,6 +554,7 @@ Update `~/.factory/settings.json` so every tested model points at
 | --- | --- | --- |
 | `gpt-5.2-codex` | `openai` | `http://127.0.0.1:8787` |
 | `grok-build-0.1` | `openai` | `http://127.0.0.1:8787` |
+| `grok-4.3` | `openai` | `http://127.0.0.1:8787` |
 | `glm-5.1` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
 | `mimo-v2.5-pro` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
 | `${FIREWORKS_MODEL}` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
@@ -575,7 +591,8 @@ Fill this table during the live run.
 | Provider | Alias | Direct non-stream | Direct stream | Tool call | Tool result | OAuth refresh | Factory text | Factory file task | Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ChatGPT/Codex OAuth | `gpt-5.2-codex` |  |  |  |  |  |  |  |  |  |
-| xAI Grok Build OAuth | `grok-build-0.1` |  |  |  |  |  |  |  |  |  |
+| xAI OAuth (Grok Build) | `grok-build-0.1` |  |  |  |  |  |  |  |  |  |
+| xAI Grok 4.3 OAuth | `grok-4.3` |  |  |  |  |  |  |  |  |  |
 | Z.AI GLM coding | `glm-5.1` |  |  |  |  | N/A |  |  |  |  |
 | Xiaomi MiMo | `mimo-v2.5-pro` |  |  |  |  | N/A |  |  |  |  |
 | Fireworks | `${FIREWORKS_MODEL}` |  |  |  |  | N/A |  |  |  |  |

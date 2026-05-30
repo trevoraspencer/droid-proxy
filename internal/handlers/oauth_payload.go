@@ -30,7 +30,7 @@ func prepareOAuthResponsesPayload(body []byte, m *config.Model, stream bool, dow
 		}
 	}
 	if m.OAuthProvider == config.OAuthProviderXAI {
-		out = prepareXAIResponsesPayload(out, downstream)
+		out = prepareXAIResponsesPayload(out, m, downstream)
 	}
 	return out
 }
@@ -43,6 +43,11 @@ func prepareCodexResponsesPayload(body []byte) []byte {
 		}
 	}
 	if next, err := sjson.SetBytes(out, "store", false); err == nil {
+		out = next
+	}
+	// The Codex OAuth endpoint currently rejects this public Responses field.
+	// Factory may send it from custom-model settings, so drop it for Codex only.
+	if next, err := sjson.DeleteBytes(out, "max_output_tokens"); err == nil {
 		out = next
 	}
 	input := gjson.GetBytes(out, "input")
@@ -58,10 +63,18 @@ func prepareCodexResponsesPayload(body []byte) []byte {
 	return out
 }
 
-func prepareXAIResponsesPayload(body []byte, downstream http.Header) []byte {
+func prepareXAIResponsesPayload(body []byte, m *config.Model, downstream http.Header) []byte {
 	out := body
+	reasoningPresent := xaiReasoningPresentBytes(out)
 	if next, err := sjson.DeleteBytes(out, "service_tier"); err == nil {
 		out = next
+	}
+	if m == nil || m.ResolvedCapabilities().FactoryReasoning != config.FactoryReasoningPassthrough {
+		// Grok Build rejects Factory's top-level reasoning effort parameter,
+		// while encrypted reasoning input items still need include handling.
+		if next, err := sjson.DeleteBytes(out, "reasoning"); err == nil {
+			out = next
+		}
 	}
 	if strings.TrimSpace(gjson.GetBytes(out, "prompt_cache_key").String()) == "" {
 		if sessionID := xaiSessionID(downstream); sessionID != "" {
@@ -73,7 +86,7 @@ func prepareXAIResponsesPayload(body []byte, downstream http.Header) []byte {
 	if tools := gjson.GetBytes(out, "tools"); tools.IsArray() {
 		out = setXAITools(out, tools.Raw)
 	}
-	if xaiReasoningPresentBytes(out) {
+	if reasoningPresent {
 		out = setXAIInclude(out)
 	}
 	return out

@@ -219,6 +219,13 @@ models:
     upstream_protocol: xai-responses
     oauth_provider: xai
     upstream_model: grok-build-0.1
+  - alias: grok-4.3
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    upstream_model: grok-4.3
+    capabilities:
+      factory_reasoning: passthrough
 `
 	cfg, err := parse([]byte(in))
 	if err != nil {
@@ -228,6 +235,15 @@ models:
 		if m.BaseURL != "" || m.APIKeyEnv != "" || !m.AgentReady() {
 			t.Fatalf("oauth model hydrated unexpected fields or not agent ready: %+v", m)
 		}
+	}
+	if got := cfg.Models[0].ResolvedCapabilities().FactoryReasoning; got != FactoryReasoningPassthrough {
+		t.Fatalf("codex factory_reasoning default = %q, want passthrough", got)
+	}
+	if got := cfg.Models[1].ResolvedCapabilities().FactoryReasoning; got != FactoryReasoningDrop {
+		t.Fatalf("xai factory_reasoning default = %q, want drop", got)
+	}
+	if got := cfg.Models[2].ResolvedCapabilities().FactoryReasoning; got != FactoryReasoningPassthrough {
+		t.Fatalf("explicit xai factory_reasoning = %q, want passthrough", got)
 	}
 }
 
@@ -773,6 +789,7 @@ func TestLoad_InvalidSchemaEnumsAndValues(t *testing.T) {
 		{"negative upstream response cap", "upstream: {response_body_max_bytes: -1}\n", "upstream.response_body_max_bytes"},
 		{"negative upstream error cap", "upstream: {error_body_max_bytes: -1}\n", "upstream.error_body_max_bytes"},
 		{"invalid reasoning enum", "models:\n  - alias: m\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    base_url: http://127.0.0.1:1/v1\n    capabilities: {reasoning: magic}\n", "capabilities.reasoning"},
+		{"invalid factory reasoning enum", "models:\n  - alias: m\n    factory_provider: openai\n    upstream_protocol: xai-responses\n    oauth_provider: xai\n    capabilities: {factory_reasoning: magic}\n", "capabilities.factory_reasoning"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

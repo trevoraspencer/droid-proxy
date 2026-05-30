@@ -40,6 +40,9 @@ func main() {
 		case "status":
 			runStatus()
 			return
+		case "restart":
+			runRestart(os.Args[2:])
+			return
 		case "service":
 			runService(os.Args[2:])
 			return
@@ -78,8 +81,11 @@ func runServerCLI(args []string) {
 }
 
 func runServer(configPath, envFile string, foreground bool) error {
-	wd, _ := os.Getwd()
-	if err := daemon.LoadLayeredEnv(wd, envFile); err != nil {
+	workDir := configWorkDir(configPath)
+	if envFile == "" {
+		envFile = defaultEnvFileForConfig(configPath)
+	}
+	if err := daemon.LoadLayeredEnv(workDir, envFile); err != nil {
 		return fmt.Errorf("env file: %w", err)
 	}
 	cfg, err := config.Load(configPath)
@@ -93,7 +99,7 @@ func runServer(configPath, envFile string, foreground bool) error {
 			return err
 		}
 		defer daemon.RemovePID()
-		meta, err := runtimeMetadata(configPath, envFile, wd)
+		meta, err := runtimeMetadata(configPath, envFile, workDir)
 		if err != nil {
 			daemon.RemovePID()
 			return err
@@ -130,9 +136,7 @@ func runStart(args []string) {
 	_ = fs.Parse(args)
 
 	if *envFile == "" {
-		if wd, err := os.Getwd(); err == nil {
-			*envFile = daemon.ResolveEnvFile(wd)
-		}
+		*envFile = defaultEnvFileForConfig(*configPath)
 	}
 
 	if *foreground {
@@ -155,8 +159,11 @@ func runStart(args []string) {
 		os.Exit(1)
 	}
 
-	child := exec.Command(exe, "start", "--foreground", "--config", *configPath, "--env-file", *envFile)
+	configArg := absPathOrOriginal(*configPath)
+	envArg := absPathOrOriginal(*envFile)
+	child := exec.Command(exe, "start", "--foreground", "--config", configArg, "--env-file", envArg)
 	child.Env = os.Environ()
+	child.Dir = configWorkDir(configArg)
 	child.Stdout = nil
 	child.Stderr = nil
 	child.Stdin = nil
@@ -200,6 +207,55 @@ func runStatus() {
 		return
 	}
 	fmt.Println("droid-proxy is not running.")
+}
+
+func runRestart(args []string) {
+	fs := flag.NewFlagSet("restart", flag.ExitOnError)
+	configPath := fs.String("config", defaultConfigPath(), "path to config.yaml")
+	envFile := fs.String("env-file", "", "optional env file with API keys (export KEY=...)")
+	_ = fs.Parse(args)
+
+	if *envFile == "" {
+		*envFile = defaultEnvFileForConfig(*configPath)
+	}
+	if err := restartProxy(*configPath, *envFile); err != nil {
+		fmt.Fprintf(os.Stderr, "droid-proxy restart error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("droid-proxy restarted.")
+}
+
+func restartProxy(configPath, envFile string) error {
+	if daemon.LaunchdInstalled() {
+		return daemon.RestartLaunchd()
+	}
+	if _, running := daemon.IsRunning(); running {
+		if err := daemon.StopWithTimeout(10 * time.Second); err != nil {
+			return fmt.Errorf("stopping running proxy: %w", err)
+		}
+	}
+	daemon.CleanStalePID()
+	exe, err := currentExecutablePath()
+	if err != nil {
+		return err
+	}
+	configArg := absPathOrOriginal(configPath)
+	envArg := absPathOrOriginal(envFile)
+	args := []string{"start", "--config", configArg}
+	if envFile != "" {
+		args = append(args, "--env-file", envArg)
+	}
+	cmd := exec.Command(exe, args...)
+	cmd.Dir = configWorkDir(configArg)
+	cmd.Env = os.Environ()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if trimmed := strings.TrimSpace(string(out)); trimmed != "" {
+			return fmt.Errorf("starting proxy: %s: %w", trimmed, err)
+		}
+		return fmt.Errorf("starting proxy: %w", err)
+	}
+	return nil
 }
 
 func runService(args []string) {
@@ -307,6 +363,40 @@ func resolveDefaultConfigPath(currentDir, executable string, meta daemon.Runtime
 func regularFileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+func configWorkDir(configPath string) string {
+	if strings.TrimSpace(configPath) == "" {
+		if wd, err := os.Getwd(); err == nil {
+			return wd
+		}
+		return "."
+	}
+	absConfig, err := filepath.Abs(configPath)
+	if err != nil {
+		if wd, wdErr := os.Getwd(); wdErr == nil {
+			return wd
+		}
+		return "."
+	}
+	return filepath.Dir(absConfig)
+}
+
+func defaultEnvFileForConfig(configPath string) string {
+	if envFile := daemon.RuntimeEnvFileForConfig(configPath); envFile != "" {
+		return envFile
+	}
+	return daemon.ResolveEnvFile(configWorkDir(configPath))
+}
+
+func absPathOrOriginal(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return path
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }
 
 func runConfig(args []string) {

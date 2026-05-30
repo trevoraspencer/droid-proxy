@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"droid-proxy/internal/config"
+	"droid-proxy/internal/factory"
 	"droid-proxy/internal/secrets"
 )
 
@@ -50,6 +51,15 @@ type providerChoice struct {
 	ka    config.KnownAuth
 	oauth config.OAuthProvider
 	label string
+}
+
+type oauthModelPreset struct {
+	Label            string
+	Alias            string
+	DisplayName      string
+	UpstreamModel    string
+	MaxOutputTokens  int
+	MaxContextTokens int
 }
 
 type formField struct {
@@ -370,6 +380,12 @@ func (m model) afterProviderChosen() (tea.Model, tea.Cmd) {
 		m.beginKeyInput(m.sel.ka.APIKeyEnv, false)
 		return m, nil
 	case pkOAuth:
+		if m.sel.oauth == config.OAuthProviderXAI {
+			m.pickCursor = 0
+			m.pickItems = xaiOAuthPickItems()
+			m.screen = screenPickModel
+			return m, nil
+		}
 		m.buildForm()
 		m.screen = screenForm
 		return m, textinput.Blink
@@ -464,6 +480,13 @@ func (m model) keyPickModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			chosen = m.pickItems[m.pickCursor]
 		}
 		m.buildForm()
+		if m.sel.kind == pkOAuth && m.sel.oauth == config.OAuthProviderXAI {
+			if preset, ok := xaiOAuthPresetByLabel(chosen); ok {
+				m.applyOAuthPreset(preset)
+			}
+			m.screen = screenForm
+			return m, textinput.Blink
+		}
 		m.setFormValue("upstream_model", chosen)
 		if chosen != "" {
 			m.setFormValue("alias", defaultAlias(chosen))
@@ -494,10 +517,23 @@ func (m *model) buildForm() {
 	}
 	add("alias", "Alias (Droid model id)", "my-model", false)
 	add("display_name", "Display name", "My Model", true)
-	add("max_output_tokens", "Max output tokens (blank = default)", "8192", true)
+	add("max_output_tokens", "Max output tokens (blank = default)", strconv.Itoa(factory.DefaultMaxOutputTokens), true)
+	add("max_context_tokens", "Max context tokens (blank = default)", "256000", true)
 	fields[0].input.Focus()
 	m.form = fields
 	m.formCursor = 0
+}
+
+func (m *model) applyOAuthPreset(p oauthModelPreset) {
+	m.setFormValue("upstream_model", p.UpstreamModel)
+	m.setFormValue("alias", p.Alias)
+	m.setFormValue("display_name", p.DisplayName)
+	if p.MaxOutputTokens > 0 {
+		m.setFormValue("max_output_tokens", strconv.Itoa(p.MaxOutputTokens))
+	}
+	if p.MaxContextTokens > 0 {
+		m.setFormValue("max_context_tokens", strconv.Itoa(p.MaxContextTokens))
+	}
 }
 
 func (m *model) setFormValue(key, val string) {
@@ -597,6 +633,13 @@ func (m model) buildModelFromForm() (*config.Model, error) {
 		}
 		built.MaxOutputTokens = n
 	}
+	if mt := m.formValue("max_context_tokens"); mt != "" {
+		n, err := strconv.Atoi(mt)
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("max context tokens must be a non-negative integer")
+		}
+		built.MaxContextTokens = n
+	}
 	switch m.sel.kind {
 	case pkKnown:
 		built.KnownAuth = m.sel.ka.Name
@@ -620,6 +663,9 @@ func (m model) buildModelFromForm() (*config.Model, error) {
 		built.OAuthAccount = m.formValue("oauth_account")
 		built.FactoryProvider = config.FactoryProviderOpenAI
 		built.UpstreamProtocol = upstreamForOAuth(m.sel.oauth)
+		if mode := factoryReasoningForOAuthModel(m.sel.oauth, upstreamModel); mode != "" {
+			built.Capabilities.FactoryReasoning = mode
+		}
 	}
 	if strings.TrimSpace(built.DisplayName) == "" {
 		built.DisplayName = defaultDisplay(upstreamModel, m.sel.label)
@@ -758,10 +804,60 @@ func buildProviderChoices() []providerChoice {
 	}
 	out = append(out,
 		providerChoice{kind: pkOAuth, oauth: config.OAuthProviderCodex, label: "Codex / ChatGPT (OAuth)"},
-		providerChoice{kind: pkOAuth, oauth: config.OAuthProviderXAI, label: "xAI Grok Build (OAuth)"},
+		providerChoice{kind: pkOAuth, oauth: config.OAuthProviderXAI, label: "xAI OAuth"},
 		providerChoice{kind: pkCustom, label: "Custom OpenAI-compatible endpoint"},
 	)
 	return out
+}
+
+func xaiOAuthPresets() []oauthModelPreset {
+	return []oauthModelPreset{
+		{
+			Label:            "Grok Build 0.1",
+			Alias:            "grok-build-0.1",
+			DisplayName:      "Grok Build 0.1 (xAI OAuth)",
+			UpstreamModel:    "grok-build-0.1",
+			MaxOutputTokens:  factory.DefaultMaxOutputTokens,
+			MaxContextTokens: 256000,
+		},
+		{
+			Label:            "Grok 4.3",
+			Alias:            "grok-4.3",
+			DisplayName:      "Grok 4.3 (xAI OAuth)",
+			UpstreamModel:    "grok-4.3",
+			MaxOutputTokens:  factory.DefaultMaxOutputTokens,
+			MaxContextTokens: 1000000,
+		},
+	}
+}
+
+func xaiOAuthPickItems() []string {
+	presets := xaiOAuthPresets()
+	out := make([]string, 0, len(presets)+1)
+	out = append(out, manualEntryLabel)
+	for _, preset := range presets {
+		out = append(out, preset.Label)
+	}
+	return out
+}
+
+func xaiOAuthPresetByLabel(label string) (oauthModelPreset, bool) {
+	for _, preset := range xaiOAuthPresets() {
+		if preset.Label == label {
+			return preset, true
+		}
+	}
+	return oauthModelPreset{}, false
+}
+
+func factoryReasoningForOAuthModel(provider config.OAuthProvider, upstreamModel string) config.FactoryReasoningMode {
+	if provider != config.OAuthProviderXAI {
+		return ""
+	}
+	if strings.EqualFold(strings.TrimSpace(upstreamModel), "grok-4.3") {
+		return config.FactoryReasoningPassthrough
+	}
+	return config.FactoryReasoningDrop
 }
 
 func factoryProviderFor(up config.UpstreamProtocol) config.FactoryProvider {

@@ -242,6 +242,7 @@ type capsYAML struct {
 	JSONMode         *bool  `yaml:"json_mode,omitempty"`
 	StructuredOutput *bool  `yaml:"structured_output,omitempty"`
 	Reasoning        string `yaml:"reasoning,omitempty"`
+	FactoryReasoning string `yaml:"factory_reasoning,omitempty"`
 	PromptCaching    *bool  `yaml:"prompt_caching,omitempty"`
 }
 
@@ -291,6 +292,9 @@ func capsToYAML(c config.Capabilities) *capsYAML {
 	}
 	if c.Reasoning != "" && c.Reasoning != config.ReasoningNone {
 		out.Reasoning = string(c.Reasoning)
+	}
+	if c.FactoryReasoning != "" {
+		out.FactoryReasoning = string(c.FactoryReasoning)
 	}
 	if out == (capsYAML{}) {
 		return nil

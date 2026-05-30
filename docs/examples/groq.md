@@ -28,7 +28,7 @@ models:
     upstream_protocol: openai-chat
     known_auth: groq
     upstream_model: llama-3.3-70b-versatile
-    max_output_tokens: 8192
+    max_output_tokens: 128000
 ```
 
 ## ~/.factory/settings.json
@@ -42,7 +42,7 @@ models:
       "provider": "generic-chat-completion-api",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxOutputTokens": 8192
+      "maxOutputTokens": 128000
     }
   ]
 }

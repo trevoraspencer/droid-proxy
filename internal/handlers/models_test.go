@@ -73,6 +73,13 @@ func TestModels_PreservesOrder(t *testing.T) {
 			t.Errorf("expected key %s in entry %v", expected, resp.Data[0])
 		}
 	}
+	caps, ok := resp.Data[0]["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatalf("capabilities missing or wrong type: %#v", resp.Data[0]["capabilities"])
+	}
+	if caps["factory_reasoning"] != string(config.FactoryReasoningPassthrough) {
+		t.Fatalf("factory_reasoning = %#v, want passthrough", caps["factory_reasoning"])
+	}
 }
 
 func TestModels_AgentReadyFlag(t *testing.T) {

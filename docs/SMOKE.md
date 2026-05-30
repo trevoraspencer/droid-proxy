@@ -141,7 +141,7 @@ curl -sS http://127.0.0.1:8787/v1/responses \
   }' | jq '.output'
 ```
 
-xAI Grok Build example:
+xAI examples:
 
 ```bash
 curl -sS http://127.0.0.1:8787/v1/responses \
@@ -149,6 +149,16 @@ curl -sS http://127.0.0.1:8787/v1/responses \
   -d '{
     "model": "grok-build-0.1",
     "input": "hello"
+  }' | jq '.output'
+```
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/responses \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "grok-4.3",
+    "input": "hello",
+    "reasoning": {"effort": "low"}
   }' | jq '.output'
 ```
 

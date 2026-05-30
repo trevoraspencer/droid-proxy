@@ -9,7 +9,7 @@ things: the proxy's `config.yaml` (which upstream models exist) and Droid's
 | Droid `provider` | Proxy endpoint | When to use |
 |------------------|----------------|-------------|
 | `generic-chat-completion-api` | `POST /v1/chat/completions` | OpenAI-compatible chat APIs (DeepSeek, MiMo, Groq, local Ollama, etc.) |
-| `openai` | `POST /v1/responses` | OpenAI Responses API, Codex OAuth, xAI Grok OAuth |
+| `openai` | `POST /v1/responses` | OpenAI Responses API, Codex OAuth, xAI OAuth |
 | `anthropic` | `POST /v1/messages`, `POST /v1/messages/count_tokens` | Anthropic Messages API |
 
 The model alias in Factory settings must match the `alias` in `config.yaml`.
@@ -34,7 +34,7 @@ Each entry in `customModels` needs these fields (current Factory schema):
 | `provider` | One of `generic-chat-completion-api`, `openai`, or `anthropic` |
 | `baseUrl` | Proxy URL, typically `http://127.0.0.1:8787` |
 | `apiKey` | Placeholder when proxy `client_auth` is off (see below) |
-| `maxOutputTokens` | Max tokens Droid may request |
+| `maxOutputTokens` | Max tokens Droid may request; Factory sync uses `128000` when `max_output_tokens` is omitted |
 
 Example:
 
@@ -47,7 +47,7 @@ Example:
       "provider": "generic-chat-completion-api",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxOutputTokens": 8192
+      "maxOutputTokens": 128000
     }
   ]
 }
@@ -59,7 +59,7 @@ Ready-to-paste snippets for common providers:
 - [OpenAI mode](factory-settings/openai.json)
 - [Anthropic mode](factory-settings/anthropic.json)
 - [Codex OAuth](factory-settings/codex-oauth.json)
-- [xAI Grok OAuth](factory-settings/xai-oauth.json)
+- [xAI OAuth](factory-settings/xai-oauth.json)
 
 Per-provider walkthroughs with full config blocks are in
 [examples/](examples/).

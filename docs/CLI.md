@@ -13,6 +13,7 @@ droid-proxy config [--config PATH]          # interactive dashboard (alias: onbo
 droid-proxy start   [--config PATH] [--env-file PATH] [--foreground]
 droid-proxy stop
 droid-proxy status
+droid-proxy restart [--config PATH] [--env-file PATH]
 droid-proxy logs    [-n LINES] [PATH]
 
 droid-proxy service install   [--config PATH]
@@ -61,7 +62,7 @@ the repo `.env.local` value wins.
 
 ## Config and env file resolution
 
-**Config path** (for `start`, `service install`, and `auth`):
+**Config path** (for `start`, `restart`, `service install`, and `auth`):
 
 1. `config.local.yaml` in the current directory (if it exists)
 2. `config.yaml` in the current directory (if it exists)
@@ -71,7 +72,7 @@ the repo `.env.local` value wins.
 
 Override with `--config /absolute/or/relative/path.yaml`.
 
-**Env file** (for `start`, `auth`, and launchd):
+**Env file** (for `start`, `restart`, `auth`, and launchd):
 
 API keys are loaded in layers, with later layers overriding earlier ones:
 
@@ -122,6 +123,7 @@ Keep the proxy running without an open terminal.
 ```bash
 ./droid-proxy start --config config.yaml
 ./droid-proxy status
+./droid-proxy restart
 ./droid-proxy stop
 ./droid-proxy logs
 ./droid-proxy logs -n 100
@@ -131,6 +133,7 @@ Keep the proxy running without an open terminal.
 |---------|-------------|
 | `start` | Detaches a child process, writes PID to `~/.droid-proxy/droid-proxy.pid` |
 | `status` | Prints running PID or "not running" |
+| `restart` | Restarts launchd when installed; otherwise stops and starts the background daemon |
 | `stop` | Sends SIGTERM; waits up to 10 seconds |
 | `logs` | Tails the last 40 lines of `~/.droid-proxy/stderr.log` (override path as optional arg) |
 
@@ -196,7 +199,7 @@ is set.
 
 ## OAuth login
 
-Browser PKCE login for Codex/ChatGPT and xAI Grok Build accounts.
+Browser PKCE login for Codex/ChatGPT and xAI accounts.
 
 ```bash
 ./droid-proxy auth codex --config config.yaml

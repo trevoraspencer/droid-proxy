@@ -3,7 +3,7 @@
 A localhost HTTP proxy that lets [Factory Droid](https://factory.ai) use any
 BYOK / custom model — Anthropic, OpenAI, DeepSeek, Xiaomi MiMo, xAI, Kimi, ZAI,
 Groq, Fireworks, local Ollama or vLLM, custom OpenAI-compatible endpoints,
-plus Codex/ChatGPT and xAI Grok Build OAuth — from a single Go binary.
+plus Codex/ChatGPT and xAI OAuth — from a single Go binary.
 
 - **Localhost-first.** Examples use `http://127.0.0.1:8787`. No tunneling
   required unless you specifically want remote access.
@@ -16,7 +16,7 @@ plus Codex/ChatGPT and xAI Grok Build OAuth — from a single Go binary.
   re-supplied on subsequent turns so multi-step tool conversations stay
   coherent.
 - **Focused OAuth.** Browser PKCE login is available for Codex/ChatGPT and xAI
-  Grok Build accounts, with tokens stored locally under `~/.droid-proxy/auth`.
+  accounts, with tokens stored locally under `~/.droid-proxy/auth`.
   Manage accounts with `auth status`, `auth enable`/`auth disable`, and
   `auth logout`, and check per-model OAuth health via `oauth_auth` in
   `/v1/models`.
@@ -58,7 +58,8 @@ droid-proxy status
 
 Replace `/path/to/droid-proxy` with the source checkout where you ran
 `go build`; for example, `/Users/trevor/code/droid-proxy`. After this, use
-`droid-proxy start`, `droid-proxy status`, `droid-proxy config`, and
+`droid-proxy start`, `droid-proxy status`, `droid-proxy restart`,
+`droid-proxy config`, and
 `droid-proxy update` from any working directory. The `~/.droid-proxy/` directory
 is only for runtime state, logs, saved auth tokens, and managed env files; it
 does not contain the executable. When there is no config file in the current
@@ -134,7 +135,7 @@ The manual, file-based flow is below.
          "provider": "generic-chat-completion-api",
          "baseUrl": "http://127.0.0.1:8787",
          "apiKey": "x",
-         "maxOutputTokens": 8192
+         "maxOutputTokens": 128000
        }
      ]
    }
@@ -177,7 +178,7 @@ Every supported provider with tier classification is in
 
 - **T1/T2 passthrough** for DeepSeek, MiMo, OpenAI Responses, Anthropic
   Messages, and OpenAI-compatible chat providers.
-- **OAuth Responses** for Codex/ChatGPT and xAI Grok Build
+- **OAuth Responses** for Codex/ChatGPT and xAI
   (`droid-proxy auth codex` / `auth xai`).
 - **T3 protocol translation** for OpenAI Responses-over-Chat and Anthropic
   Messages-over-Chat on OpenAI-compatible upstreams.
@@ -189,6 +190,44 @@ Example walkthroughs: [DeepSeek](docs/examples/deepseek.md),
 [Kimi](docs/examples/kimi.md), [Groq](docs/examples/groq.md),
 [Fireworks](docs/examples/fireworks.md), [Z.AI](docs/examples/zai.md),
 [Codex OAuth](docs/examples/codex-oauth.md), [xAI OAuth](docs/examples/xai-oauth.md).
+
+## Reasoning and fast-mode models
+
+Factory Droid should control per-request reasoning levels when the selected
+upstream supports that request field. For `codex-responses`, `droid-proxy`
+passes the request's `reasoning` object through to the Codex/ChatGPT upstream.
+For `xai-responses`, reasoning passthrough is model-specific:
+`grok-build-0.1` uses `capabilities.factory_reasoning: drop` because Grok Build
+currently rejects Factory's top-level effort, while `grok-4.3` uses
+`capabilities.factory_reasoning: passthrough`. For DeepSeek-style OpenAI Chat
+providers, `capabilities.reasoning: deepseek` enables reasoning replay across
+tool turns; it is separate from Factory's UI reasoning selector.
+Provider-specific details are documented in [`docs/OAUTH.md`](docs/OAUTH.md).
+
+Use separate aliases when a provider exposes a distinct fast/speed mode, so the
+Factory model picker feels native:
+
+```yaml
+models:
+  - alias: gpt-5.5-chatgpt
+    display_name: "GPT 5.5 (ChatGPT Pro)"
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: gpt-5.5
+
+  - alias: gpt-5.5-chatgpt-fast
+    display_name: "GPT 5.5 Fast Mode (ChatGPT Pro)"
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: gpt-5.5
+    # Add provider-specific extra_args here only after verifying the exact
+    # fast-mode field for this upstream.
+```
+
+After adding or syncing a model, restart the proxy (`r` in the TUI or
+`droid-proxy restart`) so the running daemon reloads `config.yaml`.
 
 ## Configuration
 
@@ -214,6 +253,11 @@ it manually, or use `${Y:-fallback}` in config. Keys load in layers: managed
 T3 translation rejects stateful or multimodal inputs that cannot be mapped
 safely to Chat Completions. Check `error.message`, remove the unsupported
 field, or use a native upstream protocol.
+
+**Factory shows a model, but the proxy says it is not configured**
+
+Factory settings were synced, but the running proxy has not reloaded the config
+yet. Press `r` in `droid-proxy config` or run `droid-proxy restart`, then retry.
 
 **Droid says model is offline**
 

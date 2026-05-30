@@ -32,7 +32,7 @@ models:
     upstream_protocol: codex-responses
     oauth_provider: codex
     upstream_model: gpt-5.2-codex
-    max_output_tokens: 8192
+    max_output_tokens: 128000
 ```
 
 Optional: pin a specific logged-in account:
@@ -52,7 +52,7 @@ Optional: pin a specific logged-in account:
       "provider": "openai",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxOutputTokens": 8192
+      "maxOutputTokens": 128000
     }
   ]
 }

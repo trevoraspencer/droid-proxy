@@ -7,9 +7,9 @@
 | **Tier** | T2 — OpenAI-compatible chat |
 | **Factory mode** | `generic-chat-completion-api` |
 | **Upstream protocol** | `openai-chat` |
-| **When to use** | Grok models via xAI's API key (not Grok Build OAuth) |
+| **When to use** | Grok models via xAI's API key (not xAI OAuth subscription access) |
 
-For subscription-based Grok Build access, see [xai-oauth.md](xai-oauth.md).
+For subscription-based xAI OAuth access, see [xai-oauth.md](xai-oauth.md).
 
 ## Prerequisites
 
@@ -30,7 +30,7 @@ models:
     upstream_protocol: openai-chat
     known_auth: xai
     upstream_model: grok-3
-    max_output_tokens: 8192
+    max_output_tokens: 128000
 ```
 
 ## ~/.factory/settings.json
@@ -44,7 +44,7 @@ models:
       "provider": "generic-chat-completion-api",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxOutputTokens": 8192
+      "maxOutputTokens": 128000
     }
   ]
 }

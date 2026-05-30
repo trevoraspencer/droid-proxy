@@ -127,13 +127,16 @@ func TestSaveBackupIsSingleRollingFile(t *testing.T) {
 }
 
 func TestEntryFromModelDefaults(t *testing.T) {
+	if DefaultMaxOutputTokens != 128000 {
+		t.Fatalf("DefaultMaxOutputTokens = %d, want 128000", DefaultMaxOutputTokens)
+	}
 	m := &config.Model{Alias: "no-display", FactoryProvider: config.FactoryProviderGeneric}
 	e := EntryFromModel(m, "http://127.0.0.1:8787", "")
 	if e.DisplayName != "no-display" {
 		t.Errorf("DisplayName = %q, want alias fallback", e.DisplayName)
 	}
-	if e.MaxOutputTokens != defaultMaxOutputTokens {
-		t.Errorf("MaxOutputTokens = %d, want default %d", e.MaxOutputTokens, defaultMaxOutputTokens)
+	if e.MaxOutputTokens != DefaultMaxOutputTokens {
+		t.Errorf("MaxOutputTokens = %d, want default %d", e.MaxOutputTokens, DefaultMaxOutputTokens)
 	}
 	if e.APIKey != "x" {
 		t.Errorf("APIKey = %q, want placeholder x", e.APIKey)

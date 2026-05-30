@@ -105,7 +105,7 @@ func modelProviderLabel(mod *config.Model) string {
 	case config.OAuthProviderCodex:
 		return "Codex / ChatGPT OAuth"
 	case config.OAuthProviderXAI:
-		return "xAI Grok Build OAuth"
+		return "xAI OAuth"
 	}
 	if mod.BaseURL != "" {
 		if u, err := url.Parse(mod.BaseURL); err == nil && u.Host != "" {
@@ -202,7 +202,7 @@ func (m model) viewForm() string {
 func (m model) viewOAuthProviders() string {
 	var b strings.Builder
 	b.WriteString(m.header("OAuth accounts — choose a provider"))
-	labels := []string{"Codex / ChatGPT", "xAI Grok Build"}
+	labels := []string{"Codex / ChatGPT", "xAI"}
 	for i, l := range labels {
 		cursor := "  "
 		if i == m.oauthCursor {

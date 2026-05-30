@@ -72,6 +72,7 @@ Optional model overrides, if your account exposes different current model IDs:
 ```bash
 export CODEX_UPSTREAM_MODEL="gpt-5.2-codex"
 export XAI_GROK_BUILD_MODEL="grok-build-0.1"
+export XAI_GROK_MODEL="grok-4.3"
 export ZAI_GLM_MODEL="glm-5.1"
 export DEEPSEEK_MODEL="deepseek-v4-flash"
 ```
@@ -103,7 +104,7 @@ Complete the browser login and consent flow. The callback uses:
 http://localhost:1455/auth/callback
 ```
 
-Run the browser PKCE login for xAI Grok Build:
+Run the browser PKCE login for xAI:
 
 ```bash
 scripts/live-e2e/auth-xai.sh
