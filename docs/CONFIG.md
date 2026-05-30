@@ -37,10 +37,10 @@ Keys are loaded in **layers**, with later layers overriding earlier ones. See
 |-------|--------|----------|
 | Base | `~/.droid-proxy/env` | Managed secrets file written by `droid-proxy config` (chmod 600). Always loaded. |
 | Override | `--env-file PATH` | Explicit path for foreground mode, `start`, and `service install`. |
-| Override (default) | Repo env file | When `--env-file` is omitted: `.env.live-e2e.local` (maintainer live validation only) or, otherwise, `.env.local` in the config directory. |
+| Override (default) | Repo env file | When `--env-file` is omitted: `.env.local` in the config directory, if present. |
 
 This means keys onboarded via `droid-proxy config` are available even when a
-repo `.env.local` also exists.
+repo `.env.local` also exists, while `.env.local` can override matching names.
 
 Env files support `KEY=value` or `export KEY=value` lines. Comments (`#`) and
 blank lines are ignored when loading. Missing files are skipped without error.

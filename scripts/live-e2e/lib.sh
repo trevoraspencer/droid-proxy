@@ -10,7 +10,12 @@ typeset -g LIVE_E2E_RUN_ID="${LIVE_E2E_RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 typeset -g LIVE_E2E_RUN_DIR="${LIVE_E2E_RUN_DIR:-$LIVE_E2E_BASE_DIR/$LIVE_E2E_RUN_ID}"
 typeset -g LIVE_E2E_RESULTS_NDJSON="${LIVE_E2E_RESULTS_NDJSON:-$LIVE_E2E_RUN_DIR/results.ndjson}"
 typeset -g LIVE_E2E_CONFIG="${LIVE_E2E_CONFIG:-$LIVE_E2E_REPO_ROOT/config.local.yaml}"
-typeset -g LIVE_E2E_ENV_FILE="${LIVE_E2E_ENV_FILE:-$LIVE_E2E_REPO_ROOT/.env.live-e2e.local}"
+if [[ -z "${LIVE_E2E_ENV_FILE:-}" ]]; then
+  print -u2 -r -- "[live-e2e] ERROR: LIVE_E2E_ENV_FILE is required."
+  print -u2 -r -- '[live-e2e] Example: export LIVE_E2E_ENV_FILE="$PWD/.factory/validation/live-e2e/secrets.env"'
+  exit 1
+fi
+typeset -g LIVE_E2E_ENV_FILE
 typeset -g LIVE_E2E_PROXY_PID_FILE="${LIVE_E2E_PROXY_PID_FILE:-$LIVE_E2E_RUN_DIR/proxy.pid}"
 typeset -g LIVE_E2E_PROXY_LOG="${LIVE_E2E_PROXY_LOG:-$LIVE_E2E_RUN_DIR/proxy.log}"
 typeset -g LIVE_E2E_CURRENT_RUN_ENV="${LIVE_E2E_CURRENT_RUN_ENV:-$LIVE_E2E_RUN_DIR/current-run.env}"

@@ -56,17 +56,19 @@ under [`scripts/live-e2e/`](../scripts/live-e2e/). Use this path when preparing
 the full live run:
 
 ```bash
+export LIVE_E2E_ENV_FILE="$PWD/.factory/validation/live-e2e/secrets.env"
 scripts/live-e2e/00-preflight.sh
 scripts/live-e2e/01-clean-old-proxies.sh
 scripts/live-e2e/02-generate-config.sh
 ```
 
-Then fill `.env.live-e2e.local` and complete both OAuth logins using
+Then fill the env file at `$LIVE_E2E_ENV_FILE` and complete both OAuth logins using
 [`docs/live-e2e/DONE.md`](live-e2e/DONE.md). The OAuth helpers load that env
 file before invoking `./droid-proxy auth`, so manual shell exports are not
 required. After that, run:
 
 ```bash
+export LIVE_E2E_ENV_FILE="$PWD/.factory/validation/live-e2e/secrets.env"
 scripts/live-e2e/run-all-after-secrets.sh
 ```
 
@@ -78,7 +80,7 @@ generates a Factory Droid manual evidence checklist.
 Generated local files are intentionally gitignored:
 
 - `config.local.yaml`
-- `.env.live-e2e.local`
+- `.factory/validation/live-e2e/secrets.env` (or your chosen `LIVE_E2E_ENV_FILE`)
 - `.factory/validation/live-e2e/<run-id>/`
 - OAuth tokens under `~/.droid-proxy/auth`
 
@@ -327,7 +329,7 @@ scripts/live-e2e/auth-codex.sh
 scripts/live-e2e/auth-xai.sh
 ```
 
-If invoking `./droid-proxy auth ...` directly, source `.env.live-e2e.local`
+If invoking `./droid-proxy auth ...` directly, source `$LIVE_E2E_ENV_FILE`
 first in that terminal so config validation can see the provider API key
 environment variables.
 

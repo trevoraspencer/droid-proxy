@@ -30,8 +30,8 @@ if ! assert_port_free 8787; then
   fail "port 8787 is already in use"
 fi
 
-info "Starting droid-proxy with $LIVE_E2E_CONFIG"
-nohup "$LIVE_E2E_REPO_ROOT/droid-proxy" --config "$LIVE_E2E_CONFIG" \
+info "Starting droid-proxy with $LIVE_E2E_CONFIG and $LIVE_E2E_ENV_FILE"
+nohup "$LIVE_E2E_REPO_ROOT/droid-proxy" --config "$LIVE_E2E_CONFIG" --env-file "$LIVE_E2E_ENV_FILE" \
   > "$LIVE_E2E_PROXY_LOG" 2>&1 < /dev/null &
 proxy_pid="$!"
 disown "$proxy_pid" 2>/dev/null || true

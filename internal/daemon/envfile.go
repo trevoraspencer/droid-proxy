@@ -70,10 +70,9 @@ func LoadEnvFile(path string) error {
 	return nil
 }
 
-// ResolveEnvFile picks the first existing env file for a config directory.
+// ResolveEnvFile picks the default repo env file for a config directory.
 func ResolveEnvFile(workDir string) string {
 	candidates := []string{
-		filepath.Join(workDir, ".env.live-e2e.local"),
 		filepath.Join(workDir, ".env.local"),
 		filepath.Join(StateDir(), "env"),
 	}

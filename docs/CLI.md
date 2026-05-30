@@ -52,7 +52,8 @@ It is a full-screen dashboard that, from one place:
 
 Keys onboarded here are written to `~/.droid-proxy/env`, which is always loaded
 when the proxy starts (see env file resolution below), so they are picked up
-even when a repo `.env.local` also exists.
+even when a repo `.env.local` also exists. If both files define the same name,
+the repo `.env.local` value wins.
 
 ## Config and env file resolution
 
@@ -69,13 +70,13 @@ API keys are loaded in layers, with later layers overriding earlier ones:
 
 1. `~/.droid-proxy/env` — the managed secrets file written by
    `droid-proxy config` (always loaded as the base layer).
-2. The repo env file: `.env.live-e2e.local` (maintainer live validation only)
-   or, otherwise, `.env.local` in the config directory — or the `--env-file`
+2. The repo env file `.env.local` in the config directory, or the `--env-file`
    path when given explicitly.
 
 This means keys onboarded via `droid-proxy config` are available even when a
-repo `.env.local` also exists. Env files use `KEY=value` or `export KEY=value`
-lines; `#` comments and blank lines are ignored.
+repo `.env.local` also exists, while `.env.local` can override matching names.
+Env files use `KEY=value` or `export KEY=value` lines; `#` comments and blank
+lines are ignored.
 
 Recommended end-user setup:
 

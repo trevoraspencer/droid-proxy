@@ -331,6 +331,11 @@ func TestDocsConfigDocumentsLayeredEnv(t *testing.T) {
 	if strings.Contains(body, "pick the first existing file") {
 		t.Fatal("docs/CONFIG.md still describes stale first-existing env resolution")
 	}
+	for _, rel := range []string{"docs/CONFIG.md", "docs/CLI.md"} {
+		if strings.Contains(readRepoRel(t, rel), ".env.live-e2e.local") {
+			t.Fatalf("%s must not document .env.live-e2e.local as a runtime env default", rel)
+		}
+	}
 }
 
 func TestDocsFactoryDocumentsClientAuthSync(t *testing.T) {

@@ -17,6 +17,7 @@ backup_file "$LIVE_E2E_CONFIG"
 cp "$CONFIG_TEMPLATE" "$LIVE_E2E_CONFIG"
 info "Wrote $LIVE_E2E_CONFIG from $CONFIG_TEMPLATE"
 
+mkdir -p "${LIVE_E2E_ENV_FILE:h}"
 if [[ ! -f "$LIVE_E2E_ENV_FILE" ]]; then
   cp "$ENV_TEMPLATE" "$LIVE_E2E_ENV_FILE"
   info "Created $LIVE_E2E_ENV_FILE from $ENV_TEMPLATE"

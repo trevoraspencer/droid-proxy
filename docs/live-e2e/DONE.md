@@ -6,6 +6,7 @@ the final live end-to-end test.
 ## 1. Generate local files
 
 ```bash
+export LIVE_E2E_ENV_FILE="$PWD/.factory/validation/live-e2e/secrets.env"
 scripts/live-e2e/00-preflight.sh
 scripts/live-e2e/01-clean-old-proxies.sh
 scripts/live-e2e/02-generate-config.sh
@@ -14,13 +15,14 @@ scripts/live-e2e/02-generate-config.sh
 This creates:
 
 - `config.local.yaml`
-- `.env.live-e2e.local`
+- the env file at `$LIVE_E2E_ENV_FILE`
 - `.factory/validation/live-e2e/<run-id>/`
 - `.factory/validation/live-e2e/<run-id>/current-run.env`
 
 ## 2. Add provider API keys
 
-Edit `.env.live-e2e.local` and fill these names with real local values:
+Edit the file at `$LIVE_E2E_ENV_FILE` and fill these names with real local
+values:
 
 ```bash
 export DEEPSEEK_API_KEY="..."
@@ -89,7 +91,7 @@ from this repo with `config.local.yaml`.
 ## 4. Complete OAuth
 
 Run the browser PKCE login for Codex/ChatGPT. Use the helper so the same
-`.env.live-e2e.local` values are loaded before config validation:
+`LIVE_E2E_ENV_FILE` values are loaded before config validation:
 
 ```bash
 scripts/live-e2e/auth-codex.sh
@@ -123,7 +125,7 @@ If you run the raw `./droid-proxy auth ...` commands manually, source the env
 file first in that terminal:
 
 ```bash
-source ./.env.live-e2e.local
+source "$LIVE_E2E_ENV_FILE"
 ```
 
 Expected:
@@ -144,6 +146,7 @@ I've added all secrets and completed OAuth. Run the final live E2E.
 Codex can then run:
 
 ```bash
+export LIVE_E2E_ENV_FILE="$PWD/.factory/validation/live-e2e/secrets.env"
 scripts/live-e2e/run-all-after-secrets.sh
 ```
 
