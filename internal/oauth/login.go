@@ -47,7 +47,13 @@ func (m *Manager) Login(ctx context.Context, provider config.OAuthProvider, open
 		return "", fmt.Errorf("start oauth callback listener on %s: %w", addr, err)
 	}
 	resultCh := make(chan CallbackResult, 1)
-	server := &http.Server{Handler: callbackHandler(path, state, resultCh)}
+	server := &http.Server{
+		Handler:           callbackHandler(path, state, resultCh),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       30 * time.Second,
+	}
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			select {

@@ -74,12 +74,19 @@ func newOAuthResponsesTestAPI(t *testing.T, provider config.OAuthProvider, proto
 
 func TestResponses_OAuthCodexNonStreamReconstructsResponsesAndPreservesTools(t *testing.T) {
 	var capturedAuth, capturedAccount, capturedOriginator, capturedPath string
+	var capturedBeta, capturedResidency, capturedInstallation, capturedClientRequest, capturedSession, capturedWindow string
 	var captured map[string]any
 	api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
 		capturedPath = r.URL.Path
 		capturedAuth = r.Header.Get("Authorization")
 		capturedAccount = r.Header.Get("Chatgpt-Account-Id")
 		capturedOriginator = r.Header.Get("Originator")
+		capturedBeta = r.Header.Get("OpenAI-Beta")
+		capturedResidency = r.Header.Get("x-openai-internal-codex-residency")
+		capturedInstallation = r.Header.Get("x-codex-installation-id")
+		capturedClientRequest = r.Header.Get("x-client-request-id")
+		capturedSession = r.Header.Get("session_id")
+		capturedWindow = r.Header.Get("x-codex-window-id")
 		body, _ := io.ReadAll(r.Body)
 		if err := json.Unmarshal(body, &captured); err != nil {
 			t.Fatalf("captured request JSON: %v body=%s", err, body)
@@ -113,8 +120,18 @@ func TestResponses_OAuthCodexNonStreamReconstructsResponsesAndPreservesTools(t *
 	if capturedAccount != "acct_123" || capturedOriginator == "" {
 		t.Fatalf("missing codex oauth headers account=%q originator=%q", capturedAccount, capturedOriginator)
 	}
+	if capturedBeta != "responses_websockets=2026-02-06" || capturedResidency != "us" || capturedInstallation == "" {
+		t.Fatalf("missing codex identity headers beta=%q residency=%q installation=%q", capturedBeta, capturedResidency, capturedInstallation)
+	}
+	if capturedClientRequest == "" || capturedSession == "" || capturedWindow != capturedSession+":0" {
+		t.Fatalf("bad codex session headers client=%q session=%q window=%q", capturedClientRequest, capturedSession, capturedWindow)
+	}
 	if captured["model"] != "oauth-upstream-model" || captured["stream"] != true {
 		t.Fatalf("bad oauth upstream payload: %#v", captured)
+	}
+	metadata, ok := captured["client_metadata"].(map[string]any)
+	if !ok || metadata["x-codex-installation-id"] != capturedInstallation || metadata["x-codex-window-id"] != capturedWindow {
+		t.Fatalf("missing codex client metadata: %#v", captured["client_metadata"])
 	}
 	if captured["instructions"] != codexDefaultInstructions {
 		t.Fatalf("missing default codex instructions: %#v", captured)
@@ -174,6 +191,70 @@ func TestResponses_OAuthCodexPreservesCallerInstructions(t *testing.T) {
 	msg, ok := input[0].(map[string]any)
 	if !ok || msg["role"] != "user" || msg["content"] != "hi" {
 		t.Fatalf("bad normalized input: %#v", captured["input"])
+	}
+}
+
+func TestResponses_OAuthCodexClientMetadataDoesNotOverwriteCallerValues(t *testing.T) {
+	var captured map[string]any
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("captured request JSON: %v body=%s", err, body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(w, `event: response.completed`)
+		_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[]}}`)
+		_, _ = fmt.Fprintln(w)
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","prompt_cache_key":"session-a","client_metadata":{"x-codex-installation-id":"caller-install","custom":"keep"}}`))
+	req.Header.Set("x-codex-turn-state", "turn-1")
+	api.engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	metadata, ok := captured["client_metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing metadata: %#v", captured)
+	}
+	if metadata["x-codex-installation-id"] != "caller-install" || metadata["custom"] != "keep" {
+		t.Fatalf("caller metadata overwritten: %#v", metadata)
+	}
+	if metadata["x-codex-window-id"] != "session-a:0" || metadata["x-codex-turn-state"] != "turn-1" {
+		t.Fatalf("proxy metadata not merged: %#v", metadata)
+	}
+}
+
+func TestResponses_OAuthCodexRecordsQuotaMetadata(t *testing.T) {
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("x-codex-primary-used-percent", "99")
+		w.Header().Set("x-codex-primary-window-minutes", "300")
+		w.Header().Set("x-codex-primary-reset-at", "1893456000")
+		_, _ = fmt.Fprintln(w, `event: codex.rate_limits`)
+		_, _ = fmt.Fprintln(w, `data: {"type":"codex.rate_limits","rate_limits":{"secondary":{"used_percent":12,"window_minutes":10080,"reset_at":1893542400}}}`)
+		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, `event: response.completed`)
+		_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[]}}`)
+		_, _ = fmt.Fprintln(w)
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	token, err := api.api.OAuth.LoadToken(config.OAuthProviderCodex, "user@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.CodexQuota == nil || token.CodexQuota.Primary == nil || token.CodexQuota.Secondary == nil {
+		t.Fatalf("quota metadata not persisted: %+v", token)
+	}
+	if token.RateLimitResetAt != "2030-01-02T00:00:00Z" || token.LastSeenAt == "" {
+		t.Fatalf("bad quota timestamps: reset=%q seen=%q quota=%+v", token.RateLimitResetAt, token.LastSeenAt, token.CodexQuota)
 	}
 }
 

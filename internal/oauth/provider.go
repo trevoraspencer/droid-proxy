@@ -97,8 +97,33 @@ func (m *Manager) RefreshIfNeeded(ctx context.Context, token *Token) (*Token, er
 	if strings.TrimSpace(token.RefreshToken) == "" {
 		return nil, fmt.Errorf("%s OAuth token is expired and has no refresh token", token.Provider())
 	}
+	lockKey := refreshLockKey(token)
+	mu := m.refreshMutex(lockKey)
+	mu.Lock()
+	defer mu.Unlock()
+	releaseFileLock, err := m.acquireRefreshFileLock(ctx, lockKey)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseFileLock()
+
+	if strings.TrimSpace(token.path) != "" {
+		latest, err := m.loadTokenPath(token.path)
+		if err != nil {
+			return nil, fmt.Errorf("reload auth token before refresh: %w", err)
+		}
+		if latest.Provider() != token.Provider() {
+			return nil, fmt.Errorf("auth token provider changed during refresh: got %q want %q", latest.Provider(), token.Provider())
+		}
+		token = latest
+		if strings.TrimSpace(token.AccessToken) != "" && !token.NeedsRefresh(time.Now()) {
+			return token, nil
+		}
+		if strings.TrimSpace(token.RefreshToken) == "" {
+			return nil, fmt.Errorf("%s OAuth token is expired and has no refresh token", token.Provider())
+		}
+	}
 	var refreshed *Token
-	var err error
 	switch token.Provider() {
 	case ProviderCodex:
 		refreshed, err = refreshCodex(ctx, token.RefreshToken)
@@ -141,6 +166,12 @@ func (m *Manager) RefreshIfNeeded(ctx context.Context, token *Token) (*Token, er
 	if refreshed.AuthKind == "" {
 		refreshed.AuthKind = token.AuthKind
 	}
+	if refreshed.RefreshToken == "" {
+		refreshed.RefreshToken = token.RefreshToken
+	}
+	refreshed.CodexQuota = token.CodexQuota
+	refreshed.RateLimitResetAt = token.RateLimitResetAt
+	refreshed.LastSeenAt = token.LastSeenAt
 	if _, err := m.SaveToken(refreshed); err != nil {
 		return nil, err
 	}

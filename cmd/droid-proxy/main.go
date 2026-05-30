@@ -261,13 +261,14 @@ func defaultConfigPath() string {
 
 func runAuth(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: droid-proxy auth <codex|xai> --config config.yaml")
+		fmt.Fprintln(os.Stderr, "usage: droid-proxy auth <codex|xai> [--device] --config config.yaml")
 		os.Exit(2)
 	}
 	provider := config.OAuthProvider(strings.ToLower(strings.TrimSpace(args[0])))
 	fs := flag.NewFlagSet("auth "+string(provider), flag.ExitOnError)
 	configPath := fs.String("config", defaultConfigPath(), "path to config.yaml")
 	noBrowser := fs.Bool("no-browser", false, "print auth URL without opening a browser")
+	device := fs.Bool("device", false, "use Codex device-code login instead of the local callback")
 	if err := fs.Parse(args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "auth args error: %v\n", err)
 		os.Exit(2)
@@ -283,7 +284,13 @@ func runAuth(args []string) {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	path, err := oauth.NewManager(cfg).Login(ctx, provider, !*noBrowser)
+	manager := oauth.NewManager(cfg)
+	var path string
+	if *device {
+		path, err = manager.LoginDevice(ctx, provider, !*noBrowser)
+	} else {
+		path, err = manager.Login(ctx, provider, !*noBrowser)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "auth error: %v\n", err)
 		os.Exit(1)

@@ -49,21 +49,29 @@ func (m *Manager) LoadTokens(provider config.OAuthProvider) ([]*Token, error) {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
-		raw, err := os.ReadFile(path)
+		token, err := m.loadTokenPath(path)
 		if err != nil {
-			return nil, fmt.Errorf("read auth token %s: %w", entry.Name(), err)
+			return nil, fmt.Errorf("%s: %w", entry.Name(), err)
 		}
-		var token Token
-		if err := json.Unmarshal(raw, &token); err != nil {
-			return nil, fmt.Errorf("parse auth token %s: %w", entry.Name(), err)
-		}
-		token.path = path
 		if token.Provider() != provider {
 			continue
 		}
-		out = append(out, &token)
+		out = append(out, token)
 	}
 	return out, nil
+}
+
+func (m *Manager) loadTokenPath(path string) (*Token, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read auth token: %w", err)
+	}
+	var token Token
+	if err := json.Unmarshal(raw, &token); err != nil {
+		return nil, fmt.Errorf("parse auth token: %w", err)
+	}
+	token.path = path
+	return &token, nil
 }
 
 func (m *Manager) SaveToken(token *Token) (string, error) {
@@ -88,19 +96,51 @@ func (m *Manager) SaveToken(token *Token) (string, error) {
 		return "", fmt.Errorf("serialize token: %w", err)
 	}
 	raw = append(raw, '\n')
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return "", fmt.Errorf("open token file: %w", err)
-	}
-	if _, err := f.Write(raw); err != nil {
-		_ = f.Close()
-		return "", fmt.Errorf("write token file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return "", fmt.Errorf("close token file: %w", err)
+	if err := writeFileAtomic(path, raw, 0o600); err != nil {
+		return "", err
 	}
 	_ = os.Chmod(path, 0o600)
 	return path, nil
+}
+
+func writeFileAtomic(path string, raw []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	tmp, err := os.CreateTemp(dir, "."+base+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create token temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod token temp file: %w", err)
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write token temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync token temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close token temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace token file: %w", err)
+	}
+	cleanup = false
+	if dirFile, err := os.Open(dir); err == nil {
+		_ = dirFile.Sync()
+		_ = dirFile.Close()
+	}
+	return nil
 }
 
 func tokenFileName(token *Token) string {

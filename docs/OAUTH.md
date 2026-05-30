@@ -47,6 +47,16 @@ URL instead of opening a browser:
 ./droid-proxy auth codex --config config.yaml --no-browser
 ```
 
+Codex also supports device-code login, which does not require a localhost
+callback:
+
+```bash
+./droid-proxy auth codex --config config.yaml --device
+```
+
+The command prints `https://auth.openai.com/codex/device` and a short code,
+then polls until the browser approval completes.
+
 ## Step 2: Add a model to config.yaml
 
 ### Codex
@@ -120,6 +130,9 @@ Token files are named from the provider and account, for example:
 - `xai-user@example.com.json`
 
 Each file contains access and refresh tokens plus metadata (email, expiry).
+Codex token files may also include passive health fields such as
+`codex_quota`, `rate_limit_reset_at`, and `last_seen_at`; these are hints from
+upstream response headers/events and are not used for load balancing yet.
 
 ## Multi-account selection
 
@@ -140,6 +153,10 @@ after refresh.
 Before each request, the proxy checks token expiry. If the access token expires
 within **five minutes**, it refreshes using the stored refresh token and writes
 the updated file back to disk.
+
+Refresh is coordinated per account inside the process and with a small lock
+file under `oauth.auth_dir/.locks/`, so concurrent requests do not spend the
+same rotating refresh token multiple times. Token files are replaced atomically.
 
 If refresh fails (revoked session, expired refresh token), re-run:
 
@@ -164,6 +181,17 @@ oauth:
 |----------|------------------|
 | Codex | `http://localhost:1455/auth/callback` |
 | xAI | `http://127.0.0.1:56121/callback` |
+
+Codex device login bypasses the local callback and exchanges through
+`https://auth.openai.com/deviceauth/callback`.
+
+## Codex request metadata
+
+For Codex requests, the proxy adds stable request identity headers used by
+Codex clients, including `x-codex-installation-id`, `x-client-request-id`,
+`session_id`, `x-codex-window-id`, and `OpenAI-Beta`. The same installation and
+window identifiers are merged into `client_metadata` without overwriting caller
+provided metadata keys.
 
 ## Verify
 

@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -42,6 +45,20 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 
 	downstreamStream := gjson.GetBytes(body, "stream").Bool()
 	payload := prepareOAuthResponsesPayload(body, m, true)
+	installationID := ""
+	codexConversation := ""
+	if m.OAuthProvider == config.OAuthProviderCodex {
+		codexConversation = codexConversationID(c.Request.Header, payload)
+		if codexConversation == "" {
+			codexConversation = "droid-proxy-" + randomHex(16)
+		}
+		if id, err := a.OAuth.InstallationID(); err == nil {
+			installationID = id
+			payload = injectCodexClientMetadata(payload, codexClientMetadata(c.Request.Header, installationID, codexConversation))
+		} else {
+			a.Logger.WithError(err).Warn("could not resolve codex installation id")
+		}
+	}
 	upstreamURL, err := oauthResponsesURL(m, token)
 	if err != nil {
 		WriteJSONError(c, http.StatusInternalServerError, "configuration_error", err.Error())
@@ -52,7 +69,7 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 		WriteJSONError(c, http.StatusInternalServerError, "configuration_error", err.Error())
 		return
 	}
-	applyOAuthResponsesHeaders(req, c.Request.Header, m, token, payload)
+	applyOAuthResponsesHeaders(req, c.Request.Header, m, token, payload, installationID, codexConversation)
 
 	var resp *http.Response
 	if downstreamStream {
@@ -65,6 +82,10 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 		return
 	}
 	defer resp.Body.Close()
+	if m.OAuthProvider == config.OAuthProviderCodex {
+		quota, resetAt := oauth.ParseCodexRateLimitHeaders(resp.Header)
+		a.recordCodexUsage(token, quota, resetAt)
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, ok := a.readUpstreamErrorBody(resp)
@@ -91,9 +112,14 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 			return
 		}
 		if err := stream.Forward(c.Request.Context(), c.Writer, flusher, resp.Body, stream.Options{
-			KeepAlive:            a.Cfg.Upstream.StreamKeepAlive,
-			IdleTimeout:          a.Cfg.Upstream.HTTPTimeout,
-			IsTerminal:           stream.ResponsesTerminal,
+			KeepAlive:   a.Cfg.Upstream.StreamKeepAlive,
+			IdleTimeout: a.Cfg.Upstream.HTTPTimeout,
+			IsTerminal:  stream.ResponsesTerminal,
+			OnLine: func(line []byte) {
+				if quota := codexQuotaFromSSELine(line); quota != nil {
+					a.recordCodexUsage(token, quota, nil)
+				}
+			},
 			WriteTruncationError: a.responsesTruncationWriter(http.StatusBadGateway, "upstream stream ended before terminal marker"),
 		}); err != nil && !errors.Is(err, c.Request.Context().Err()) {
 			a.Logger.WithError(err).Warn("oauth responses stream terminated abnormally")
@@ -105,6 +131,11 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 	if !ok {
 		WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream response body too large")
 		return
+	}
+	if m.OAuthProvider == config.OAuthProviderCodex {
+		if quota := codexQuotaFromSSEBody(raw); quota != nil {
+			a.recordCodexUsage(token, quota, nil)
+		}
 	}
 	translated, err := responseFromResponsesSSE(raw)
 	if err != nil {
@@ -185,7 +216,7 @@ func oauthResponsesURL(m *config.Model, token *oauth.Token) (string, error) {
 	return u.String(), nil
 }
 
-func applyOAuthResponsesHeaders(req *http.Request, downstream http.Header, m *config.Model, token *oauth.Token, payload []byte) {
+func applyOAuthResponsesHeaders(req *http.Request, downstream http.Header, m *config.Model, token *oauth.Token, payload []byte, installationID, conversationID string) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Cache-Control", "no-cache")
@@ -195,10 +226,24 @@ func applyOAuthResponsesHeaders(req *http.Request, downstream http.Header, m *co
 	case config.OAuthProviderCodex:
 		req.Header.Set("User-Agent", firstHeader(downstream, "User-Agent", codexUserAgent))
 		req.Header.Set("Originator", firstHeader(downstream, "Originator", "codex_cli_rs"))
+		req.Header.Set("OpenAI-Beta", firstHeader(downstream, "OpenAI-Beta", "responses_websockets=2026-02-06"))
+		req.Header.Set("x-openai-internal-codex-residency", firstHeader(downstream, "x-openai-internal-codex-residency", "us"))
 		if token.AccountID != "" {
 			req.Header.Set("Chatgpt-Account-Id", token.AccountID)
 		}
-		for _, name := range []string{"Version", "X-Codex-Beta-Features", "X-Codex-Turn-Metadata", "X-Client-Request-Id", "Session_id"} {
+		if installationID != "" {
+			req.Header.Set("x-codex-installation-id", installationID)
+		}
+		if conversationID == "" {
+			conversationID = codexConversationID(downstream, payload)
+			if conversationID == "" {
+				conversationID = "droid-proxy-" + randomHex(16)
+			}
+		}
+		req.Header.Set("x-client-request-id", firstHeader(downstream, "X-Client-Request-Id", conversationID))
+		req.Header.Set("session_id", firstHeader(downstream, "session_id", conversationID))
+		req.Header.Set("x-codex-window-id", firstHeader(downstream, "x-codex-window-id", conversationID+":0"))
+		for _, name := range []string{"Version", "X-Codex-Beta-Features", "X-Codex-Turn-Metadata", "X-Codex-Turn-State", "X-Codex-Parent-Thread-Id", "X-ResponsesAPI-Include-Timing-Metrics"} {
 			if v := strings.TrimSpace(downstream.Get(name)); v != "" {
 				req.Header.Set(name, v)
 			}
@@ -208,6 +253,68 @@ func applyOAuthResponsesHeaders(req *http.Request, downstream http.Header, m *co
 			req.Header.Set("x-grok-conv-id", sessionID)
 		}
 	}
+}
+
+func codexClientMetadata(headers http.Header, installationID, conversationID string) map[string]string {
+	metadata := map[string]string{}
+	if installationID != "" {
+		metadata["x-codex-installation-id"] = installationID
+	}
+	if conversationID != "" {
+		metadata["x-codex-window-id"] = firstHeader(headers, "x-codex-window-id", conversationID+":0")
+	}
+	for _, name := range []string{"x-codex-turn-metadata", "x-codex-turn-state", "x-codex-parent-thread-id"} {
+		if value := strings.TrimSpace(headers.Get(name)); value != "" {
+			metadata[name] = value
+		}
+	}
+	return metadata
+}
+
+func injectCodexClientMetadata(payload []byte, metadata map[string]string) []byte {
+	if len(metadata) == 0 {
+		return payload
+	}
+	out := payload
+	for key, value := range metadata {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		if existing := gjson.GetBytes(out, "client_metadata."+key); existing.Exists() {
+			continue
+		}
+		if next, err := sjson.SetBytes(out, "client_metadata."+key, value); err == nil {
+			out = next
+		}
+	}
+	return out
+}
+
+func codexConversationID(h http.Header, payload []byte) string {
+	for _, v := range []string{
+		h.Get("session_id"),
+		h.Get("Session_id"),
+		h.Get("X-Codex-Session-Id"),
+		h.Get("X-Codex-Conversation-Id"),
+		h.Get("X-Client-Request-Id"),
+		gjson.GetBytes(payload, "prompt_cache_key").String(),
+	} {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func randomHex(n int) string {
+	if n <= 0 {
+		n = 16
+	}
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }
 
 func firstHeader(h http.Header, name, fallback string) string {
@@ -229,6 +336,37 @@ func oauthSessionID(h http.Header, payload []byte) string {
 		}
 	}
 	return ""
+}
+
+func codexQuotaFromSSEBody(body []byte) *oauth.CodexQuota {
+	var out *oauth.CodexQuota
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		if quota := codexQuotaFromSSELine(line); quota != nil {
+			out = quota
+		}
+	}
+	return out
+}
+
+func codexQuotaFromSSELine(line []byte) *oauth.CodexQuota {
+	line = bytes.TrimSpace(line)
+	if !bytes.HasPrefix(line, []byte("data:")) {
+		return nil
+	}
+	data := bytes.TrimSpace(line[len("data:"):])
+	if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
+		return nil
+	}
+	return oauth.ParseCodexRateLimitsEvent(data)
+}
+
+func (a *API) recordCodexUsage(token *oauth.Token, quota *oauth.CodexQuota, resetAt *time.Time) {
+	if a == nil || a.OAuth == nil || token == nil || token.Provider() != config.OAuthProviderCodex {
+		return
+	}
+	if err := a.OAuth.RecordCodexUsage(token, quota, resetAt); err != nil {
+		a.Logger.WithError(err).Warn("could not record codex quota metadata")
+	}
 }
 
 func responseFromResponsesSSE(body []byte) ([]byte, error) {

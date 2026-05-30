@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -176,6 +179,223 @@ func TestRefreshCodexSavesRefreshedToken(t *testing.T) {
 	}
 	if loaded.AccessToken != "new-access" {
 		t.Fatalf("refreshed token was not saved: %+v", loaded)
+	}
+}
+
+func TestRefreshIfNeededDeduplicatesConcurrentRefresh(t *testing.T) {
+	authDir := t.TempDir()
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})
+	path, err := manager.SaveToken(&Token{
+		Type:         string(ProviderCodex),
+		AccessToken:  "old-access",
+		RefreshToken: "refresh-secret",
+		Email:        "user@example.com",
+		Expired:      time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refreshes atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		refreshes.Add(1)
+		body, _ := io.ReadAll(r.Body)
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if values.Get("refresh_token") != "refresh-secret" {
+			t.Fatalf("bad refresh token: %s", body)
+		}
+		time.Sleep(50 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "new-access",
+			"refresh_token": "new-refresh",
+			"expires_in":    3600,
+		})
+	}))
+	defer srv.Close()
+
+	oldTokenURL := codexTokenURL
+	codexTokenURL = srv.URL
+	t.Cleanup(func() { codexTokenURL = oldTokenURL })
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make(chan error, 12)
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			token, err := manager.loadTokenPath(path)
+			if err != nil {
+				errs <- err
+				return
+			}
+			<-start
+			refreshed, err := manager.RefreshIfNeeded(context.Background(), token)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if refreshed.AccessToken != "new-access" || refreshed.RefreshToken != "new-refresh" {
+				errs <- fmt.Errorf("bad refreshed token: %+v", refreshed)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := refreshes.Load(); got != 1 {
+		t.Fatalf("refresh requests=%d want 1", got)
+	}
+}
+
+func TestRefreshPreservesRefreshTokenWhenResponseOmitsIt(t *testing.T) {
+	authDir := t.TempDir()
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})
+	oldTokenURL := codexTokenURL
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "new-access",
+			"expires_in":   3600,
+		})
+	}))
+	defer srv.Close()
+	codexTokenURL = srv.URL
+	t.Cleanup(func() { codexTokenURL = oldTokenURL })
+	refreshed, err := manager.RefreshIfNeeded(context.Background(), &Token{
+		Type:         string(ProviderCodex),
+		RefreshToken: "old-refresh",
+		Expired:      time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.RefreshToken != "old-refresh" {
+		t.Fatalf("refresh token not preserved: %+v", refreshed)
+	}
+}
+
+func TestLoginDeviceCodex(t *testing.T) {
+	authDir := t.TempDir()
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})
+	var polls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/usercode":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"device_auth_id": "device-1",
+				"user_code":      "ABCD-EFGH",
+				"interval":       0.001,
+			})
+		case "/token":
+			if polls.Add(1) == 1 {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"status":"pending"}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"authorization_code": "auth-code",
+				"code_verifier":      "device-verifier",
+				"code_challenge":     "device-challenge",
+			})
+		case "/oauth/token":
+			body, _ := io.ReadAll(r.Body)
+			values, err := url.ParseQuery(string(body))
+			if err != nil {
+				t.Fatalf("parse token form: %v", err)
+			}
+			if values.Get("grant_type") != "authorization_code" ||
+				values.Get("code") != "auth-code" ||
+				values.Get("code_verifier") != "device-verifier" ||
+				values.Get("redirect_uri") != codexDeviceRedirectURI {
+				t.Fatalf("bad device token exchange: %s", body)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token":  "device-access",
+				"refresh_token": "device-refresh",
+				"expires_in":    3600,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	oldUserCodeURL, oldTokenURL, oldOAuthURL := codexDeviceUserCodeURL, codexDeviceTokenURL, codexTokenURL
+	oldVerifyURL := codexDeviceVerifyURL
+	codexDeviceUserCodeURL = srv.URL + "/usercode"
+	codexDeviceTokenURL = srv.URL + "/token"
+	codexTokenURL = srv.URL + "/oauth/token"
+	codexDeviceVerifyURL = srv.URL + "/verify"
+	t.Cleanup(func() {
+		codexDeviceUserCodeURL = oldUserCodeURL
+		codexDeviceTokenURL = oldTokenURL
+		codexTokenURL = oldOAuthURL
+		codexDeviceVerifyURL = oldVerifyURL
+	})
+
+	path, err := manager.LoginDevice(context.Background(), ProviderCodex, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(path) != authDir {
+		t.Fatalf("device token path=%q not under %q", path, authDir)
+	}
+	loaded, err := manager.LoadToken(ProviderCodex, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.AccessToken != "device-access" || loaded.RefreshToken != "device-refresh" {
+		t.Fatalf("bad saved device token: %+v", loaded)
+	}
+	if polls.Load() < 2 {
+		t.Fatalf("expected pending poll before success, got %d", polls.Load())
+	}
+}
+
+func TestLoginDeviceCodexTimeoutAndProviderValidation(t *testing.T) {
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: t.TempDir()}})
+	if _, err := manager.LoginDevice(context.Background(), ProviderXAI, false); err == nil || !strings.Contains(err.Error(), "only supported for codex") {
+		t.Fatalf("expected non-codex device rejection, got %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/usercode":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"device_auth_id": "device-1",
+				"user_code":      "ABCD-EFGH",
+				"interval":       0.001,
+			})
+		case "/token":
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"status":"pending"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	oldUserCodeURL, oldTokenURL, oldTimeout := codexDeviceUserCodeURL, codexDeviceTokenURL, codexDeviceLoginTimeout
+	codexDeviceUserCodeURL = srv.URL + "/usercode"
+	codexDeviceTokenURL = srv.URL + "/token"
+	codexDeviceLoginTimeout = 5 * time.Millisecond
+	t.Cleanup(func() {
+		codexDeviceUserCodeURL = oldUserCodeURL
+		codexDeviceTokenURL = oldTokenURL
+		codexDeviceLoginTimeout = oldTimeout
+	})
+	_, err := manager.LoginDevice(context.Background(), ProviderCodex, false)
+	if err == nil {
+		t.Fatal("expected device timeout")
 	}
 }
 

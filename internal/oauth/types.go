@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"droid-proxy/internal/config"
@@ -34,24 +35,41 @@ const (
 const refreshLead = 5 * time.Minute
 
 type Token struct {
-	Type          string `json:"type"`
-	AccessToken   string `json:"access_token"`
-	RefreshToken  string `json:"refresh_token,omitempty"`
-	IDToken       string `json:"id_token,omitempty"`
-	TokenType     string `json:"token_type,omitempty"`
-	ExpiresIn     int    `json:"expires_in,omitempty"`
-	Expired       string `json:"expired,omitempty"`
-	LastRefresh   string `json:"last_refresh,omitempty"`
-	Email         string `json:"email,omitempty"`
-	Subject       string `json:"sub,omitempty"`
-	AccountID     string `json:"account_id,omitempty"`
-	BaseURL       string `json:"base_url,omitempty"`
-	RedirectURI   string `json:"redirect_uri,omitempty"`
-	TokenEndpoint string `json:"token_endpoint,omitempty"`
-	AuthKind      string `json:"auth_kind,omitempty"`
-	Disabled      bool   `json:"disabled,omitempty"`
+	Type             string      `json:"type"`
+	AccessToken      string      `json:"access_token"`
+	RefreshToken     string      `json:"refresh_token,omitempty"`
+	IDToken          string      `json:"id_token,omitempty"`
+	TokenType        string      `json:"token_type,omitempty"`
+	ExpiresIn        int         `json:"expires_in,omitempty"`
+	Expired          string      `json:"expired,omitempty"`
+	LastRefresh      string      `json:"last_refresh,omitempty"`
+	Email            string      `json:"email,omitempty"`
+	Subject          string      `json:"sub,omitempty"`
+	AccountID        string      `json:"account_id,omitempty"`
+	BaseURL          string      `json:"base_url,omitempty"`
+	RedirectURI      string      `json:"redirect_uri,omitempty"`
+	TokenEndpoint    string      `json:"token_endpoint,omitempty"`
+	AuthKind         string      `json:"auth_kind,omitempty"`
+	Disabled         bool        `json:"disabled,omitempty"`
+	CodexQuota       *CodexQuota `json:"codex_quota,omitempty"`
+	RateLimitResetAt string      `json:"rate_limit_reset_at,omitempty"`
+	LastSeenAt       string      `json:"last_seen_at,omitempty"`
 
 	path string
+}
+
+type CodexQuota struct {
+	Primary    *CodexQuotaWindow `json:"primary,omitempty"`
+	Secondary  *CodexQuotaWindow `json:"secondary,omitempty"`
+	CodeReview *CodexQuotaWindow `json:"code_review,omitempty"`
+}
+
+type CodexQuotaWindow struct {
+	UsedPercent      float64  `json:"used_percent"`
+	RemainingPercent *float64 `json:"remaining_percent,omitempty"`
+	WindowMinutes    *float64 `json:"window_minutes,omitempty"`
+	ResetAt          *int64   `json:"reset_at,omitempty"`
+	LimitReached     bool     `json:"limit_reached,omitempty"`
 }
 
 func (t *Token) Provider() config.OAuthProvider {
@@ -111,11 +129,13 @@ func (t *Token) MatchesAccount(account string) bool {
 }
 
 type Manager struct {
-	cfg *config.Config
+	cfg          *config.Config
+	mu           sync.Mutex
+	refreshLocks map[string]*sync.Mutex
 }
 
 func NewManager(cfg *config.Config) *Manager {
-	return &Manager{cfg: cfg}
+	return &Manager{cfg: cfg, refreshLocks: make(map[string]*sync.Mutex)}
 }
 
 func (m *Manager) AuthDir() (string, error) {

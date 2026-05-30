@@ -16,6 +16,7 @@ the full OAuth walkthrough.
 
 - ChatGPT account with Codex access
 - OAuth login completed: `./droid-proxy auth codex --config config.yaml`
+  - On headless machines, use `./droid-proxy auth codex --config config.yaml --device`.
 
 ## config.yaml
 
@@ -75,5 +76,6 @@ curl -sS http://127.0.0.1:8787/v1/responses \
 ## Notes
 
 - Replace `upstream_model` with the Codex model ID your account supports.
-- Tokens refresh automatically five minutes before expiry.
+- Tokens refresh automatically five minutes before expiry, with per-account locking to avoid concurrent refresh-token reuse.
+- Codex requests include stable installation/session metadata, and token files may record passive quota hints from upstream.
 - Ready-to-paste Factory snippet: [codex-oauth.json](../factory-settings/codex-oauth.json).

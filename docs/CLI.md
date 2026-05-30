@@ -16,7 +16,7 @@ droid-proxy logs    [-n LINES] [PATH]
 droid-proxy service install   [--config PATH]
 droid-proxy service uninstall
 
-droid-proxy auth codex|xai [--config PATH] [--no-browser]
+droid-proxy auth codex|xai [--config PATH] [--no-browser] [--device]
 ```
 
 ## Config and env file resolution
@@ -131,12 +131,14 @@ Browser PKCE login for Codex/ChatGPT and xAI Grok Build accounts.
 ./droid-proxy auth codex --config config.yaml
 ./droid-proxy auth xai --config config.yaml
 ./droid-proxy auth codex --config config.yaml --no-browser
+./droid-proxy auth codex --config config.yaml --device
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--config` | Config file (determines OAuth callback settings) |
 | `--no-browser` | Print the authorization URL instead of opening a browser |
+| `--device` | Use Codex device-code login. Codex only; useful for headless or remote machines. |
 
 Tokens are saved under `oauth.auth_dir` (default `~/.droid-proxy/auth/`).
 See [OAUTH.md](OAUTH.md) for the full walkthrough.
