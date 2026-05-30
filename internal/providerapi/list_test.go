@@ -44,6 +44,26 @@ func TestParseModelIDsBareArray(t *testing.T) {
 	}
 }
 
+func TestParseModelIDsBareObjectArray(t *testing.T) {
+	body := []byte(`[{"id":"b"},{"id":"a"},{"name":"c"}]`)
+	got, err := parseModelIDs(body)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	want := []string{"a", "b", "c"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseModelIDsUnrecognizedShape(t *testing.T) {
+	for _, body := range []string{`{"foo":1}`, `42`, ``, `   `} {
+		if _, err := parseModelIDs([]byte(body)); err == nil {
+			t.Errorf("expected error for %q", body)
+		}
+	}
+}
+
 func TestListModelsSendsAuthAndParses(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

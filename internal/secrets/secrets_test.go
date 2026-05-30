@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +122,58 @@ func TestSpecialCharValuesRoundTrip(t *testing.T) {
 	for k, want := range cases {
 		if got := values[k]; got != want {
 			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+}
+
+func TestSetPreservesCommentsAndOtherKeys(t *testing.T) {
+	withTempStateDir(t)
+	body := "# my header\nexport KEEP_KEY=\"keep\"\n\n# trailing note\nexport OPENAI_API_KEY=\"old\"\n"
+	if err := os.WriteFile(Path(), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Set("OPENAI_API_KEY", "new"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	raw, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	out := string(raw)
+	for _, want := range []string{"# my header", "# trailing note", `export KEEP_KEY="keep"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q preserved, file:\n%s", want, out)
+		}
+	}
+	values, _ := Read()
+	if values["OPENAI_API_KEY"] != "new" {
+		t.Errorf("OPENAI_API_KEY = %q, want new", values["OPENAI_API_KEY"])
+	}
+	if values["KEEP_KEY"] != "keep" {
+		t.Errorf("KEEP_KEY = %q, want keep", values["KEEP_KEY"])
+	}
+	if strings.Contains(out, `="old"`) {
+		t.Errorf("old value should be replaced, file:\n%s", out)
+	}
+}
+
+func TestDeletePreservesOtherLines(t *testing.T) {
+	withTempStateDir(t)
+	body := "# header\nexport A=\"1\"\nexport B=\"2\"\n# note\n"
+	if err := os.WriteFile(Path(), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Delete("A"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	raw, _ := os.ReadFile(Path())
+	out := string(raw)
+	if strings.Contains(out, "export A=") {
+		t.Errorf("A should be deleted, file:\n%s", out)
+	}
+	for _, want := range []string{"# header", "# note", `export B="2"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q preserved, file:\n%s", want, out)
 		}
 	}
 }

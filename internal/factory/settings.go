@@ -198,7 +198,8 @@ func (s *Settings) Remove(model string) (bool, error) {
 }
 
 // Save writes settings.json (pretty-printed, 0600). When backup is true and a
-// file already exists, it is copied to settings.json.bak-<timestamp> first.
+// file already exists, it is copied to a single rolling settings.json.bak
+// first; a subsequent save overwrites that backup.
 func (s *Settings) Save(backup bool) error {
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

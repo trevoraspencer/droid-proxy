@@ -27,16 +27,33 @@ type backend struct {
 	configPath  string
 	factoryPath string
 	baseURL     string
+	factoryKey  string
 	manager     *oauth.Manager
 }
 
 func newBackend(configPath string) *backend {
+	cfg := loadConfigBestEffort(configPath)
 	return &backend{
 		configPath:  configPath,
 		factoryPath: factory.DefaultSettingsPath(),
 		baseURL:     proxyBaseURL(configPath),
-		manager:     oauth.NewManager(loadConfigBestEffort(configPath)),
+		factoryKey:  factoryAPIKey(cfg),
+		manager:     oauth.NewManager(cfg),
 	}
+}
+
+// factoryAPIKey returns the API key Droid should send to the proxy. When the
+// proxy enforces client_auth, the first configured (env-expanded) key is used
+// so synced Factory entries authenticate; otherwise a placeholder is returned.
+func factoryAPIKey(cfg *config.Config) string {
+	if cfg != nil && cfg.ClientAuth.Enabled {
+		for _, k := range cfg.ClientAuth.APIKeys {
+			if strings.TrimSpace(k) != "" {
+				return k
+			}
+		}
+	}
+	return "x"
 }
 
 // models returns the configured models (hydrated, no env validation).
@@ -129,7 +146,7 @@ func (b *backend) syncFactory(models []*config.Model) error {
 		return err
 	}
 	for _, m := range models {
-		if err := settings.Upsert(factory.EntryFromModel(m, b.baseURL, "x")); err != nil {
+		if err := settings.Upsert(factory.EntryFromModel(m, b.baseURL, b.factoryKey)); err != nil {
 			return err
 		}
 	}

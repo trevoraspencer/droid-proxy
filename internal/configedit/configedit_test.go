@@ -117,6 +117,53 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+func TestUpsertOAuthModel(t *testing.T) {
+	path := writeTemp(t, sampleConfig)
+	doc, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	m := &config.Model{
+		Alias:            "grok",
+		DisplayName:      "Grok 4",
+		FactoryProvider:  config.FactoryProviderOpenAI,
+		UpstreamProtocol: config.UpstreamXAIResponses,
+		OAuthProvider:    config.OAuthProviderXAI,
+		UpstreamModel:    "grok-4",
+	}
+	if err := doc.Upsert(m); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if err := doc.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	out, _ := os.ReadFile(path)
+	if !strings.Contains(string(out), "oauth_provider: xai") {
+		t.Errorf("oauth_provider not written:\n%s", out)
+	}
+
+	models, err := LoadModels(path)
+	if err != nil {
+		t.Fatalf("LoadModels: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("got %d models, want 2", len(models))
+	}
+	var got *config.Model
+	for _, mm := range models {
+		if mm.Alias == "grok" {
+			got = mm
+		}
+	}
+	if got == nil {
+		t.Fatal("oauth model not found after round-trip")
+	}
+	if got.OAuthProvider != config.OAuthProviderXAI || got.UpstreamProtocol != config.UpstreamXAIResponses {
+		t.Errorf("round-trip mismatch: %#v", got)
+	}
+}
+
 func TestUpsertRejectsInvalid(t *testing.T) {
 	path := writeTemp(t, sampleConfig)
 	doc, _ := Load(path)

@@ -84,6 +84,28 @@ func TestProxyBaseURL(t *testing.T) {
 	}
 }
 
+func TestFactoryAPIKey(t *testing.T) {
+	if got := factoryAPIKey(nil); got != "x" {
+		t.Errorf("nil config = %q, want x", got)
+	}
+	disabled := &config.Config{}
+	disabled.ClientAuth.APIKeys = []string{"unused"}
+	if got := factoryAPIKey(disabled); got != "x" {
+		t.Errorf("client auth disabled = %q, want x", got)
+	}
+	enabled := &config.Config{}
+	enabled.ClientAuth.Enabled = true
+	enabled.ClientAuth.APIKeys = []string{"  ", "real-key"}
+	if got := factoryAPIKey(enabled); got != "real-key" {
+		t.Errorf("client auth enabled = %q, want real-key", got)
+	}
+	blank := &config.Config{}
+	blank.ClientAuth.Enabled = true
+	if got := factoryAPIKey(blank); got != "x" {
+		t.Errorf("client auth enabled without keys = %q, want x", got)
+	}
+}
+
 func newFormModel(t *testing.T, sel providerChoice, values map[string]string) model {
 	t.Helper()
 	m := model{sel: sel}

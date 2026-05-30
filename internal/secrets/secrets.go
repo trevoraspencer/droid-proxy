@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"droid-proxy/internal/daemon"
 )
+
+const managedHeader = "# Managed by `droid-proxy config`. Edit with care."
 
 // stateDirFn resolves the directory holding the managed env file. It is a
 // variable so tests can redirect writes away from the real state dir.
@@ -57,55 +58,90 @@ func Has(key string) (bool, error) {
 	return ok && strings.TrimSpace(v) != "", nil
 }
 
-// Set writes or replaces a single key in the managed env file, preserving the
-// other entries. The file is created with 0600 permissions if it does not
-// exist and is written atomically.
+// Set writes or replaces a single key in the managed env file, preserving all
+// other lines (comments, blanks, unrelated keys, and their ordering). The file
+// is created with 0600 permissions if it does not exist and is written
+// atomically.
 func Set(key, value string) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return fmt.Errorf("secrets: empty key")
 	}
-	values, err := Read()
+	lines, existed, err := readLines()
 	if err != nil {
 		return err
 	}
-	values[key] = value
-	return writeAll(values)
+	newLine := fmt.Sprintf("export %s=%q", key, value)
+	out := make([]string, 0, len(lines)+2)
+	replaced := false
+	for _, line := range lines {
+		if k, _, ok, perr := daemon.ParseEnvLine(line); perr == nil && ok && k == key {
+			if !replaced {
+				out = append(out, newLine)
+				replaced = true
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+	if !replaced {
+		if !existed && len(out) == 0 {
+			out = append(out, managedHeader)
+		}
+		out = append(out, newLine)
+	}
+	return writeRaw(out)
 }
 
-// Delete removes a key from the managed env file. Missing keys are ignored.
+// Delete removes a key from the managed env file, preserving all other lines.
+// Missing keys (and a missing file) are ignored.
 func Delete(key string) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return nil
 	}
-	values, err := Read()
-	if err != nil {
+	lines, existed, err := readLines()
+	if err != nil || !existed {
 		return err
 	}
-	if _, ok := values[key]; !ok {
+	out := make([]string, 0, len(lines))
+	changed := false
+	for _, line := range lines {
+		if k, _, ok, perr := daemon.ParseEnvLine(line); perr == nil && ok && k == key {
+			changed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	if !changed {
 		return nil
 	}
-	delete(values, key)
-	return writeAll(values)
+	return writeRaw(out)
 }
 
-func writeAll(values map[string]string) error {
+// readLines returns the managed env file's lines (trailing blank line trimmed)
+// and whether the file currently exists.
+func readLines() (lines []string, existed bool, err error) {
+	data, err := os.ReadFile(Path())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	trimmed := strings.TrimRight(string(data), "\n")
+	if trimmed == "" {
+		return nil, true, nil
+	}
+	return strings.Split(trimmed, "\n"), true, nil
+}
+
+func writeRaw(lines []string) error {
 	dir := stateDirFn()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	keys := make([]string, 0, len(values))
-	for k := range values {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var b strings.Builder
-	b.WriteString("# Managed by `droid-proxy config`. Edit with care.\n")
-	for _, k := range keys {
-		fmt.Fprintf(&b, "export %s=%q\n", k, values[k])
-	}
+	content := strings.Join(lines, "\n") + "\n"
 
 	tmp, err := os.CreateTemp(dir, "env-*.tmp")
 	if err != nil {
@@ -117,7 +153,7 @@ func writeAll(values map[string]string) error {
 		tmp.Close()
 		return err
 	}
-	if _, err := tmp.WriteString(b.String()); err != nil {
+	if _, err := tmp.WriteString(content); err != nil {
 		tmp.Close()
 		return err
 	}
