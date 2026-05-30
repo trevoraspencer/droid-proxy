@@ -48,17 +48,20 @@ shell `PATH`. On macOS or Linux, a symlink in `~/.local/bin` keeps the source
 checkout in place while making the command globally available:
 
 ```bash
+cd /path/to/droid-proxy
 mkdir -p ~/.local/bin
-ln -sf "$(pwd)/droid-proxy" ~/.local/bin/droid-proxy
+ln -sf "$PWD/droid-proxy" ~/.local/bin/droid-proxy
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 droid-proxy status
 ```
 
-After this, use `droid-proxy start`, `droid-proxy status`, `droid-proxy config`,
-and `droid-proxy update` from any working directory. The `~/.droid-proxy/`
-directory is only for runtime state, logs, saved auth tokens, and managed env
-files; it does not contain the executable.
+Replace `/path/to/droid-proxy` with the source checkout where you ran
+`go build`; for example, `/Users/trevor/code/droid-proxy`. After this, use
+`droid-proxy start`, `droid-proxy status`, `droid-proxy config`, and
+`droid-proxy update` from any working directory. The `~/.droid-proxy/` directory
+is only for runtime state, logs, saved auth tokens, and managed env files; it
+does not contain the executable.
 
 To update a source install later:
 
