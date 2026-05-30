@@ -9,7 +9,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 
 	"droid-proxy/internal/config"
 	"droid-proxy/internal/reasoning"
@@ -56,7 +55,7 @@ func (a *API) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	payload := prepareChatPayload(body, m)
+	payload := applyUpstreamPayloadOverrides(body, m)
 	isStream := gjson.GetBytes(payload, "stream").Bool()
 
 	// Optional: DeepSeek reasoning replay. When enabled and we have a cache,
@@ -116,17 +115,9 @@ func (a *API) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	// streaming
 	upstream.CopyHeaders(c.Writer.Header(), resp.Header)
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.WriteHeader(http.StatusOK)
-
-	flusher, ok := c.Writer.(http.Flusher)
+	flusher, ok := a.beginSSE(c)
 	if !ok {
-		// can't recover meaningfully — gin always supports Flusher in practice
-		a.Logger.Warn("response writer does not support flushing")
 		return
 	}
 
@@ -211,24 +202,4 @@ func (a *API) clientAuthHash(headers http.Header) string {
 		return ""
 	}
 	return reasoning.APIKeyHash(credential)
-}
-
-// prepareChatPayload rewrites the inbound payload for the upstream:
-//   - sets `model` to m.UpstreamModel when non-empty (otherwise the client's
-//     value is left intact, which lets users target an alias that already matches
-//     the upstream's model id).
-//   - applies top-level extra_args (sjson SetBytes for each key).
-func prepareChatPayload(body []byte, m *config.Model) []byte {
-	out := body
-	if strings.TrimSpace(m.UpstreamModel) != "" {
-		if next, err := sjson.SetBytes(out, "model", m.UpstreamModel); err == nil {
-			out = next
-		}
-	}
-	for k, v := range m.ExtraArgs {
-		if next, err := sjson.SetBytes(out, k, v); err == nil {
-			out = next
-		}
-	}
-	return out
 }

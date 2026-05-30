@@ -9,7 +9,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 
 	"droid-proxy/internal/config"
 	"droid-proxy/internal/stream"
@@ -99,13 +98,8 @@ func (a *API) responsesViaChat(c *gin.Context, m *config.Model, body []byte) {
 	}
 
 	if isStream {
-		c.Writer.Header().Set("Content-Type", "text/event-stream")
-		c.Writer.Header().Set("Cache-Control", "no-cache")
-		c.Writer.Header().Set("Connection", "keep-alive")
-		c.Writer.WriteHeader(http.StatusOK)
-		flusher, ok := c.Writer.(http.Flusher)
+		flusher, ok := a.beginSSE(c)
 		if !ok {
-			a.Logger.Warn("response writer does not support flushing")
 			return
 		}
 		if err := translate.ForwardChatStreamToResponsesWithOptions(resp.Body, c.Writer, flusher.Flush, m.UpstreamModel, translate.ChatStreamForwardOptions{
@@ -133,17 +127,7 @@ func (a *API) responsesViaChat(c *gin.Context, m *config.Model, body []byte) {
 }
 
 func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
-	payload := body
-	if strings.TrimSpace(m.UpstreamModel) != "" {
-		if next, err := sjson.SetBytes(payload, "model", m.UpstreamModel); err == nil {
-			payload = next
-		}
-	}
-	for k, v := range m.ExtraArgs {
-		if next, err := sjson.SetBytes(payload, k, v); err == nil {
-			payload = next
-		}
-	}
+	payload := applyUpstreamPayloadOverrides(body, m)
 	isStream := gjson.GetBytes(payload, "stream").Bool()
 
 	req, err := a.Client.Build(c.Request.Context(), upstream.SendOptions{
@@ -197,14 +181,8 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 	}
 
 	upstream.CopyHeaders(c.Writer.Header(), resp.Header)
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.WriteHeader(http.StatusOK)
-
-	flusher, ok := c.Writer.(http.Flusher)
+	flusher, ok := a.beginSSE(c)
 	if !ok {
-		a.Logger.Warn("response writer does not support flushing")
 		return
 	}
 	if err := stream.Forward(c.Request.Context(), c.Writer, flusher, resp.Body, stream.Options{
@@ -221,10 +199,7 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 // streaming shape. Used when upstream returns a non-2xx status BEFORE any SSE
 // has been sent.
 func (a *API) writeResponsesStreamError(c *gin.Context, status int, body []byte) {
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.WriteHeader(http.StatusOK)
+	writeSSEHeaders(c)
 	_ = a.writeResponsesStreamErrorFrame(c, status, body)
 }
 

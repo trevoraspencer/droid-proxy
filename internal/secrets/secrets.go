@@ -38,18 +38,8 @@ func readFile(path string) (map[string]string, error) {
 		return nil, err
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		val = daemon.ParseEnvValue(val)
-		if key == "" {
+		key, val, ok, err := daemon.ParseEnvLine(line)
+		if err != nil || !ok {
 			continue
 		}
 		out[key] = val

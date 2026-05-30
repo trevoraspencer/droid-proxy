@@ -124,3 +124,20 @@ func TestSpecialCharValuesRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestReadSkipsInvalidLines(t *testing.T) {
+	withTempStateDir(t)
+	if err := os.WriteFile(Path(), []byte("not-an-env-line\nexport VALID=\"ok\"\n=empty\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	values, err := Read()
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if got := values["VALID"]; got != "ok" {
+		t.Fatalf("VALID = %q, want ok", got)
+	}
+	if _, ok := values[""]; ok {
+		t.Fatal("empty key should be skipped")
+	}
+}

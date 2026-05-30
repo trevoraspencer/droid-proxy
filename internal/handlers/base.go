@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/sjson"
 
 	"droid-proxy/internal/config"
 	"droid-proxy/internal/logging"
@@ -85,6 +86,40 @@ func (a *API) readUpstreamBody(resp *http.Response, limit int64) ([]byte, bool) 
 	}
 	a.Logger.WithError(err).Warn("read upstream body failed")
 	return nil, false
+}
+
+// applyUpstreamPayloadOverrides rewrites native provider payloads with the
+// configured upstream model and static extra_args.
+func applyUpstreamPayloadOverrides(body []byte, m *config.Model) []byte {
+	out := body
+	if strings.TrimSpace(m.UpstreamModel) != "" {
+		if next, err := sjson.SetBytes(out, "model", m.UpstreamModel); err == nil {
+			out = next
+		}
+	}
+	for k, v := range m.ExtraArgs {
+		if next, err := sjson.SetBytes(out, k, v); err == nil {
+			out = next
+		}
+	}
+	return out
+}
+
+func writeSSEHeaders(c *gin.Context) {
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.WriteHeader(http.StatusOK)
+}
+
+func (a *API) beginSSE(c *gin.Context) (http.Flusher, bool) {
+	writeSSEHeaders(c)
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		a.Logger.Warn("response writer does not support flushing")
+		return nil, false
+	}
+	return flusher, true
 }
 
 func safeErrorMessage(msg string) string {

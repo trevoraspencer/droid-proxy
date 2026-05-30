@@ -11,7 +11,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 
 	"droid-proxy/internal/config"
 	"droid-proxy/internal/stream"
@@ -100,13 +99,8 @@ func (a *API) messagesViaChat(c *gin.Context, m *config.Model, body []byte) {
 	}
 
 	if isStream {
-		c.Writer.Header().Set("Content-Type", "text/event-stream")
-		c.Writer.Header().Set("Cache-Control", "no-cache")
-		c.Writer.Header().Set("Connection", "keep-alive")
-		c.Writer.WriteHeader(http.StatusOK)
-		flusher, ok := c.Writer.(http.Flusher)
+		flusher, ok := a.beginSSE(c)
 		if !ok {
-			a.Logger.Warn("response writer does not support flushing")
 			return
 		}
 		if err := translate.ForwardChatStreamToAnthropicWithOptions(resp.Body, c.Writer, flusher.Flush, m.UpstreamModel, translate.ChatStreamForwardOptions{
@@ -150,10 +144,7 @@ func WriteAnthropicError(c *gin.Context, status int, typ, msg string) {
 }
 
 func (a *API) writeAnthropicStreamError(c *gin.Context, body []byte) {
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.WriteHeader(http.StatusOK)
+	writeSSEHeaders(c)
 	_ = a.writeAnthropicStreamErrorFrame(c.Writer, body)
 	if f, ok := c.Writer.(http.Flusher); ok {
 		f.Flush()
@@ -175,17 +166,7 @@ func (a *API) writeAnthropicStreamErrorFrame(w io.Writer, body []byte) error {
 
 // messagesNative forwards an Anthropic Messages request to an Anthropic-protocol upstream.
 func (a *API) messagesNative(c *gin.Context, m *config.Model, body []byte, path string) {
-	payload := body
-	if strings.TrimSpace(m.UpstreamModel) != "" {
-		if next, err := sjson.SetBytes(payload, "model", m.UpstreamModel); err == nil {
-			payload = next
-		}
-	}
-	for k, v := range m.ExtraArgs {
-		if next, err := sjson.SetBytes(payload, k, v); err == nil {
-			payload = next
-		}
-	}
+	payload := applyUpstreamPayloadOverrides(body, m)
 	isStream := gjson.GetBytes(payload, "stream").Bool()
 
 	// Forward Anthropic-specific headers from the client when set.
@@ -251,14 +232,8 @@ func (a *API) messagesNative(c *gin.Context, m *config.Model, body []byte, path 
 	}
 
 	upstream.CopyHeaders(c.Writer.Header(), resp.Header)
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.WriteHeader(http.StatusOK)
-
-	flusher, ok := c.Writer.(http.Flusher)
+	flusher, ok := a.beginSSE(c)
 	if !ok {
-		a.Logger.Warn("response writer does not support flushing")
 		return
 	}
 	if err := stream.Forward(c.Request.Context(), c.Writer, flusher, resp.Body, stream.Options{

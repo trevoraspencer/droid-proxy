@@ -22,6 +22,25 @@ func ParseEnvValue(raw string) string {
 	return strings.Trim(v, `"'`)
 }
 
+// ParseEnvLine parses a single KEY=VALUE env-file line. Blank lines and
+// comments return ok=false; malformed lines return an error.
+func ParseEnvLine(line string) (key, value string, ok bool, err error) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", false, nil
+	}
+	line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+	key, value, ok = strings.Cut(line, "=")
+	if !ok {
+		return "", "", false, fmt.Errorf("invalid env line %q", line)
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", "", false, fmt.Errorf("empty env key")
+	}
+	return key, ParseEnvValue(value), true, nil
+}
+
 // LoadEnvFile reads KEY=VALUE lines from path into the process environment.
 // Supports optional leading "export " and double-quoted values.
 // Missing files are ignored.
@@ -37,19 +56,12 @@ func LoadEnvFile(path string) error {
 		return err
 	}
 	for lineNum, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+		key, val, ok, err := ParseEnvLine(line)
+		if err != nil {
+			return fmt.Errorf("%s:%d: %w", path, lineNum+1, err)
 		}
-		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
-		key, val, ok := strings.Cut(line, "=")
 		if !ok {
-			return fmt.Errorf("%s:%d: invalid env line %q", path, lineNum+1, line)
-		}
-		key = strings.TrimSpace(key)
-		val = ParseEnvValue(val)
-		if key == "" {
-			return fmt.Errorf("%s:%d: empty env key", path, lineNum+1)
+			continue
 		}
 		if err := os.Setenv(key, val); err != nil {
 			return fmt.Errorf("%s:%d: setenv %q: %w", path, lineNum+1, key, err)

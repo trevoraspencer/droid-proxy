@@ -25,3 +25,14 @@ func TestLoadEnvFileMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLoadEnvFileInvalidLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "env")
+	if err := os.WriteFile(path, []byte("not-an-env-line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadEnvFile(path); err == nil {
+		t.Fatal("expected invalid env line error")
+	}
+}
