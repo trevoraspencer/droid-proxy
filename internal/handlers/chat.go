@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,20 +24,18 @@ func (a *API) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	alias := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-	if alias == "" {
-		BadRequest(c, "request is missing required field: model")
-		return
-	}
-
-	m, err := a.Router.Resolve(alias)
-	if err != nil {
-		var nf *upstream.NotFoundError
-		if errors.As(err, &nf) {
-			WriteJSONError(c, http.StatusNotFound, "model_not_found", nf.Error())
-			return
-		}
-		WriteJSONError(c, http.StatusInternalServerError, "internal_error", err.Error())
+	m, ok := a.resolveRequestModel(body, modelResolveErrors{
+		Missing: func() {
+			BadRequest(c, "request is missing required field: model")
+		},
+		NotFound: func(err error) {
+			WriteJSONError(c, http.StatusNotFound, "model_not_found", err.Error())
+		},
+		Internal: func(err error) {
+			WriteJSONError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		},
+	})
+	if !ok {
 		return
 	}
 
@@ -68,29 +65,27 @@ func (a *API) ChatCompletions(c *gin.Context) {
 		payload = reasoning.PatchRequest(payload, reasoningScope, a.ReasoningCache)
 	}
 
-	req, err := a.Client.Build(c.Request.Context(), upstream.SendOptions{
+	resp, ok := a.doUpstream(c, upstream.SendOptions{
 		Model:    m,
 		Method:   http.MethodPost,
 		Path:     "/chat/completions",
 		Body:     payload,
 		IsStream: isStream,
-	})
-	if err != nil {
+	}, func(err error) {
 		WriteJSONError(c, http.StatusInternalServerError, "configuration_error", err.Error())
-		return
-	}
-
-	resp, err := a.Client.Do(req)
-	if err != nil {
+	}, func(err error) {
 		WriteJSONError(c, http.StatusBadGateway, "upstream_error", err.Error())
+	})
+	if !ok {
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, ok := a.readUpstreamErrorBody(resp)
-		if !ok {
+		body, ok := a.rawUpstreamErrorBody(resp, func() {
 			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream error body too large")
+		})
+		if !ok {
 			return
 		}
 		WriteUpstreamStatusError(c, resp.StatusCode, body, resp.Header.Get("Content-Type"))
@@ -98,26 +93,16 @@ func (a *API) ChatCompletions(c *gin.Context) {
 	}
 
 	if !isStream {
-		respBody, ok := a.readUpstreamSuccessBody(resp)
-		if !ok {
+		respBody, ok := a.rawUpstreamSuccessBody(resp, func() {
 			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream response body too large")
+		})
+		if !ok {
 			return
 		}
 		if useReasoning {
 			reasoning.CaptureNonStream(respBody, reasoningScope, a.ReasoningCache)
 		}
-		upstream.CopyHeaders(c.Writer.Header(), resp.Header)
-		ct := resp.Header.Get("Content-Type")
-		if ct == "" {
-			ct = "application/json"
-		}
-		c.Data(http.StatusOK, ct, respBody)
-		return
-	}
-
-	upstream.CopyHeaders(c.Writer.Header(), resp.Header)
-	flusher, ok := a.beginSSE(c)
-	if !ok {
+		writeRawUpstreamResponse(c, resp, http.StatusOK, respBody, "application/json")
 		return
 	}
 
@@ -134,10 +119,7 @@ func (a *API) ChatCompletions(c *gin.Context) {
 	if capture != nil {
 		opts.OnLine = func(b []byte) { capture.ObserveLine(b) }
 	}
-	streamErr := stream.Forward(c.Request.Context(), c.Writer, flusher, resp.Body, opts)
-	if streamErr != nil && !errors.Is(streamErr, c.Request.Context().Err()) {
-		a.Logger.WithError(streamErr).Warn("stream forward terminated abnormally")
-	}
+	streamErr := a.forwardRawUpstreamSSE(c, resp, opts, "stream forward terminated abnormally")
 	if capture != nil && streamErr == nil {
 		capture.Commit()
 	}

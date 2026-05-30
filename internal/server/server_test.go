@@ -600,20 +600,17 @@ models:
     upstream_protocol: openai-chat
     base_url: http://127.0.0.1:1/v1
 `)
-	// Override port with an unused one. We use 0 to ask the OS, but Run uses fixed addr.
-	// For this test, allocate manually.
-	ln, err := getEphemeralAddr()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Skipf("no ephemeral port: %v", err)
+		t.Skipf("no ephemeral listener: %v", err)
 	}
-	cfg.Listen.Host, cfg.Listen.Port = ln.host, ln.port
 	s, err := New(cfg, discardLogger())
 	if err != nil {
 		t.Fatalf("server new: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- s.Run(ctx) }()
+	go func() { done <- s.RunOnListener(ctx, ln) }()
 	cancel()
 	select {
 	case err := <-done:

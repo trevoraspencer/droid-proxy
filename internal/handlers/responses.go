@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -25,19 +24,18 @@ func (a *API) Responses(c *gin.Context) {
 	if !ok {
 		return
 	}
-	alias := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-	if alias == "" {
-		BadRequest(c, "request is missing required field: model")
-		return
-	}
-	m, err := a.Router.Resolve(alias)
-	if err != nil {
-		var nf *upstream.NotFoundError
-		if errors.As(err, &nf) {
-			WriteJSONError(c, http.StatusNotFound, "model_not_found", nf.Error())
-			return
-		}
-		WriteJSONError(c, http.StatusInternalServerError, "internal_error", err.Error())
+	m, ok := a.resolveRequestModel(body, modelResolveErrors{
+		Missing: func() {
+			BadRequest(c, "request is missing required field: model")
+		},
+		NotFound: func(err error) {
+			WriteJSONError(c, http.StatusNotFound, "model_not_found", err.Error())
+		},
+		Internal: func(err error) {
+			WriteJSONError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		},
+	})
+	if !ok {
 		return
 	}
 	if m.FactoryProvider != config.FactoryProviderOpenAI {
@@ -65,28 +63,27 @@ func (a *API) responsesViaChat(c *gin.Context, m *config.Model, body []byte) {
 	}
 	isStream := gjson.GetBytes(payload, "stream").Bool()
 
-	req, err := a.Client.Build(c.Request.Context(), upstream.SendOptions{
+	resp, ok := a.doUpstream(c, upstream.SendOptions{
 		Model:    m,
 		Method:   http.MethodPost,
 		Path:     "/chat/completions",
 		Body:     payload,
 		IsStream: isStream,
-	})
-	if err != nil {
+	}, func(err error) {
 		WriteJSONError(c, http.StatusInternalServerError, "configuration_error", err.Error())
-		return
-	}
-	resp, err := a.Client.Do(req)
-	if err != nil {
+	}, func(err error) {
 		WriteJSONError(c, http.StatusBadGateway, "upstream_error", safeErrorMessage(err.Error()))
+	})
+	if !ok {
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, ok := a.readUpstreamErrorBody(resp)
-		if !ok {
+		raw, ok := a.rawUpstreamErrorBody(resp, func() {
 			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream body too large")
+		})
+		if !ok {
 			return
 		}
 		if isStream {
@@ -113,9 +110,10 @@ func (a *API) responsesViaChat(c *gin.Context, m *config.Model, body []byte) {
 		return
 	}
 
-	raw, ok := a.readUpstreamSuccessBody(resp)
-	if !ok {
+	raw, ok := a.rawUpstreamSuccessBody(resp, func() {
 		WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream response body too large")
+	})
+	if !ok {
 		return
 	}
 	translated, err := translate.ChatToResponsesResponse(raw, m.UpstreamModel)
@@ -130,28 +128,27 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 	payload := applyUpstreamPayloadOverrides(body, m)
 	isStream := gjson.GetBytes(payload, "stream").Bool()
 
-	req, err := a.Client.Build(c.Request.Context(), upstream.SendOptions{
+	resp, ok := a.doUpstream(c, upstream.SendOptions{
 		Model:    m,
 		Method:   http.MethodPost,
 		Path:     "/responses",
 		Body:     payload,
 		IsStream: isStream,
-	})
-	if err != nil {
+	}, func(err error) {
 		WriteJSONError(c, http.StatusInternalServerError, "configuration_error", err.Error())
-		return
-	}
-	resp, err := a.Client.Do(req)
-	if err != nil {
+	}, func(err error) {
 		WriteJSONError(c, http.StatusBadGateway, "upstream_error", safeErrorMessage(err.Error()))
+	})
+	if !ok {
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, ok := a.readUpstreamErrorBody(resp)
-		if !ok {
+		raw, ok := a.rawUpstreamErrorBody(resp, func() {
 			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream error body too large")
+		})
+		if !ok {
 			return
 		}
 		if isStream {
@@ -166,33 +163,22 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 	}
 
 	if !isStream {
-		raw, ok := a.readUpstreamSuccessBody(resp)
-		if !ok {
+		raw, ok := a.rawUpstreamSuccessBody(resp, func() {
 			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream response body too large")
+		})
+		if !ok {
 			return
 		}
-		upstream.CopyHeaders(c.Writer.Header(), resp.Header)
-		ct := resp.Header.Get("Content-Type")
-		if ct == "" {
-			ct = "application/json"
-		}
-		c.Data(http.StatusOK, ct, raw)
+		writeRawUpstreamResponse(c, resp, http.StatusOK, raw, "application/json")
 		return
 	}
 
-	upstream.CopyHeaders(c.Writer.Header(), resp.Header)
-	flusher, ok := a.beginSSE(c)
-	if !ok {
-		return
-	}
-	if err := stream.Forward(c.Request.Context(), c.Writer, flusher, resp.Body, stream.Options{
+	_ = a.forwardRawUpstreamSSE(c, resp, stream.Options{
 		KeepAlive:            a.Cfg.Upstream.StreamKeepAlive,
 		IdleTimeout:          a.Cfg.Upstream.HTTPTimeout,
 		IsTerminal:           stream.ResponsesTerminal,
 		WriteTruncationError: a.responsesTruncationWriter(http.StatusBadGateway, "upstream stream ended before terminal marker"),
-	}); err != nil && !errors.Is(err, c.Request.Context().Err()) {
-		a.Logger.WithError(err).Warn("responses stream terminated abnormally")
-	}
+	}, "responses stream terminated abnormally")
 }
 
 // writeResponsesStreamError emits an SSE error chunk in the OpenAI Responses

@@ -28,19 +28,18 @@ func (a *API) Messages(c *gin.Context) {
 	if !ok {
 		return
 	}
-	alias := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-	if alias == "" {
-		WriteAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "request is missing required field: model")
-		return
-	}
-	m, err := a.Router.Resolve(alias)
-	if err != nil {
-		var nf *upstream.NotFoundError
-		if errors.As(err, &nf) {
-			WriteAnthropicError(c, http.StatusNotFound, "not_found_error", nf.Error())
-			return
-		}
-		WriteAnthropicError(c, http.StatusInternalServerError, "api_error", err.Error())
+	m, ok := a.resolveRequestModel(body, modelResolveErrors{
+		Missing: func() {
+			WriteAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "request is missing required field: model")
+		},
+		NotFound: func(err error) {
+			WriteAnthropicError(c, http.StatusNotFound, "not_found_error", err.Error())
+		},
+		Internal: func(err error) {
+			WriteAnthropicError(c, http.StatusInternalServerError, "api_error", err.Error())
+		},
+	})
+	if !ok {
 		return
 	}
 	if m.FactoryProvider != config.FactoryProviderAnthropic {
@@ -66,28 +65,27 @@ func (a *API) messagesViaChat(c *gin.Context, m *config.Model, body []byte) {
 	}
 	isStream := gjson.GetBytes(payload, "stream").Bool()
 
-	req, err := a.Client.Build(c.Request.Context(), upstream.SendOptions{
+	resp, ok := a.doUpstream(c, upstream.SendOptions{
 		Model:    m,
 		Method:   http.MethodPost,
 		Path:     "/chat/completions",
 		Body:     payload,
 		IsStream: isStream,
-	})
-	if err != nil {
+	}, func(err error) {
 		WriteAnthropicError(c, http.StatusInternalServerError, "api_error", err.Error())
-		return
-	}
-	resp, err := a.Client.Do(req)
-	if err != nil {
+	}, func(err error) {
 		WriteAnthropicError(c, http.StatusBadGateway, "api_error", safeErrorMessage(err.Error()))
+	})
+	if !ok {
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, ok := a.readUpstreamErrorBody(resp)
-		if !ok {
+		raw, ok := a.rawUpstreamErrorBody(resp, func() {
 			WriteAnthropicError(c, http.StatusBadGateway, "api_error", "upstream body too large")
+		})
+		if !ok {
 			return
 		}
 		if isStream {
@@ -114,9 +112,10 @@ func (a *API) messagesViaChat(c *gin.Context, m *config.Model, body []byte) {
 		return
 	}
 
-	raw, ok := a.readUpstreamSuccessBody(resp)
-	if !ok {
+	raw, ok := a.rawUpstreamSuccessBody(resp, func() {
 		WriteAnthropicError(c, http.StatusBadGateway, "api_error", "upstream response body too large")
+	})
+	if !ok {
 		return
 	}
 	translated, err := translate.ChatToAnthropicResponse(raw, m.UpstreamModel)
@@ -177,29 +176,28 @@ func (a *API) messagesNative(c *gin.Context, m *config.Model, body []byte, path 
 		}
 	}
 
-	req, err := a.Client.Build(c.Request.Context(), upstream.SendOptions{
+	resp, ok := a.doUpstream(c, upstream.SendOptions{
 		Model:        m,
 		Method:       http.MethodPost,
 		Path:         path,
 		Body:         payload,
 		IsStream:     isStream,
 		ExtraHeaders: clientHeaders,
-	})
-	if err != nil {
+	}, func(err error) {
 		WriteAnthropicError(c, http.StatusInternalServerError, "api_error", err.Error())
-		return
-	}
-	resp, err := a.Client.Do(req)
-	if err != nil {
+	}, func(err error) {
 		WriteAnthropicError(c, http.StatusBadGateway, "api_error", safeErrorMessage(err.Error()))
+	})
+	if !ok {
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, ok := a.readUpstreamErrorBody(resp)
-		if !ok {
+		raw, ok := a.rawUpstreamErrorBody(resp, func() {
 			WriteAnthropicError(c, http.StatusBadGateway, "api_error", "upstream error body too large")
+		})
+		if !ok {
 			return
 		}
 		WriteUpstreamStatusError(c, resp.StatusCode, raw, resp.Header.Get("Content-Type"))
@@ -207,9 +205,10 @@ func (a *API) messagesNative(c *gin.Context, m *config.Model, body []byte, path 
 	}
 
 	if !isStream {
-		raw, ok := a.readUpstreamSuccessBody(resp)
-		if !ok {
+		raw, ok := a.rawUpstreamSuccessBody(resp, func() {
 			WriteAnthropicError(c, http.StatusBadGateway, "api_error", "upstream response body too large")
+		})
+		if !ok {
 			return
 		}
 		// Anthropic sometimes returns gzipped JSON without Content-Encoding set
@@ -222,30 +221,18 @@ func (a *API) messagesNative(c *gin.Context, m *config.Model, body []byte, path 
 				return
 			}
 		}
-		upstream.CopyHeaders(c.Writer.Header(), resp.Header)
-		ct := resp.Header.Get("Content-Type")
-		if ct == "" {
-			ct = "application/json"
-		}
-		c.Data(http.StatusOK, ct, raw)
+		writeRawUpstreamResponse(c, resp, http.StatusOK, raw, "application/json")
 		return
 	}
 
-	upstream.CopyHeaders(c.Writer.Header(), resp.Header)
-	flusher, ok := a.beginSSE(c)
-	if !ok {
-		return
-	}
-	if err := stream.Forward(c.Request.Context(), c.Writer, flusher, resp.Body, stream.Options{
+	_ = a.forwardRawUpstreamSSE(c, resp, stream.Options{
 		KeepAlive:   a.Cfg.Upstream.StreamKeepAlive,
 		IdleTimeout: a.Cfg.Upstream.HTTPTimeout,
 		IsTerminal:  stream.AnthropicTerminal,
 		WriteTruncationError: func(w io.Writer) error {
 			return a.writeAnthropicStreamErrorFrame(w, []byte("upstream stream ended before terminal marker"))
 		},
-	}); err != nil && !errors.Is(err, c.Request.Context().Err()) {
-		a.Logger.WithError(err).Warn("anthropic stream terminated abnormally")
-	}
+	}, "anthropic stream terminated abnormally")
 }
 
 func maybeGzipped(b []byte) bool {

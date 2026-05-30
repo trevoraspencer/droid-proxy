@@ -61,8 +61,6 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Server, error) {
 }
 
 // registerAPIRoutes mounts the /v1/* surface plus its prefix-less aliases.
-// Routes wired in this phase: chat/completions. Other routes are stubbed
-// until their phase implements them.
 func registerAPIRoutes(rg *gin.RouterGroup, api *handlers.API) {
 	mount := func(method, path string, h gin.HandlerFunc) {
 		rg.Handle(method, "/v1"+path, h)
@@ -73,12 +71,6 @@ func registerAPIRoutes(rg *gin.RouterGroup, api *handlers.API) {
 	mount(http.MethodPost, "/responses", api.Responses)
 	mount(http.MethodPost, "/messages", api.Messages)
 	mount(http.MethodPost, "/messages/count_tokens", api.CountTokens)
-}
-
-func notImplemented(name string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		handlers.WriteJSONError(c, http.StatusNotImplemented, "not_implemented", name+" not yet wired")
-	}
 }
 
 // Engine returns the gin engine (used by tests to drive requests via httptest).
@@ -92,11 +84,21 @@ func (s *Server) Addr() string {
 // Run starts the HTTP server and blocks until ctx is cancelled or the server errors.
 // On ctx cancellation it performs a graceful shutdown with the configured timeout.
 func (s *Server) Run(ctx context.Context) error {
+	ln, err := net.Listen("tcp", s.Addr())
+	if err != nil {
+		return err
+	}
+	return s.RunOnListener(ctx, ln)
+}
+
+// RunOnListener serves on an already-bound listener. It is primarily useful for
+// tests that need the OS to choose a port without releasing it before startup.
+func (s *Server) RunOnListener(ctx context.Context, ln net.Listener) error {
 	srv := s.newHTTPServer()
 	errCh := make(chan error, 1)
 	go func() {
-		s.logger.WithField("addr", srv.Addr).Info("droid-proxy listening")
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		s.logger.WithField("addr", ln.Addr().String()).Info("droid-proxy listening")
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 			return
 		}

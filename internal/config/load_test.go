@@ -85,6 +85,8 @@ client_auth:
   enabled: true
   api_keys: ["raw-key"]
   scheme: ""
+listen:
+  port: 0
 logging:
   redact: false
 reasoning_cache:
@@ -112,6 +114,9 @@ models:
 	}
 	if cfg.ClientAuth.Scheme != "" {
 		t.Fatalf("explicit raw auth scheme overwritten: %q", cfg.ClientAuth.Scheme)
+	}
+	if cfg.Listen.Port != 0 {
+		t.Fatalf("explicit listen.port=0 overwritten: %d", cfg.Listen.Port)
 	}
 	if cfg.Logging.Redact {
 		t.Fatalf("explicit logging.redact=false overwritten")
