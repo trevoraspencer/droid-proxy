@@ -100,6 +100,36 @@ func TestUpsertReplacesExisting(t *testing.T) {
 	}
 }
 
+func TestLoadModelsExpandsDefaultsForDisplay(t *testing.T) {
+	path := writeTemp(t, `models:
+  - alias: "${MODEL_ALIAS}"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: "${KNOWN_AUTH:-mimo}"
+    upstream_model: "${UPSTREAM_MODEL:-mimo-v2.5-pro}"
+`)
+
+	models, err := LoadModels(path)
+	if err != nil {
+		t.Fatalf("LoadModels: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("got %d models, want 1", len(models))
+	}
+	if models[0].Alias != "${MODEL_ALIAS}" {
+		t.Fatalf("unresolved alias = %q, want placeholder preserved", models[0].Alias)
+	}
+	if models[0].KnownAuth != "mimo" {
+		t.Fatalf("known_auth = %q, want mimo", models[0].KnownAuth)
+	}
+	if models[0].APIKeyEnv != "MIMO_API_KEY" {
+		t.Fatalf("api_key_env = %q, want MIMO_API_KEY", models[0].APIKeyEnv)
+	}
+	if models[0].UpstreamModel != "mimo-v2.5-pro" {
+		t.Fatalf("upstream_model = %q, want mimo-v2.5-pro", models[0].UpstreamModel)
+	}
+}
+
 func TestRemove(t *testing.T) {
 	path := writeTemp(t, sampleConfig)
 	doc, _ := Load(path)

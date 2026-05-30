@@ -43,3 +43,28 @@ func TestRuntimeMetadataRoundTrip(t *testing.T) {
 		t.Fatalf("runtime metadata still exists or stat failed: %v", err)
 	}
 }
+
+func TestRuntimeEnvFileForConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	oldStateDir := stateDir
+	oldPIDFile := pidFile
+	stateDir = filepath.Join(os.Getenv("HOME"), dirName)
+	pidFile = filepath.Join(stateDir, "droid-proxy.pid")
+	t.Cleanup(func() {
+		stateDir = oldStateDir
+		pidFile = oldPIDFile
+	})
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	envPath := filepath.Join(dir, ".env.live")
+	if err := WriteRuntimeMetadata(RuntimeMetadata{ConfigPath: configPath, EnvFile: envPath}); err != nil {
+		t.Fatalf("WriteRuntimeMetadata: %v", err)
+	}
+	if got := RuntimeEnvFileForConfig(configPath); got != envPath {
+		t.Fatalf("RuntimeEnvFileForConfig = %q, want %q", got, envPath)
+	}
+	if got := RuntimeEnvFileForConfig(filepath.Join(dir, "other.yaml")); got != "" {
+		t.Fatalf("RuntimeEnvFileForConfig for other config = %q, want empty", got)
+	}
+}

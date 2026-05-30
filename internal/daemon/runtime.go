@@ -53,6 +53,25 @@ func ReadRuntimeMetadata() (RuntimeMetadata, error) {
 	return meta, nil
 }
 
+func RuntimeEnvFileForConfig(configPath string) string {
+	meta, err := ReadRuntimeMetadata()
+	if err != nil || meta.ConfigPath == "" || meta.EnvFile == "" {
+		return ""
+	}
+	want, err := filepath.Abs(configPath)
+	if err != nil {
+		return ""
+	}
+	got, err := filepath.Abs(meta.ConfigPath)
+	if err != nil {
+		return ""
+	}
+	if want != got {
+		return ""
+	}
+	return meta.EnvFile
+}
+
 func RemoveRuntimeMetadata() {
 	_ = os.Remove(RuntimeFile())
 }

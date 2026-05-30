@@ -211,7 +211,11 @@ func (b *backend) restartProxy() error {
 	if err != nil {
 		return err
 	}
-	child := exec.Command(exe, "start", "--config", b.configPath)
+	args := []string{"start", "--config", b.configPath}
+	if envFile := daemon.RuntimeEnvFileForConfig(b.configPath); envFile != "" {
+		args = append(args, "--env-file", envFile)
+	}
+	child := exec.Command(exe, args...)
 	child.Env = os.Environ()
 	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := child.Start(); err != nil {

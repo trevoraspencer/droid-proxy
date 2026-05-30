@@ -36,8 +36,10 @@ The fastest way to add providers and models is the interactive TUI:
 
 It is a full-screen dashboard that, from one place:
 
-- lists configured models with status badges (API key present, agent-ready,
-  Factory-synced; OAuth account health for OAuth models) and proxy status;
+- lists configured models with the actual upstream provider (`known_auth`,
+  OAuth provider, or custom host), upstream protocol, status badges (API key
+  present, agent-ready, Factory-synced; OAuth account health for OAuth models),
+  and proxy status;
 - adds a model by picking a provider from the built-in registry (DeepSeek,
   Fireworks, Groq, Kimi, Z.AI, MiMo, xAI, OpenAI, Anthropic, Ollama, vLLM, …),
   a custom OpenAI-compatible endpoint, or Codex/xAI OAuth;
@@ -62,7 +64,10 @@ the repo `.env.local` value wins.
 **Config path** (for `start`, `service install`, and `auth`):
 
 1. `config.local.yaml` in the current directory (if it exists)
-2. Otherwise `config.yaml`
+2. `config.yaml` in the current directory (if it exists)
+3. The config path recorded by the running proxy in `~/.droid-proxy/runtime.json`
+4. `config.local.yaml` or `config.yaml` beside the `droid-proxy` executable
+5. Otherwise `config.yaml`
 
 Override with `--config /absolute/or/relative/path.yaml`.
 

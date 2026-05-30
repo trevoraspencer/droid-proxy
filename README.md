@@ -61,7 +61,9 @@ Replace `/path/to/droid-proxy` with the source checkout where you ran
 `droid-proxy start`, `droid-proxy status`, `droid-proxy config`, and
 `droid-proxy update` from any working directory. The `~/.droid-proxy/` directory
 is only for runtime state, logs, saved auth tokens, and managed env files; it
-does not contain the executable.
+does not contain the executable. When there is no config file in the current
+directory, commands such as `droid-proxy config` fall back to the config path
+recorded by the running proxy.
 
 To update a source install later:
 

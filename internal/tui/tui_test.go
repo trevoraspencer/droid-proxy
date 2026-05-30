@@ -84,6 +84,38 @@ func TestProxyBaseURL(t *testing.T) {
 	}
 }
 
+func TestModelRouteSummaryShowsActualProvider(t *testing.T) {
+	got := modelRouteSummary(&config.Model{
+		KnownAuth:        "zai-coding-api",
+		FactoryProvider:  config.FactoryProviderGeneric,
+		UpstreamProtocol: config.UpstreamOpenAIChat,
+	})
+	want := "Z.AI (GLM Coding Plan) · openai-chat"
+	if got != want {
+		t.Fatalf("route summary = %q, want %q", got, want)
+	}
+
+	got = modelRouteSummary(&config.Model{
+		OAuthProvider:    config.OAuthProviderXAI,
+		FactoryProvider:  config.FactoryProviderOpenAI,
+		UpstreamProtocol: config.UpstreamXAIResponses,
+	})
+	want = "xAI Grok Build OAuth · xai-responses"
+	if got != want {
+		t.Fatalf("oauth route summary = %q, want %q", got, want)
+	}
+
+	got = modelRouteSummary(&config.Model{
+		BaseURL:          "https://api.example.com/v1",
+		FactoryProvider:  config.FactoryProviderGeneric,
+		UpstreamProtocol: config.UpstreamOpenAIChat,
+	})
+	want = "api.example.com · openai-chat"
+	if got != want {
+		t.Fatalf("custom route summary = %q, want %q", got, want)
+	}
+}
+
 func TestFactoryAPIKey(t *testing.T) {
 	if got := factoryAPIKey(nil); got != "x" {
 		t.Errorf("nil config = %q, want x", got)

@@ -60,7 +60,7 @@ func main() {
 
 func runServerCLI(args []string) {
 	fs := flag.NewFlagSet("droid-proxy", flag.ExitOnError)
-	configPath := fs.String("config", "config.yaml", "path to config.yaml")
+	configPath := fs.String("config", defaultConfigPath(), "path to config.yaml")
 	envFile := fs.String("env-file", "", "optional env file with API keys (export KEY=...)")
 	showVersion := fs.Bool("version", false, "print version and exit")
 	foreground := fs.Bool("foreground", false, "run in foreground (used by daemon and launchd)")
@@ -270,19 +270,50 @@ func runLogs(args []string) {
 }
 
 func defaultConfigPath() string {
-	for _, path := range []string{"config.local.yaml", "config.yaml"} {
-		if _, err := os.Stat(path); err == nil {
-			return path
+	exe, _ := currentExecutablePath()
+	meta, haveMeta := daemon.RuntimeMetadata{}, false
+	if m, err := daemon.ReadRuntimeMetadata(); err == nil {
+		meta = m
+		haveMeta = true
+	}
+	return resolveDefaultConfigPath(".", exe, meta, haveMeta, regularFileExists)
+}
+
+func resolveDefaultConfigPath(currentDir, executable string, meta daemon.RuntimeMetadata, haveMeta bool, exists func(string) bool) string {
+	for _, name := range []string{"config.local.yaml", "config.yaml"} {
+		candidate := filepath.Join(currentDir, name)
+		if exists(candidate) {
+			if currentDir == "." || currentDir == "" {
+				return name
+			}
+			return candidate
+		}
+	}
+	if haveMeta && meta.ConfigPath != "" && exists(meta.ConfigPath) {
+		return meta.ConfigPath
+	}
+	if executable != "" {
+		exeDir := filepath.Dir(executable)
+		for _, name := range []string{"config.local.yaml", "config.yaml"} {
+			candidate := filepath.Join(exeDir, name)
+			if exists(candidate) {
+				return candidate
+			}
 		}
 	}
 	return "config.yaml"
+}
+
+func regularFileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func runConfig(args []string) {
 	fs := flag.NewFlagSet("config", flag.ExitOnError)
 	configPath := fs.String("config", defaultConfigPath(), "path to config.yaml")
 	_ = fs.Parse(args)
-	loadConfigEnv()
+	loadConfigEnv(*configPath)
 	if err := tui.Run(*configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "droid-proxy config error: %v\n", err)
 		os.Exit(1)
@@ -505,7 +536,7 @@ func runAuth(args []string) {
 		fmt.Fprintf(os.Stderr, "unsupported oauth provider %q (must be codex or xai)\n", provider)
 		os.Exit(2)
 	}
-	loadConfigEnv()
+	loadConfigEnv(*configPath)
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
@@ -625,7 +656,7 @@ func parseAuthAccountArgs(usage string, args []string) (config.OAuthProvider, st
 }
 
 func authManagerFromConfig(configPath string) (*oauth.Manager, error) {
-	loadConfigEnv()
+	loadConfigEnv(configPath)
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
@@ -636,9 +667,14 @@ func authManagerFromConfig(configPath string) (*oauth.Manager, error) {
 // loadConfigEnv loads API keys from the managed secrets file and any repo
 // env file so config.Load validation passes for commands that don't run the
 // server.
-func loadConfigEnv() {
-	wd, _ := os.Getwd()
-	_ = daemon.LoadLayeredEnv(wd, "")
+func loadConfigEnv(configPath string) {
+	workDir := "."
+	if configPath != "" {
+		if absConfig, err := filepath.Abs(configPath); err == nil {
+			workDir = filepath.Dir(absConfig)
+		}
+	}
+	_ = daemon.LoadLayeredEnv(workDir, daemon.RuntimeEnvFileForConfig(configPath))
 }
 
 func formatAuthStatus(manager *oauth.Manager, providers []config.OAuthProvider) (string, error) {

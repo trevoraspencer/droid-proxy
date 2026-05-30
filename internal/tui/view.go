@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"droid-proxy/internal/config"
@@ -65,7 +66,7 @@ func (m model) viewDashboard() string {
 			name = selectedStyle.Render(name)
 		}
 		b.WriteString(fmt.Sprintf("%s%s\n", cursor, name))
-		b.WriteString("    " + subtleStyle.Render(string(mod.FactoryProvider)+" · "+string(mod.UpstreamProtocol)) + "  " + m.modelBadges(mod) + "\n")
+		b.WriteString("    " + subtleStyle.Render(modelRouteSummary(mod)) + "  " + m.modelBadges(mod) + "\n")
 	}
 
 	b.WriteString("\n" + helpStyle.Render(
@@ -84,6 +85,35 @@ func (m model) modelBadges(mod *config.Model) string {
 	parts = append(parts, badge("agent", mod.AgentReady()))
 	parts = append(parts, badge("factory", m.factory[mod.Alias]))
 	return strings.Join(parts, "  ")
+}
+
+func modelRouteSummary(mod *config.Model) string {
+	return modelProviderLabel(mod) + " · " + string(mod.UpstreamProtocol)
+}
+
+func modelProviderLabel(mod *config.Model) string {
+	if mod == nil {
+		return "unknown provider"
+	}
+	if mod.KnownAuth != "" {
+		if ka, ok := config.LookupKnownAuth(mod.KnownAuth); ok {
+			return ka.Label()
+		}
+		return mod.KnownAuth
+	}
+	switch mod.OAuthProvider {
+	case config.OAuthProviderCodex:
+		return "Codex / ChatGPT OAuth"
+	case config.OAuthProviderXAI:
+		return "xAI Grok Build OAuth"
+	}
+	if mod.BaseURL != "" {
+		if u, err := url.Parse(mod.BaseURL); err == nil && u.Host != "" {
+			return u.Host
+		}
+		return mod.BaseURL
+	}
+	return "custom provider"
 }
 
 func (m model) viewAddProvider() string {

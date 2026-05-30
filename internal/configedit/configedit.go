@@ -9,12 +9,15 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"droid-proxy/internal/config"
 )
+
+var displayEnvRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}`)
 
 // Doc is an in-memory, comment-preserving view of a config file.
 type Doc struct {
@@ -304,14 +307,29 @@ func LoadModels(path string) ([]*config.Model, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
+	expanded := expandEnvForDisplay(string(raw))
 	var mf struct {
 		Models []*config.Model `yaml:"models"`
 	}
-	if err := yaml.Unmarshal(raw, &mf); err != nil {
+	if err := yaml.Unmarshal([]byte(expanded), &mf); err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 	for _, m := range mf.Models {
 		_ = config.HydrateModel(m)
 	}
 	return mf.Models, nil
+}
+
+func expandEnvForDisplay(s string) string {
+	return displayEnvRef.ReplaceAllStringFunc(s, func(match string) string {
+		parts := displayEnvRef.FindStringSubmatch(match)
+		name := parts[1]
+		if val, ok := os.LookupEnv(name); ok {
+			return val
+		}
+		if parts[2] != "" {
+			return parts[3]
+		}
+		return match
+	})
 }
