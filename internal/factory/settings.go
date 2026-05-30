@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"droid-proxy/internal/config"
 )
@@ -207,7 +206,7 @@ func (s *Settings) Save(backup bool) error {
 	}
 	if backup {
 		if existing, err := os.ReadFile(s.path); err == nil {
-			bak := fmt.Sprintf("%s.bak-%s", s.path, time.Now().Format("20060102-150405"))
+			bak := s.path + ".bak"
 			if err := os.WriteFile(bak, existing, 0o600); err != nil {
 				return fmt.Errorf("backup settings: %w", err)
 			}

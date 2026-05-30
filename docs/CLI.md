@@ -19,6 +19,8 @@ droid-proxy service install   [--config PATH]
 droid-proxy service uninstall
 
 droid-proxy auth codex|xai [--config PATH] [--no-browser] [--device]
+droid-proxy auth status [codex|xai] [--config PATH]
+droid-proxy auth enable|disable|logout <provider> <account> [--config PATH]
 ```
 
 ## Interactive config dashboard
@@ -176,6 +178,29 @@ Browser PKCE login for Codex/ChatGPT and xAI Grok Build accounts.
 
 Tokens are saved under `oauth.auth_dir` (default `~/.droid-proxy/auth/`).
 See [OAUTH.md](OAUTH.md) for the full walkthrough.
+
+### OAuth account management
+
+Inspect and manage stored OAuth accounts without re-running a login:
+
+```bash
+./droid-proxy auth status                       # all providers
+./droid-proxy auth status codex                 # one provider
+./droid-proxy auth disable xai user@example.com # stop using an account
+./droid-proxy auth enable  xai user@example.com # re-enable it
+./droid-proxy auth logout  codex user@example.com
+```
+
+| Command | Description |
+|---------|-------------|
+| `auth status [provider]` | Lists stored accounts with email, subject, account ID, expiry, last refresh, `disabled` flag, and token file path. Omit the provider to show both `codex` and `xai`. |
+| `auth disable <provider> <account>` | Marks an account disabled. The proxy skips disabled accounts when selecting a token for requests. |
+| `auth enable <provider> <account>` | Clears the disabled flag. |
+| `auth logout <provider> <account>` | Deletes the account's token file from `oauth.auth_dir`. |
+
+`<account>` is the same selector accepted by a model's `oauth_account`: an
+email, subject (`sub`), account ID, or the token filename. The same actions are
+available interactively from the `droid-proxy config` dashboard (press `o`).
 
 ## State directory
 

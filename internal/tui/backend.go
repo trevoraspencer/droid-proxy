@@ -93,10 +93,14 @@ func (b *backend) removeModel(alias string) error {
 	}
 	settings, err := factory.Load(b.factoryPath)
 	if err != nil {
-		return nil
+		return err
 	}
-	if removed, _ := settings.Remove(alias); removed {
-		_ = settings.Save(true)
+	removed, err := settings.Remove(alias)
+	if err != nil {
+		return err
+	}
+	if removed {
+		return settings.Save(true)
 	}
 	return nil
 }
@@ -125,7 +129,9 @@ func (b *backend) syncFactory(models []*config.Model) error {
 		return err
 	}
 	for _, m := range models {
-		settings.Upsert(factory.EntryFromModel(m, b.baseURL, "x"))
+		if err := settings.Upsert(factory.EntryFromModel(m, b.baseURL, "x")); err != nil {
+			return err
+		}
 	}
 	return settings.Save(true)
 }

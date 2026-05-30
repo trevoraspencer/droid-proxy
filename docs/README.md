@@ -13,7 +13,7 @@ Guides for running `droid-proxy` with [Factory Droid](https://factory.ai).
 
 | Document | Description |
 |----------|-------------|
-| [CLI.md](CLI.md) | `start`, `stop`, `status`, `logs`, launchd `service`, `auth`, env files |
+| [CLI.md](CLI.md) | `config` dashboard, `start`, `stop`, `status`, `logs`, launchd `service`, `auth` (login + `status`/`enable`/`disable`/`logout`), env files |
 | [CONFIG.md](CONFIG.md) | Full YAML schema |
 | [FACTORY.md](FACTORY.md) | `~/.factory/settings.json` integration |
 | [PROVIDERS.md](PROVIDERS.md) | Provider matrix, tiers, OAuth summary |

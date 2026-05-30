@@ -213,36 +213,65 @@ func prepareCodexResponsesPayload(body []byte) []byte {
 const xaiEncryptedReasoningInclude = "reasoning.encrypted_content"
 
 func prepareXAIResponsesPayload(body []byte, downstream http.Header) []byte {
-	var root map[string]any
-	if err := json.Unmarshal(body, &root); err != nil {
-		return body
+	out := body
+	if next, err := sjson.DeleteBytes(out, "service_tier"); err == nil {
+		out = next
 	}
-	delete(root, "service_tier")
-	if strings.TrimSpace(stringValue(root["prompt_cache_key"])) == "" {
-		if sessionID := xaiSessionID(downstream, root); sessionID != "" {
-			root["prompt_cache_key"] = sessionID
+	if strings.TrimSpace(gjson.GetBytes(out, "prompt_cache_key").String()) == "" {
+		if sessionID := xaiSessionID(downstream); sessionID != "" {
+			if next, err := sjson.SetBytes(out, "prompt_cache_key", sessionID); err == nil {
+				out = next
+			}
 		}
 	}
-	if tools, ok := root["tools"].([]any); ok {
-		root["tools"] = normalizeXAITools(tools)
+	if tools := gjson.GetBytes(out, "tools"); tools.IsArray() {
+		out = setXAITools(out, tools.Raw)
 	}
-	if xaiReasoningPresent(root) {
-		root["include"] = includeXAIEncryptedReasoning(root["include"])
-	}
-	out, err := json.Marshal(root)
-	if err != nil {
-		return body
+	if xaiReasoningPresentBytes(out) {
+		out = setXAIInclude(out)
 	}
 	return out
 }
 
-func xaiSessionID(h http.Header, root map[string]any) string {
+// setXAITools normalizes the tools array, decoding only that subtree with
+// UseNumber so numeric schema bounds keep their original precision.
+func setXAITools(body []byte, rawTools string) []byte {
+	dec := json.NewDecoder(strings.NewReader(rawTools))
+	dec.UseNumber()
+	var tools []any
+	if err := dec.Decode(&tools); err != nil {
+		return body
+	}
+	normalized := normalizeXAITools(tools)
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return body
+	}
+	if next, err := sjson.SetRawBytes(body, "tools", raw); err == nil {
+		return next
+	}
+	return body
+}
+
+// setXAIInclude appends the encrypted-reasoning include marker, preserving any
+// existing include entries.
+func setXAIInclude(body []byte) []byte {
+	var current any
+	if inc := gjson.GetBytes(body, "include"); inc.Exists() {
+		current = inc.Value()
+	}
+	updated := includeXAIEncryptedReasoning(current)
+	if next, err := sjson.SetBytes(body, "include", updated); err == nil {
+		return next
+	}
+	return body
+}
+
+func xaiSessionID(h http.Header) string {
 	for _, v := range []string{
 		h.Get("X-Session-ID"),
 		h.Get("Session_id"),
-		h.Get("session_id"),
 		h.Get("X-Client-Request-Id"),
-		stringValue(root["prompt_cache_key"]),
 	} {
 		if strings.TrimSpace(v) != "" {
 			return strings.TrimSpace(v)
@@ -411,11 +440,15 @@ func sanitizeXAIEnum(value any) []any {
 	return out
 }
 
-func xaiReasoningPresent(root map[string]any) bool {
-	if _, ok := root["reasoning"]; ok {
+func xaiReasoningPresentBytes(body []byte) bool {
+	if gjson.GetBytes(body, "reasoning").Exists() {
 		return true
 	}
-	return xaiValueContainsReasoning(root["input"])
+	input := gjson.GetBytes(body, "input")
+	if !input.Exists() {
+		return false
+	}
+	return xaiValueContainsReasoning(input.Value())
 }
 
 func xaiValueContainsReasoning(value any) bool {

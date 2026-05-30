@@ -103,6 +103,29 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+func TestSaveBackupIsSingleRollingFile(t *testing.T) {
+	path := tempSettings(t, `{"customModels":[{"model":"a"}]}`)
+	for i := 0; i < 3; i++ {
+		s, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if err := s.Upsert(EntryFromModel(&config.Model{Alias: "a", FactoryProvider: config.FactoryProviderGeneric}, "http://127.0.0.1:8787", "x")); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		if err := s.Save(true); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+	if _, err := os.Stat(path + ".bak"); err != nil {
+		t.Fatalf("expected rolling backup %s.bak: %v", path, err)
+	}
+	matches, _ := filepath.Glob(path + ".bak-*")
+	if len(matches) != 0 {
+		t.Fatalf("expected no timestamped backups, got %v", matches)
+	}
+}
+
 func TestEntryFromModelDefaults(t *testing.T) {
 	m := &config.Model{Alias: "no-display", FactoryProvider: config.FactoryProviderGeneric}
 	e := EntryFromModel(m, "http://127.0.0.1:8787", "")

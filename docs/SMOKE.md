@@ -29,6 +29,13 @@ curl -s http://127.0.0.1:8787/v1/models | jq '.data[] | {id, factory_provider, u
 
 Every configured alias should appear with fields matching `config.yaml`.
 
+For OAuth models, confirm an account is logged in via the `oauth_auth` object
+(`missing_auth: false`, `active_count > 0`):
+
+```bash
+curl -s http://127.0.0.1:8787/v1/models | jq '.data[] | select(.oauth_auth) | {id, oauth_auth}'
+```
+
 ## 2. Chat completions (DeepSeek example)
 
 Requires `deepseek-v4-flash` in config and `DEEPSEEK_API_KEY` set.

@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"droid-proxy/internal/config"
+	"droid-proxy/internal/secrets"
 )
 
 type screen int
@@ -819,7 +820,7 @@ func isLoopbackBaseURL(raw string) bool {
 }
 
 func secretsPathHint() string {
-	return "~/.droid-proxy/env"
+	return secrets.Path()
 }
 
 func maxInt(a, b int) int {

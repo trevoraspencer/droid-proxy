@@ -17,6 +17,9 @@ plus Codex/ChatGPT and xAI Grok Build OAuth — from a single Go binary.
   coherent.
 - **Focused OAuth.** Browser PKCE login is available for Codex/ChatGPT and xAI
   Grok Build accounts, with tokens stored locally under `~/.droid-proxy/auth`.
+  Manage accounts with `auth status`, `auth enable`/`auth disable`, and
+  `auth logout`, and check per-model OAuth health via `oauth_auth` in
+  `/v1/models`.
 
 ## Endpoints
 

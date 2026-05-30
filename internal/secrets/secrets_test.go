@@ -99,3 +99,28 @@ func TestEmptyValueNotPresent(t *testing.T) {
 		t.Fatal("empty value should report Has=false")
 	}
 }
+
+func TestSpecialCharValuesRoundTrip(t *testing.T) {
+	withTempStateDir(t)
+	cases := map[string]string{
+		"WITH_QUOTE":     `ab"cd`,
+		"WITH_BACKSLASH": `ab\cd`,
+		"WITH_SPACE":     "a b c",
+		"WITH_EQUALS":    "key=val=ue",
+		"WITH_HASH":      "value#notcomment",
+	}
+	for k, v := range cases {
+		if err := Set(k, v); err != nil {
+			t.Fatalf("Set %s: %v", k, err)
+		}
+	}
+	values, err := Read()
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	for k, want := range cases {
+		if got := values[k]; got != want {
+			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+}

@@ -17,7 +17,9 @@ Droid sends that string as the `model` field on each request.
 
 > **Tip:** `droid-proxy config` writes these `customModels` entries for you.
 > Add a model in the dashboard, then press `s` (selected) or `S` (all) to sync
-> into `~/.factory/settings.json` — no hand-editing required. The manual schema
+> into `~/.factory/settings.json` — no hand-editing required. Each sync first
+> copies the current file to `~/.factory/settings.json.bak` (a single rolling
+> backup), so the previous version is always recoverable. The manual schema
 > below still applies if you prefer to edit the file yourself.
 
 ## Required `settings.json` fields
@@ -106,6 +108,19 @@ curl -s http://127.0.0.1:8787/v1/models | jq '.data[] | {id, agent_ready, capabi
 
 `agent_ready: true` means streaming, tools, and tool results are validated for
 that model's tier. See [PROVIDERS.md](PROVIDERS.md) for tier definitions.
+
+For OAuth models (Codex/xAI), each `/v1/models` entry also carries an
+`oauth_auth` object summarizing stored-account health, so you can confirm a
+model is actually logged in before using it:
+
+```bash
+curl -s http://127.0.0.1:8787/v1/models \
+  | jq '.data[] | select(.oauth_auth) | {id, oauth_auth}'
+```
+
+`missing_auth: true` means no stored account matches the model — run
+`droid-proxy auth <codex|xai>`. See [OAUTH.md](OAUTH.md#checking-oauth-health)
+for the field reference and account-management commands.
 
 ## Typical setup flow
 

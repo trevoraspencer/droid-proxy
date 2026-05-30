@@ -73,8 +73,23 @@ curl -sS http://127.0.0.1:8787/v1/responses \
   }' | jq '.output'
 ```
 
+## Manage accounts
+
+```bash
+./droid-proxy auth status xai                  # list accounts + expiry
+./droid-proxy auth disable xai user@example.com
+./droid-proxy auth logout  xai user@example.com
+```
+
+Check the model is logged in: `curl -s http://127.0.0.1:8787/v1/models | jq
+'.data[] | select(.oauth_auth) | {id, oauth_auth}'`. See
+[OAUTH.md](../OAUTH.md#managing-accounts) for the full reference.
+
 ## Notes
 
 - Replace `upstream_model` with the Grok Build model ID your account supports.
 - Callback defaults: `127.0.0.1:56121/callback` (configurable under `oauth:`).
+- The proxy automatically sanitizes the outbound request for Grok agent
+  compatibility (tool normalization, encrypted reasoning, completed-output
+  repair) — see [xAI request handling](../OAUTH.md#xai-request-handling).
 - Ready-to-paste Factory snippet: [xai-oauth.json](../factory-settings/xai-oauth.json).

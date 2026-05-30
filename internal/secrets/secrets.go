@@ -48,7 +48,7 @@ func readFile(path string) (map[string]string, error) {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		val = strings.Trim(strings.TrimSpace(val), `"'`)
+		val = daemon.ParseEnvValue(val)
 		if key == "" {
 			continue
 		}

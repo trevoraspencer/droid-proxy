@@ -109,6 +109,11 @@ OAuth token files live under `oauth.auth_dir` (default
 model sets `oauth_account`, the proxy selects that stored account; otherwise it
 uses the first valid account for the provider after refresh.
 
+Manage stored accounts with `droid-proxy auth status` (list), `auth disable` /
+`auth enable` (a disabled account is skipped during request-time selection), and
+`auth logout` (delete a token file). Per-model OAuth health is also surfaced in
+the `oauth_auth` object on `/v1/models`. See [OAUTH.md](OAUTH.md) for details.
+
 ## Factory provider × upstream protocol matrix
 
 | factory_provider | upstream_protocol | Droid hits | Tier | Status in this build |

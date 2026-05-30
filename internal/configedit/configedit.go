@@ -199,8 +199,6 @@ func indexOfAlias(seq *yaml.Node, alias string) int {
 
 func validateModel(m *config.Model) error {
 	clone := *m
-	caps := m.Capabilities
-	clone.Capabilities = caps
 	if err := config.HydrateModel(&clone); err != nil {
 		return err
 	}

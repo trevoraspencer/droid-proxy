@@ -73,6 +73,18 @@ curl -sS http://127.0.0.1:8787/v1/responses \
   }' | jq '.output'
 ```
 
+## Manage accounts
+
+```bash
+./droid-proxy auth status codex                  # list accounts + expiry
+./droid-proxy auth disable codex user@example.com
+./droid-proxy auth logout  codex user@example.com
+```
+
+Check the model is logged in: `curl -s http://127.0.0.1:8787/v1/models | jq
+'.data[] | select(.oauth_auth) | {id, oauth_auth}'`. See
+[OAUTH.md](../OAUTH.md#managing-accounts) for the full reference.
+
 ## Notes
 
 - Replace `upstream_model` with the Codex model ID your account supports.

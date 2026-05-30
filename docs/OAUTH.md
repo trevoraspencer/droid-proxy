@@ -130,9 +130,11 @@ Token files are named from the provider and account, for example:
 - `xai-user@example.com.json`
 
 Each file contains access and refresh tokens plus metadata (email, expiry).
-Codex token files may also include passive health fields such as
-`codex_quota`, `rate_limit_reset_at`, and `last_seen_at`; these are hints from
-upstream response headers/events and are not used for load balancing yet.
+A `disabled` flag (toggled by `auth enable`/`auth disable`) marks accounts the
+proxy should skip during request-time selection. Codex token files may also
+include passive health fields such as `codex_quota`, `rate_limit_reset_at`, and
+`last_seen_at`; these are hints from upstream response headers/events and are
+not used for load balancing yet.
 
 ## Multi-account selection
 
@@ -145,8 +147,68 @@ To pin a model to one account, set `oauth_account` on the model entry:
 ```
 
 The proxy matches against email, subject, account ID, or filename. If
-`oauth_account` is unset, the first valid account for that provider is used
-after refresh.
+`oauth_account` is unset, the first valid (non-disabled) account for that
+provider is used after refresh.
+
+## Managing accounts
+
+Inspect and manage stored accounts without re-running a login. These commands
+work from the CLI; the same actions are available in the `droid-proxy config`
+dashboard (press `o`).
+
+```bash
+./droid-proxy auth status                        # both providers
+./droid-proxy auth status codex                  # one provider
+./droid-proxy auth disable xai user@example.com  # stop using an account
+./droid-proxy auth enable  xai user@example.com  # re-enable it
+./droid-proxy auth logout  codex user@example.com
+```
+
+`auth status` prints each stored account:
+
+```text
+OAuth auth directory: /Users/you/.droid-proxy/auth
+codex:
+  - provider: codex
+    account: user@example.com
+    email: user@example.com
+    expires: 2026-05-29T21:00:00Z
+    last_refresh: 2026-05-29T20:00:00Z
+    disabled: false
+    path: /Users/you/.droid-proxy/auth/codex-user@example.com.json
+xai:
+  (no accounts)
+```
+
+- **`disable`** sets the `disabled` flag; the proxy then skips that account when
+  picking a token for requests. Use it to park a rate-limited or secondary
+  account without deleting its tokens.
+- **`enable`** clears the flag.
+- **`logout`** deletes the token file entirely (re-run `auth <provider>` to log
+  back in).
+
+`<account>` is the same selector accepted by `oauth_account`: email, subject
+(`sub`), account ID, or token filename.
+
+## Checking OAuth health
+
+`/v1/models` includes an `oauth_auth` object for every model that uses an OAuth
+provider, summarizing the accounts that match the model's `oauth_account`:
+
+```bash
+curl -s http://127.0.0.1:8787/v1/models \
+  | jq '.data[] | select(.oauth_auth) | {id, oauth_auth}'
+```
+
+| Field | Meaning |
+|-------|---------|
+| `provider` | The model's `oauth_provider` (`codex` or `xai`). |
+| `pinned_account` | The model's `oauth_account`, or empty for "any account". |
+| `matching_account_count` | Stored accounts matching the pin. |
+| `active_count` | Matching accounts that are enabled and not expiring. |
+| `disabled_count` | Matching accounts marked disabled. |
+| `expired_or_expiring_count` | Matching accounts whose access token is expired or within the 5-minute refresh window. |
+| `missing_auth` | `true` when no stored account matches — log in or fix `oauth_account`. |
 
 ## Auto-refresh
 
@@ -192,6 +254,27 @@ Codex clients, including `x-codex-installation-id`, `x-client-request-id`,
 `session_id`, `x-codex-window-id`, and `OpenAI-Beta`. The same installation and
 window identifiers are merged into `client_metadata` without overwriting caller
 provided metadata keys.
+
+## xAI request handling
+
+For xAI Grok Build OAuth requests, the proxy adjusts the outbound `/v1/responses`
+payload so it stays compatible with the Grok agent endpoint. These changes are
+applied automatically — you do not configure them:
+
+- Drops `service_tier` (not accepted on the OAuth endpoint).
+- Sets `prompt_cache_key` from the downstream session header (`X-Session-ID`,
+  `Session_id`, or `X-Client-Request-Id`) when the caller did not provide one.
+- Normalizes `tools` for agent compatibility: flattens namespace/grouped tools,
+  drops unsupported tools (`tool_search`, `image_generation`, `apply_patch`),
+  converts `custom` tools to `function`, strips JSON-schema `pattern`/`format`
+  and enum values containing `/`, and removes unsupported web-search fields
+  (`search_context_size`, `user_location`, domain filters, etc.).
+- Adds `reasoning.encrypted_content` to `include` when the request carries
+  reasoning, so encrypted reasoning round-trips across turns.
+
+For streamed responses the proxy also repairs `response.completed` events whose
+`output` arrives empty or split, reconstructing it from the preceding
+`response.output_item.done` events so Droid receives a complete final message.
 
 ## Verify
 

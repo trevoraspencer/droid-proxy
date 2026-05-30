@@ -4,8 +4,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
+
+// ParseEnvValue decodes a raw env value. Double-quoted values are unescaped via
+// strconv.Unquote (so they round-trip with values written using %q); on failure
+// or for unquoted/single-quoted values it falls back to trimming surrounding
+// quotes, preserving the behavior of hand-written env files.
+func ParseEnvValue(raw string) string {
+	v := strings.TrimSpace(raw)
+	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
+		if unq, err := strconv.Unquote(v); err == nil {
+			return unq
+		}
+	}
+	return strings.Trim(v, `"'`)
+}
 
 // LoadEnvFile reads KEY=VALUE lines from path into the process environment.
 // Supports optional leading "export " and double-quoted values.
@@ -32,8 +47,7 @@ func LoadEnvFile(path string) error {
 			return fmt.Errorf("%s:%d: invalid env line %q", path, lineNum+1, line)
 		}
 		key = strings.TrimSpace(key)
-		val = strings.TrimSpace(val)
-		val = strings.Trim(val, `"'`)
+		val = ParseEnvValue(val)
 		if key == "" {
 			return fmt.Errorf("%s:%d: empty env key", path, lineNum+1)
 		}
