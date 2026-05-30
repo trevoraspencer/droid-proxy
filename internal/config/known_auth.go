@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -106,10 +107,50 @@ var knownAuthRegistry = map[string]KnownAuth{
 	},
 }
 
+// knownAuthLabels maps registry keys to human-friendly labels for pickers.
+// Missing entries fall back to the registry key.
+var knownAuthLabels = map[string]string{
+	"deepseek":            "DeepSeek",
+	"openai":              "OpenAI",
+	"anthropic":           "Anthropic",
+	"xai":                 "xAI (Grok, API key)",
+	"kimi":                "Kimi (Moonshot)",
+	"groq":                "Groq",
+	"fireworks":           "Fireworks AI",
+	"zai":                 "Z.AI (main, legacy alias)",
+	"zai-main-api":        "Z.AI (main API)",
+	"zai-coding-api":      "Z.AI (GLM Coding Plan)",
+	"mimo":                "Xiaomi MiMo",
+	"mimo-token-plan-cn":  "Xiaomi MiMo (Token Plan, CN)",
+	"mimo-token-plan-sgp": "Xiaomi MiMo (Token Plan, SGP)",
+	"mimo-token-plan-ams": "Xiaomi MiMo (Token Plan, AMS)",
+	"ollama":              "Ollama (local)",
+	"vllm":                "vLLM (local)",
+}
+
+// Label returns a human-friendly display name for the provider.
+func (k KnownAuth) Label() string {
+	if l, ok := knownAuthLabels[k.Name]; ok {
+		return l
+	}
+	return k.Name
+}
+
 // LookupKnownAuth returns a known auth descriptor by lowercase name.
 func LookupKnownAuth(name string) (KnownAuth, bool) {
 	a, ok := knownAuthRegistry[strings.ToLower(strings.TrimSpace(name))]
 	return a, ok
+}
+
+// KnownAuthList returns all registered providers sorted by name. Used by the
+// interactive config UI to render a provider picker.
+func KnownAuthList() []KnownAuth {
+	out := make([]KnownAuth, 0, len(knownAuthRegistry))
+	for _, ka := range knownAuthRegistry {
+		out = append(out, ka)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // HydrateModel fills empty fields on m from the known_auth registry (if set).

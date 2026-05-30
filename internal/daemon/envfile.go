@@ -58,3 +58,42 @@ func ResolveEnvFile(workDir string) string {
 	}
 	return filepath.Join(StateDir(), "env")
 }
+
+// ManagedEnvFile is the path to the secrets file written by `droid-proxy
+// config` (~/.droid-proxy/env).
+func ManagedEnvFile() string {
+	return filepath.Join(StateDir(), "env")
+}
+
+// LoadEnvFiles loads multiple env files in order. Later files override earlier
+// ones (each call uses os.Setenv). Empty or missing paths are skipped.
+func LoadEnvFiles(paths ...string) error {
+	for _, p := range paths {
+		if err := LoadEnvFile(p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// LoadLayeredEnv loads the managed secrets file (~/.droid-proxy/env) as the
+// base layer, then an optional explicit env file that overrides it. When
+// explicit is empty, the resolved repo env file (.env.local etc.) is used so
+// keys onboarded via `droid-proxy config` are always available regardless of
+// whether a repo .env.local also exists.
+func LoadLayeredEnv(workDir, explicit string) error {
+	managed := ManagedEnvFile()
+	if err := LoadEnvFile(managed); err != nil {
+		return err
+	}
+	override := explicit
+	if override == "" {
+		override = ResolveEnvFile(workDir)
+	}
+	if override != "" && override != managed {
+		if err := LoadEnvFile(override); err != nil {
+			return err
+		}
+	}
+	return nil
+}

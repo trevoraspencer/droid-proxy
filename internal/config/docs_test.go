@@ -314,22 +314,22 @@ func TestDocsCLIDocumented(t *testing.T) {
 func TestDocsExamplePagesExistForKnownAuth(t *testing.T) {
 	providers := readRepoFile(t, "docs/PROVIDERS.md")
 	wantExample := map[string]string{
-		"deepseek":              "examples/deepseek.md",
-		"openai":                "examples/openai.md",
-		"anthropic":             "examples/anthropic.md",
-		"xai":                   "examples/xai.md",
-		"kimi":                  "examples/kimi.md",
-		"groq":                  "examples/groq.md",
-		"fireworks":             "examples/fireworks.md",
-		"zai":                   "examples/zai.md",
-		"zai-main-api":          "examples/zai.md",
-		"zai-coding-api":        "examples/zai.md",
-		"mimo":                  "examples/mimo.md",
-		"mimo-token-plan-cn":    "examples/mimo.md",
-		"mimo-token-plan-sgp":   "examples/mimo.md",
-		"mimo-token-plan-ams":   "examples/mimo.md",
-		"ollama":                "examples/local-ollama.md",
-		"vllm":                  "examples/local-vllm.md",
+		"deepseek":            "examples/deepseek.md",
+		"openai":              "examples/openai.md",
+		"anthropic":           "examples/anthropic.md",
+		"xai":                 "examples/xai.md",
+		"kimi":                "examples/kimi.md",
+		"groq":                "examples/groq.md",
+		"fireworks":           "examples/fireworks.md",
+		"zai":                 "examples/zai.md",
+		"zai-main-api":        "examples/zai.md",
+		"zai-coding-api":      "examples/zai.md",
+		"mimo":                "examples/mimo.md",
+		"mimo-token-plan-cn":  "examples/mimo.md",
+		"mimo-token-plan-sgp": "examples/mimo.md",
+		"mimo-token-plan-ams": "examples/mimo.md",
+		"ollama":              "examples/local-ollama.md",
+		"vllm":                "examples/local-vllm.md",
 	}
 	for name, example := range wantExample {
 		if !strings.Contains(providers, example) {

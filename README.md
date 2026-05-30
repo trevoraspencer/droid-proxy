@@ -40,6 +40,23 @@ go build -o droid-proxy ./cmd/droid-proxy
 
 Requires Go 1.26.3 or newer in the Go 1.26 line. The build produces a single static binary.
 
+## Quickstart: interactive setup
+
+The easiest way to onboard a provider and model is the interactive dashboard:
+
+```bash
+./droid-proxy config
+```
+
+It picks a provider from the built-in registry (or a custom endpoint / OAuth),
+prompts for the API key (stored in `~/.droid-proxy/env`, chmod 600), discovers
+available models from the provider, writes your `config.yaml`, and syncs the
+entry into Factory's `~/.factory/settings.json` — all without hand-editing
+three files. Press `r` to restart the proxy when done. See
+[`docs/CLI.md`](docs/CLI.md#interactive-config-dashboard).
+
+The manual, file-based flow is below.
+
 ## Quickstart: DeepSeek via Droid
 
 1. **Configure droid-proxy.**
@@ -179,7 +196,7 @@ Confirm `baseUrl` in Factory settings matches the proxy listen address.
 | Daemon / launchd logs | `~/.droid-proxy/stdout.log`, `stderr.log` | Written by `start` and `service install` |
 | OAuth tokens | `~/.droid-proxy/auth/*.json` | From `auth codex` / `auth xai` |
 | Foreground logs | stderr | Unless you redirect manually |
-| Upstream API keys | Your env / `.env.local` | Never written to disk by the proxy |
+| Upstream API keys | Your env / `.env.local`, or `~/.droid-proxy/env` | Only written to disk (chmod 600) when you save them via `droid-proxy config` |
 
 ## Development
 

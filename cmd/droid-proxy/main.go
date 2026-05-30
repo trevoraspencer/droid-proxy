@@ -20,6 +20,7 @@ import (
 	"droid-proxy/internal/logging"
 	"droid-proxy/internal/oauth"
 	"droid-proxy/internal/server"
+	"droid-proxy/internal/tui"
 	"droid-proxy/internal/version"
 )
 
@@ -43,6 +44,9 @@ func main() {
 			return
 		case "logs":
 			runLogs(os.Args[2:])
+			return
+		case "config", "onboard":
+			runConfig(os.Args[2:])
 			return
 		}
 	}
@@ -70,7 +74,8 @@ func runServerCLI(args []string) {
 }
 
 func runServer(configPath, envFile string, foreground bool) error {
-	if err := daemon.LoadEnvFile(envFile); err != nil {
+	wd, _ := os.Getwd()
+	if err := daemon.LoadLayeredEnv(wd, envFile); err != nil {
 		return fmt.Errorf("env file: %w", err)
 	}
 	cfg, err := config.Load(configPath)
@@ -259,6 +264,17 @@ func defaultConfigPath() string {
 	return "config.yaml"
 }
 
+func runConfig(args []string) {
+	fs := flag.NewFlagSet("config", flag.ExitOnError)
+	configPath := fs.String("config", defaultConfigPath(), "path to config.yaml")
+	_ = fs.Parse(args)
+	loadConfigEnv()
+	if err := tui.Run(*configPath); err != nil {
+		fmt.Fprintf(os.Stderr, "droid-proxy config error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func runAuth(args []string) {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: droid-proxy auth <codex|xai> [--device] --config config.yaml")
@@ -293,6 +309,7 @@ func runAuth(args []string) {
 		fmt.Fprintf(os.Stderr, "unsupported oauth provider %q (must be codex or xai)\n", provider)
 		os.Exit(2)
 	}
+	loadConfigEnv()
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
@@ -412,11 +429,20 @@ func parseAuthAccountArgs(usage string, args []string) (config.OAuthProvider, st
 }
 
 func authManagerFromConfig(configPath string) (*oauth.Manager, error) {
+	loadConfigEnv()
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	return oauth.NewManager(cfg), nil
+}
+
+// loadConfigEnv loads API keys from the managed secrets file and any repo
+// env file so config.Load validation passes for commands that don't run the
+// server.
+func loadConfigEnv() {
+	wd, _ := os.Getwd()
+	_ = daemon.LoadLayeredEnv(wd, "")
 }
 
 func formatAuthStatus(manager *oauth.Manager, providers []config.OAuthProvider) (string, error) {

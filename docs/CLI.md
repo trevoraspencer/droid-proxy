@@ -8,6 +8,8 @@ daemon commands, macOS launchd integration, and OAuth login helpers.
 ```text
 droid-proxy [--config PATH] [--env-file PATH] [--foreground] [--version]
 
+droid-proxy config [--config PATH]          # interactive dashboard (alias: onboard)
+
 droid-proxy start   [--config PATH] [--env-file PATH] [--foreground]
 droid-proxy stop
 droid-proxy status
@@ -19,6 +21,36 @@ droid-proxy service uninstall
 droid-proxy auth codex|xai [--config PATH] [--no-browser] [--device]
 ```
 
+## Interactive config dashboard
+
+The fastest way to add providers and models is the interactive TUI:
+
+```bash
+./droid-proxy config            # or: ./droid-proxy onboard
+./droid-proxy config --config config.yaml
+```
+
+It is a full-screen dashboard that, from one place:
+
+- lists configured models with status badges (API key present, agent-ready,
+  Factory-synced; OAuth account health for OAuth models) and proxy status;
+- adds a model by picking a provider from the built-in registry (DeepSeek,
+  Fireworks, Groq, Kimi, Z.AI, MiMo, xAI, OpenAI, Anthropic, Ollama, vLLM, …),
+  a custom OpenAI-compatible endpoint, or Codex/xAI OAuth;
+- prompts for the provider API key and stores it in `~/.droid-proxy/env`
+  (chmod 600) — no manual `.env` editing;
+- discovers available models from the provider's `/models` endpoint so you pick
+  from a list instead of pasting a slug (falls back to manual entry);
+- writes the model to your YAML config (comments preserved);
+- syncs the entry into Factory's `~/.factory/settings.json` (`s` for one, `S`
+  for all), so you do not hand-edit `customModels`;
+- manages OAuth accounts (`o`): browser or device login, enable/disable, logout;
+- restarts the proxy (`r`) so changes take effect.
+
+Keys onboarded here are written to `~/.droid-proxy/env`, which is always loaded
+when the proxy starts (see env file resolution below), so they are picked up
+even when a repo `.env.local` also exists.
+
 ## Config and env file resolution
 
 **Config path** (for `start`, `service install`, and `auth`):
@@ -28,17 +60,19 @@ droid-proxy auth codex|xai [--config PATH] [--no-browser] [--device]
 
 Override with `--config /absolute/or/relative/path.yaml`.
 
-**Env file** (for `start` and launchd):
+**Env file** (for `start`, `auth`, and launchd):
 
-When `--env-file` is omitted, `start` and `service install` pick the first file
-that exists in this order:
+API keys are loaded in layers, with later layers overriding earlier ones:
 
-1. `.env.live-e2e.local` in the config directory (maintainer live validation only)
-2. `.env.local` in the config directory
-3. `~/.droid-proxy/env`
+1. `~/.droid-proxy/env` — the managed secrets file written by
+   `droid-proxy config` (always loaded as the base layer).
+2. The repo env file: `.env.live-e2e.local` (maintainer live validation only)
+   or, otherwise, `.env.local` in the config directory — or the `--env-file`
+   path when given explicitly.
 
-Pass `--env-file` explicitly to override. Env files use `KEY=value` or
-`export KEY=value` lines; `#` comments and blank lines are ignored.
+This means keys onboarded via `droid-proxy config` are available even when a
+repo `.env.local` also exists. Env files use `KEY=value` or `export KEY=value`
+lines; `#` comments and blank lines are ignored.
 
 Recommended end-user setup:
 
@@ -151,7 +185,7 @@ All persistent runtime files live under `~/.droid-proxy/`:
 |------|---------|
 | `droid-proxy.pid` | Background daemon PID |
 | `stdout.log` / `stderr.log` | Daemon and launchd output |
-| `env` | Fallback env file when no `.env.local` exists |
+| `env` | Managed secrets file written by `droid-proxy config` (chmod 600); always loaded as the base env layer |
 | `auth/*.json` | OAuth token files |
 
 The reasoning cache is **in-memory only** and is not stored here.

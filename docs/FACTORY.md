@@ -15,6 +15,11 @@ things: the proxy's `config.yaml` (which upstream models exist) and Droid's
 The model alias in Factory settings must match the `alias` in `config.yaml`.
 Droid sends that string as the `model` field on each request.
 
+> **Tip:** `droid-proxy config` writes these `customModels` entries for you.
+> Add a model in the dashboard, then press `s` (selected) or `S` (all) to sync
+> into `~/.factory/settings.json` — no hand-editing required. The manual schema
+> below still applies if you prefer to edit the file yourself.
+
 ## Required `settings.json` fields
 
 Each entry in `customModels` needs these fields (current Factory schema):
