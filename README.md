@@ -43,6 +43,23 @@ go build -o droid-proxy ./cmd/droid-proxy
 
 Requires Go 1.26.3 or newer in the Go 1.26 line. The build produces a single static binary.
 
+To run `droid-proxy` commands from any directory, put the built binary on your
+shell `PATH`. On macOS or Linux, a symlink in `~/.local/bin` keeps the source
+checkout in place while making the command globally available:
+
+```bash
+mkdir -p ~/.local/bin
+ln -sf "$(pwd)/droid-proxy" ~/.local/bin/droid-proxy
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+droid-proxy status
+```
+
+After this, use `droid-proxy start`, `droid-proxy status`, `droid-proxy config`,
+and `droid-proxy update` from any working directory. The `~/.droid-proxy/`
+directory is only for runtime state, logs, saved auth tokens, and managed env
+files; it does not contain the executable.
+
 To update a source install later:
 
 ```bash
