@@ -114,7 +114,10 @@ middleware features that consume this schema.
 DeepSeek (and DeepSeek-compatible) APIs return a `reasoning_content` field
 alongside tool calls. Anthropic-style "extended thinking" tools require this
 field to be re-supplied on subsequent turns. droid-proxy captures and replays
-it automatically for models with `capabilities.reasoning: deepseek`.
+it automatically for models with `capabilities.reasoning: deepseek`. Provider
+profiles such as `deepseek` and `mimo` also set provider-specific
+`extra_args.thinking.type: enabled`; replay and upstream thinking are related
+but separate settings.
 
 | key | type | default | description |
 |---|---|---|---|

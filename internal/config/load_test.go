@@ -525,6 +525,12 @@ models:
 	if cfg.Models[1].Capabilities.Reasoning != ReasoningDeepSeek {
 		t.Fatalf("deepseek did not hydrate reasoning: %q", cfg.Models[1].Capabilities.Reasoning)
 	}
+	if got := nestedString(cfg.Models[1].ExtraArgs, "thinking", "type"); got != "enabled" {
+		t.Fatalf("deepseek thinking.type = %q, want enabled", got)
+	}
+	if got, _ := cfg.Models[1].ExtraArgs["reasoning_effort"].(string); got != "high" {
+		t.Fatalf("deepseek reasoning_effort = %q, want high", got)
+	}
 	if cfg.Models[2].Capabilities.Reasoning != ReasoningNone {
 		t.Fatalf("explicit reasoning override overwritten: %q", cfg.Models[2].Capabilities.Reasoning)
 	}
@@ -575,7 +581,45 @@ models:
 			if m.Capabilities.Reasoning != ReasoningDeepSeek {
 				t.Fatalf("reasoning = %q, want %q", m.Capabilities.Reasoning, ReasoningDeepSeek)
 			}
+			if got := nestedString(m.ExtraArgs, "thinking", "type"); got != "enabled" {
+				t.Fatalf("thinking.type = %q, want enabled", got)
+			}
 		})
+	}
+}
+
+func TestLoad_KnownAuthExtraArgsExplicitOverridePreserved(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "secret")
+	t.Setenv("MIMO_API_KEY", "secret")
+
+	in := `
+models:
+  - alias: deepseek
+    factory_provider: generic-chat-completion-api
+    known_auth: deepseek
+    extra_args:
+      thinking:
+        type: disabled
+      reasoning_effort: max
+  - alias: mimo
+    factory_provider: generic-chat-completion-api
+    known_auth: mimo
+    extra_args:
+      thinking:
+        type: disabled
+`
+	cfg, err := parse([]byte(in))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := nestedString(cfg.Models[0].ExtraArgs, "thinking", "type"); got != "disabled" {
+		t.Fatalf("deepseek explicit thinking.type overwritten: %q", got)
+	}
+	if got, _ := cfg.Models[0].ExtraArgs["reasoning_effort"].(string); got != "max" {
+		t.Fatalf("deepseek explicit reasoning_effort overwritten: %q", got)
+	}
+	if got := nestedString(cfg.Models[1].ExtraArgs, "thinking", "type"); got != "disabled" {
+		t.Fatalf("mimo explicit thinking.type overwritten: %q", got)
 	}
 }
 
@@ -892,4 +936,10 @@ func TestModelAgentReadyRequiresSupportedRuntimePath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func nestedString(m map[string]any, key, nested string) string {
+	child, _ := m[key].(map[string]any)
+	got, _ := child[nested].(string)
+	return got
 }

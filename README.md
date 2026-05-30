@@ -114,6 +114,10 @@ The manual, file-based flow is below.
        upstream_model: deepseek-v4-flash
        capabilities:
          reasoning: deepseek
+       extra_args:
+         thinking:
+           type: enabled
+         reasoning_effort: high
    ```
 
 2. **Start the proxy.**
@@ -201,7 +205,10 @@ For `xai-responses`, reasoning passthrough is model-specific:
 currently rejects Factory's top-level effort, while `grok-4.3` uses
 `capabilities.factory_reasoning: passthrough`. For DeepSeek-style OpenAI Chat
 providers, `capabilities.reasoning: deepseek` enables reasoning replay across
-tool turns; it is separate from Factory's UI reasoning selector.
+tool turns; it is separate from Factory's UI reasoning selector. For DeepSeek
+and MiMo `known_auth` profiles, droid-proxy also sends provider-specific
+thinking-on request fields so these models do not depend on Factory's generic
+custom-model reasoning badge.
 Provider-specific details are documented in [`docs/OAUTH.md`](docs/OAUTH.md).
 
 Use separate aliases when a provider exposes a distinct fast/speed mode, so the

@@ -16,6 +16,9 @@ type KnownAuth struct {
 	UpstreamProtocol UpstreamProtocol
 	NoAuth           bool
 	DefaultReasoning ReasoningMode
+	// ExtraArgs are merged into every outgoing request to this provider unless
+	// the model config already sets that top-level key.
+	ExtraArgs map[string]any
 	// AuthHeader and AuthScheme override the defaults (Authorization / Bearer)
 	// used for OpenAI-compatible providers. Empty AuthScheme means raw header value.
 	AuthHeader string
@@ -32,6 +35,10 @@ var knownAuthRegistry = map[string]KnownAuth{
 		Name: "deepseek", BaseURL: "https://api.deepseek.com/v1",
 		APIKeyEnv: "DEEPSEEK_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
 		DefaultReasoning: ReasoningDeepSeek,
+		ExtraArgs: map[string]any{
+			"thinking":         map[string]any{"type": "enabled"},
+			"reasoning_effort": "high",
+		},
 	},
 	"openai": {
 		Name: "openai", BaseURL: "https://api.openai.com/v1",
@@ -78,24 +85,28 @@ var knownAuthRegistry = map[string]KnownAuth{
 		APIKeyEnv: "MIMO_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
 		DefaultReasoning: ReasoningDeepSeek,
 		AuthHeader:       "api-key",
+		ExtraArgs:        thinkingEnabledExtraArgs(),
 	},
 	"mimo-token-plan-cn": {
 		Name: "mimo-token-plan-cn", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1",
 		APIKeyEnv: "MIMO_TOKEN_PLAN_CN_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
 		DefaultReasoning: ReasoningDeepSeek,
 		AuthHeader:       "api-key",
+		ExtraArgs:        thinkingEnabledExtraArgs(),
 	},
 	"mimo-token-plan-sgp": {
 		Name: "mimo-token-plan-sgp", BaseURL: "https://token-plan-sgp.xiaomimimo.com/v1",
 		APIKeyEnv: "MIMO_TOKEN_PLAN_SGP_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
 		DefaultReasoning: ReasoningDeepSeek,
 		AuthHeader:       "api-key",
+		ExtraArgs:        thinkingEnabledExtraArgs(),
 	},
 	"mimo-token-plan-ams": {
 		Name: "mimo-token-plan-ams", BaseURL: "https://token-plan-ams.xiaomimimo.com/v1",
 		APIKeyEnv: "MIMO_TOKEN_PLAN_AMS_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
 		DefaultReasoning: ReasoningDeepSeek,
 		AuthHeader:       "api-key",
+		ExtraArgs:        thinkingEnabledExtraArgs(),
 	},
 	"ollama": {
 		Name: "ollama", BaseURL: "http://127.0.0.1:11434/v1",
@@ -105,6 +116,10 @@ var knownAuthRegistry = map[string]KnownAuth{
 		Name: "vllm", BaseURL: "http://127.0.0.1:8000/v1",
 		UpstreamProtocol: UpstreamOpenAIChat, NoAuth: true,
 	},
+}
+
+func thinkingEnabledExtraArgs() map[string]any {
+	return map[string]any{"thinking": map[string]any{"type": "enabled"}}
 }
 
 // knownAuthLabels maps registry keys to human-friendly labels for pickers.
@@ -174,6 +189,16 @@ func HydrateModel(m *Model) error {
 	}
 	if ka.DefaultReasoning != "" && m.Capabilities.Reasoning == "" {
 		m.Capabilities.Reasoning = ka.DefaultReasoning
+	}
+	if len(ka.ExtraArgs) > 0 {
+		if m.ExtraArgs == nil {
+			m.ExtraArgs = make(map[string]any, len(ka.ExtraArgs))
+		}
+		for k, v := range ka.ExtraArgs {
+			if _, set := m.ExtraArgs[k]; !set {
+				m.ExtraArgs[k] = v
+			}
+		}
 	}
 	if len(ka.ExtraHeaders) > 0 {
 		if m.ExtraHeaders == nil {

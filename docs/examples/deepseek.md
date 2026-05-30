@@ -42,9 +42,14 @@ models:
     max_context_tokens: 64000
     capabilities:
       reasoning: deepseek
+    extra_args:
+      thinking:
+        type: enabled
+      reasoning_effort: high
 ```
 
-`known_auth: deepseek` fills in `base_url`, `api_key_env`, and reasoning defaults.
+`known_auth: deepseek` fills in `base_url`, `api_key_env`, thinking-on request
+defaults, and reasoning replay defaults.
 See [PROVIDERS.md](../PROVIDERS.md) for tier details.
 
 ## ~/.factory/settings.json
@@ -95,4 +100,7 @@ curl -sS http://127.0.0.1:8787/v1/chat/completions \
 
 - Enable `capabilities.reasoning: deepseek` (or use `known_auth: deepseek`) for
   reasoning replay on multi-turn tool conversations.
+- DeepSeek thinking defaults to enabled upstream, but droid-proxy sets
+  `extra_args.thinking.type: enabled` and `reasoning_effort: high` for
+  `known_auth: deepseek` so the request is explicit.
 - Ready-to-paste Factory snippet: [generic.json](../factory-settings/generic.json).

@@ -65,6 +65,11 @@ Custom OpenAI-compatible upstreams (LiteLLM, custom self-hosted gateways, etc.)
 work the same as the above — set `base_url`, `api_key_env`, and
 `upstream_protocol: openai-chat`. No `known_auth` needed.
 
+For DeepSeek, `known_auth: deepseek` enables `capabilities.reasoning: deepseek`
+and sends `extra_args.thinking.type: enabled` plus `reasoning_effort: high`.
+The replay capability keeps tool-call turns coherent; the `extra_args` make
+upstream thinking explicit.
+
 For Z.AI, use `zai-coding-api` with GLM Coding Plan keys. Use `zai-main-api`
 with normal Z.AI API keys. The older `zai` profile remains as a compatibility
 alias for the main API and still reads `ZAI_API_KEY`.
@@ -73,9 +78,10 @@ alias for the main API and still reads `ZAI_API_KEY`.
 
 MiMo is OpenAI Chat-compatible and should be exposed to Droid as
 `generic-chat-completion-api`. The built-in profiles use Xiaomi's documented
-`api-key` header and enable DeepSeek-style reasoning replay by default because
-MiMo thinking mode returns `reasoning_content` with tool calls and requires it
-to be sent back in later turns.
+`api-key` header, send `extra_args.thinking.type: enabled`, and enable
+DeepSeek-style reasoning replay by default because MiMo thinking mode returns
+`reasoning_content` with tool calls and requires it to be sent back in later
+turns.
 
 Use `mimo-v2.5-pro` for coding and long reasoning. Use `mimo-v2.5` when
 multimodal input is needed. Avoid new configs with legacy `mimo-v2-pro` or

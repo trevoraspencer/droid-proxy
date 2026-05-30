@@ -51,6 +51,7 @@ models:
 - `api_key_env: MIMO_API_KEY`
 - `api-key` auth header (not Bearer)
 - `capabilities.reasoning: deepseek`
+- `extra_args.thinking.type: enabled`
 
 ### Token Plan variants
 

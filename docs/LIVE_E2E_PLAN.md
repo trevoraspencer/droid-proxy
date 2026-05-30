@@ -287,6 +287,10 @@ models:
     max_context_tokens: 64000
     capabilities:
       reasoning: deepseek
+    extra_args:
+      thinking:
+        type: enabled
+      reasoning_effort: high
 ```
 
 Required environment:
