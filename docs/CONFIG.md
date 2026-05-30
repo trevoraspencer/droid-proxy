@@ -11,7 +11,14 @@ A working example lives at [`config.example.yaml`](../config.example.yaml).
 The YAML file describes the HTTP server only. Starting, stopping, and installing
 as a background service are CLI commands — see [CLI.md](CLI.md).
 
-Typical flow:
+Typical flow (interactive — preferred):
+
+```bash
+./droid-proxy config    # onboard providers/models, store keys, sync Factory
+./droid-proxy start --config config.yaml
+```
+
+Manual file-based alternative:
 
 ```bash
 cp config.example.yaml config.yaml
@@ -22,15 +29,24 @@ set -a && source .env.local && set +a
 
 ## Environment files
 
-Load API keys from a shell-style env file instead of exporting them manually.
+Load API keys from shell-style env files instead of exporting them manually.
+Keys are loaded in **layers**, with later layers overriding earlier ones. See
+[CLI.md](CLI.md#config-and-env-file-resolution) for the full resolution order.
 
-| Mechanism | Behavior |
-|-----------|----------|
-| `--env-file PATH` | Explicit path; used by foreground mode and `start` |
-| Auto-resolution | When `--env-file` is omitted, `start` and `service install` pick the first existing file: `.env.live-e2e.local` → `.env.local` → `~/.droid-proxy/env` (relative to the config directory for the first two) |
+| Layer | Source | Behavior |
+|-------|--------|----------|
+| Base | `~/.droid-proxy/env` | Managed secrets file written by `droid-proxy config` (chmod 600). Always loaded. |
+| Override | `--env-file PATH` | Explicit path for foreground mode, `start`, and `service install`. |
+| Override (default) | Repo env file | When `--env-file` is omitted: `.env.live-e2e.local` (maintainer live validation only) or, otherwise, `.env.local` in the config directory. |
+
+This means keys onboarded via `droid-proxy config` are available even when a
+repo `.env.local` also exists.
 
 Env files support `KEY=value` or `export KEY=value` lines. Comments (`#`) and
-blank lines are ignored. Missing files are skipped without error.
+blank lines are ignored when loading. Missing files are skipped without error.
+Values written by `droid-proxy config` use `export KEY="..."` quoting; the
+loader unescapes double-quoted values so special characters round-trip
+correctly.
 
 See [`.env.local.example`](../.env.local.example) for a template of all supported
 API key env vars. OAuth tokens are **not** loaded from env files — use

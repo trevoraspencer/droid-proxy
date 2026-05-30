@@ -24,6 +24,10 @@ legacy compatibility names rather than new defaults.
 - API key from [DeepSeek](https://platform.deepseek.com/)
 - Env var: `DEEPSEEK_API_KEY`
 
+> Alternatively, run `./droid-proxy config` to set keys in `~/.droid-proxy/env`,
+> write `config.yaml`, and sync Factory — see
+> [CLI.md](../CLI.md#interactive-config-dashboard).
+
 ## config.yaml
 
 ```yaml

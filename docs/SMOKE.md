@@ -155,7 +155,8 @@ curl -sS http://127.0.0.1:8787/v1/responses \
 ## 8. Drive Droid
 
 1. Start the proxy: `./droid-proxy start --config config.yaml`
-2. Add a model entry to `~/.factory/settings.json` (see [FACTORY.md](FACTORY.md)).
+2. Add models via `./droid-proxy config` and sync to Factory (`s`/`S`), or
+   hand-edit `~/.factory/settings.json` — see [FACTORY.md](FACTORY.md).
 3. Select the model in Droid.
 4. Send a message; confirm a response.
 5. Ask the agent to use a tool ("read the README"); confirm tool calls flow.
@@ -187,4 +188,9 @@ After code changes, also run:
 go test ./...
 ```
 
-Workflow validation uses local fake upstreams and does not require provider API keys.
+Workflow validation uses local fake upstreams and does not require provider API
+keys. The runtime smoke test
+(`TestWorkflowValidation_RuntimeSmokeBinaryStartReadinessShutdownCleanup` in
+`internal/server/workflow_runtime_smoke_test.go`) builds and exercises a real
+binary against fake upstreams; it requires port **8787** to be free (stop a
+running daemon first).

@@ -20,6 +20,10 @@ API key type.
 | `zai-coding-api` | `ZAI_CODING_API_KEY` | GLM Coding Plan keys |
 | `zai` | `ZAI_API_KEY` | Legacy alias for main API (compatibility) |
 
+> Alternatively, run `./droid-proxy config` to set keys in `~/.droid-proxy/env`,
+> write `config.yaml`, and sync Factory — see
+> [CLI.md](../CLI.md#interactive-config-dashboard).
+
 ## config.yaml
 
 ### Main API (recommended)

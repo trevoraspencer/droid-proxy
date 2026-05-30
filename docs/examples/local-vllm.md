@@ -16,6 +16,9 @@ vLLM's OpenAI-compatible API server defaults to port 8000.
 - vLLM running with `--api-server` (or equivalent)
 - No API key by default; optional if you start vLLM with `--api-key`
 
+> Alternatively, run `./droid-proxy config` and pick vLLM from the provider
+> list — see [CLI.md](../CLI.md#interactive-config-dashboard).
+
 ## config.yaml
 
 ```yaml

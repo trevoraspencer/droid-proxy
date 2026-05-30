@@ -18,6 +18,10 @@ Uses browser PKCE login. See [OAUTH.md](../OAUTH.md) for the full walkthrough.
 - xAI Grok Build subscription
 - OAuth login completed: `./droid-proxy auth xai --config config.yaml`
 
+> Alternatively, run `./droid-proxy config` to add OAuth models and manage
+> accounts interactively — see
+> [CLI.md](../CLI.md#interactive-config-dashboard).
+
 ## config.yaml
 
 ```yaml

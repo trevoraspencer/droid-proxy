@@ -18,6 +18,9 @@ Any model you've pulled with `ollama pull <name>` can be wired up.
 - Model pulled (e.g. `ollama pull llama3:8b`)
 - No API key required
 
+> Alternatively, run `./droid-proxy config` and pick Ollama from the provider
+> list — see [CLI.md](../CLI.md#interactive-config-dashboard).
+
 ## config.yaml
 
 ```yaml

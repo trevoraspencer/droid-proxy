@@ -16,6 +16,10 @@ For subscription-based Grok Build access, see [xai-oauth.md](xai-oauth.md).
 - API key from [xAI Console](https://console.x.ai/)
 - Env var: `XAI_API_KEY`
 
+> Alternatively, run `./droid-proxy config` to set keys in `~/.droid-proxy/env`,
+> write `config.yaml`, and sync Factory — see
+> [CLI.md](../CLI.md#interactive-config-dashboard).
+
 ## config.yaml
 
 ```yaml

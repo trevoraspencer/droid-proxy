@@ -4,6 +4,16 @@ Guides for running `droid-proxy` with [Factory Droid](https://factory.ai).
 
 ## Getting started
 
+**Interactive (preferred):**
+
+1. Read the [README](../README.md) for install.
+2. Run `./droid-proxy config` to onboard providers, store API keys, write
+   `config.yaml`, and sync Factory settings — see
+   [CLI reference](CLI.md#interactive-config-dashboard).
+3. Start the proxy — see [CLI reference](CLI.md).
+
+**Manual alternative:**
+
 1. Read the [README](../README.md) for install and a DeepSeek quickstart.
 2. Copy [`config.example.yaml`](../config.example.yaml) to `config.yaml`.
 3. Copy [`.env.local.example`](../.env.local.example) to `.env.local` and add API keys.

@@ -14,6 +14,10 @@
 - API key from [Moonshot AI](https://platform.moonshot.cn/)
 - Env var: `MOONSHOT_API_KEY`
 
+> Alternatively, run `./droid-proxy config` to set keys in `~/.droid-proxy/env`,
+> write `config.yaml`, and sync Factory — see
+> [CLI.md](../CLI.md#interactive-config-dashboard).
+
 ## config.yaml
 
 ```yaml

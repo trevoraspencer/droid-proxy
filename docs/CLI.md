@@ -40,7 +40,8 @@ It is a full-screen dashboard that, from one place:
   Fireworks, Groq, Kimi, Z.AI, MiMo, xAI, OpenAI, Anthropic, Ollama, vLLM, …),
   a custom OpenAI-compatible endpoint, or Codex/xAI OAuth;
 - prompts for the provider API key and stores it in `~/.droid-proxy/env`
-  (chmod 600) — no manual `.env` editing;
+  (chmod 600) — no manual `.env` editing; updates are line-oriented so your
+  comments, blank lines, and unrelated keys in that file are preserved;
 - discovers available models from the provider's `/models` endpoint so you pick
   from a list instead of pasting a slug (falls back to manual entry);
 - writes the model to your YAML config (comments preserved);

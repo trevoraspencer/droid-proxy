@@ -172,8 +172,10 @@ Full schema: [`docs/CONFIG.md`](docs/CONFIG.md). Highlights:
 
 **`config error: model "X": env var Y is empty`**
 
-Export the model's API key before starting, or use `${Y:-fallback}` in config.
-Load keys from `.env.local` — see [docs/CLI.md](docs/CLI.md).
+Set the key with `./droid-proxy config` (stored in `~/.droid-proxy/env`), export
+it manually, or use `${Y:-fallback}` in config. Keys load in layers: managed
+`~/.droid-proxy/env` first, then `.env.local` if present — see
+[docs/CLI.md](docs/CLI.md#config-and-env-file-resolution).
 
 **Translated Responses or Messages calls fail with a local `400`**
 

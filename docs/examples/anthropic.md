@@ -17,6 +17,10 @@ sometimes strips the `Content-Encoding` header).
 - API key from [Anthropic](https://console.anthropic.com/)
 - Env var: `ANTHROPIC_API_KEY`
 
+> Alternatively, run `./droid-proxy config` to set keys in `~/.droid-proxy/env`,
+> write `config.yaml`, and sync Factory — see
+> [CLI.md](../CLI.md#interactive-config-dashboard).
+
 ## config.yaml
 
 ```yaml

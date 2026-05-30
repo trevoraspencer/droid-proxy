@@ -18,6 +18,10 @@ chat-completions-shaped requests.
 - API key from [OpenAI](https://platform.openai.com/)
 - Env var: `OPENAI_API_KEY`
 
+> Alternatively, run `./droid-proxy config` to set keys in `~/.droid-proxy/env`,
+> write `config.yaml`, and sync Factory — see
+> [CLI.md](../CLI.md#interactive-config-dashboard).
+
 ## config.yaml
 
 ```yaml

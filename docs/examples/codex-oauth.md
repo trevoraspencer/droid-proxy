@@ -18,6 +18,10 @@ the full OAuth walkthrough.
 - OAuth login completed: `./droid-proxy auth codex --config config.yaml`
   - On headless machines, use `./droid-proxy auth codex --config config.yaml --device`.
 
+> Alternatively, run `./droid-proxy config` to add OAuth models and manage
+> accounts interactively — see
+> [CLI.md](../CLI.md#interactive-config-dashboard).
+
 ## config.yaml
 
 ```yaml

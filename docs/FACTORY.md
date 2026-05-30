@@ -19,8 +19,9 @@ Droid sends that string as the `model` field on each request.
 > Add a model in the dashboard, then press `s` (selected) or `S` (all) to sync
 > into `~/.factory/settings.json` — no hand-editing required. Each sync first
 > copies the current file to `~/.factory/settings.json.bak` (a single rolling
-> backup), so the previous version is always recoverable. The manual schema
-> below still applies if you prefer to edit the file yourself.
+> backup — each sync overwrites the previous backup), so the most recent prior
+> version is always recoverable. The manual schema below still applies if you
+> prefer to edit the file yourself.
 
 ## Required `settings.json` fields
 
@@ -77,8 +78,10 @@ client_auth:
     - "${DROID_PROXY_API_KEY}"
 ```
 
-Set the same value in Factory's `apiKey` field (or send it via Droid's
-configured auth mechanism).
+When syncing via `droid-proxy config` (`s`/`S`), the dashboard writes the
+**first** env-expanded `api_keys` entry into Factory's `apiKey` field
+automatically. If you edit `settings.json` by hand, set `apiKey` to that same
+value (or send it via Droid's configured auth mechanism).
 
 ## Choosing the right `provider`
 
@@ -124,10 +127,22 @@ for the field reference and account-management commands.
 
 ## Typical setup flow
 
+**Interactive (preferred):**
+
+1. Run `./droid-proxy config` — pick a provider, set the API key, add models,
+   and sync to Factory (`s`/`S`).
+2. Press `r` in the dashboard (or run `./droid-proxy start --config config.yaml`)
+   to start/restart the proxy.
+3. Pick the model in Droid.
+4. Run [SMOKE.md](SMOKE.md) checks if anything fails.
+
+**Manual alternative:**
+
 1. Copy and edit `config.yaml` — add model entries for providers you use.
-2. Export API keys (or use `.env.local` — see [CLI.md](CLI.md)).
+2. Export API keys (or use `.env.local` / `~/.droid-proxy/env` — see
+   [CLI.md](CLI.md)).
 3. Start the proxy: `./droid-proxy start --config config.yaml`
-4. Merge entries into `~/.factory/settings.json`.
+4. Merge entries into `~/.factory/settings.json` (see schema above).
 5. Restart Droid or refresh settings; pick the model in the UI.
 6. Run [SMOKE.md](SMOKE.md) checks if anything fails.
 

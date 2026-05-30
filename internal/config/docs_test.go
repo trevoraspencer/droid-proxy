@@ -294,6 +294,8 @@ func TestDocsREADMELinksToDocsIndex(t *testing.T) {
 func TestDocsCLIDocumented(t *testing.T) {
 	cli := readRepoFile(t, "docs", "CLI.md")
 	for _, cmd := range []string{
+		"config",
+		"onboard",
 		"start",
 		"stop",
 		"status",
@@ -302,11 +304,45 @@ func TestDocsCLIDocumented(t *testing.T) {
 		"service uninstall",
 		"auth codex",
 		"auth xai",
+		"auth status",
+		"auth enable",
+		"auth disable",
+		"auth logout",
 		"--env-file",
 		"--no-browser",
 	} {
 		if !strings.Contains(cli, cmd) {
 			t.Fatalf("docs/CLI.md must document %q", cmd)
+		}
+	}
+}
+
+func TestDocsConfigDocumentsLayeredEnv(t *testing.T) {
+	body := readRepoFile(t, "docs", "CONFIG.md")
+	for _, want := range []string{
+		"~/.droid-proxy/env",
+		"layer",
+		".env.local",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("docs/CONFIG.md must document layered env loading (%q)", want)
+		}
+	}
+	if strings.Contains(body, "pick the first existing file") {
+		t.Fatal("docs/CONFIG.md still describes stale first-existing env resolution")
+	}
+}
+
+func TestDocsFactoryDocumentsClientAuthSync(t *testing.T) {
+	body := readRepoFile(t, "docs", "FACTORY.md")
+	for _, want := range []string{
+		"droid-proxy config",
+		"client_auth",
+		"apiKey",
+		"env-expanded",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("docs/FACTORY.md must document client_auth Factory sync (%q)", want)
 		}
 	}
 }

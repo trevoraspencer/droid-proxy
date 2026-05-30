@@ -20,6 +20,10 @@ DeepSeek.
 - API key from [Xiaomi MiMo](https://www.xiaomimimo.com/) or MiMo Token Plan
 - Env var: `MIMO_API_KEY` (standard) or a Token Plan regional key (see below)
 
+> Alternatively, run `./droid-proxy config` to set keys in `~/.droid-proxy/env`,
+> write `config.yaml`, and sync Factory — see
+> [CLI.md](../CLI.md#interactive-config-dashboard).
+
 ## config.yaml
 
 Standard MiMo API:
