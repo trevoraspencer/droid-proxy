@@ -43,6 +43,16 @@ go build -o droid-proxy ./cmd/droid-proxy
 
 Requires Go 1.26.3 or newer in the Go 1.26 line. The build produces a single static binary.
 
+To update a source install later:
+
+```bash
+./droid-proxy update --dry-run
+./droid-proxy update
+```
+
+The updater fetches `origin/main` from GitHub, refuses to touch dirty or locally
+ahead checkouts, rebuilds the binary, and restarts a running proxy.
+
 ## Quickstart: interactive setup
 
 The easiest way to onboard a provider and model is the interactive dashboard:

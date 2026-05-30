@@ -302,6 +302,7 @@ func TestDocsCLIDocumented(t *testing.T) {
 		"logs",
 		"service install",
 		"service uninstall",
+		"update",
 		"auth codex",
 		"auth xai",
 		"auth status",

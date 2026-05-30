@@ -56,6 +56,14 @@ func plistPath() string {
 	return filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", launchdLabel+".plist")
 }
 
+func LaunchdInstalled() bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	_, err := os.Stat(plistPath())
+	return err == nil
+}
+
 // InstallLaunchd registers droid-proxy as a user launchd agent.
 func InstallLaunchd(configPath string) error {
 	if runtime.GOOS != "darwin" {
@@ -125,6 +133,22 @@ func loadLaunchAgent(path string) error {
 	out, err = exec.Command("launchctl", "load", path).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("launchctl bootstrap/load: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+func RestartLaunchd() error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("launchd restart is supported on macOS only")
+	}
+	if !LaunchdInstalled() {
+		return fmt.Errorf("launchd service not installed")
+	}
+	uid := os.Getuid()
+	target := "gui/" + strconv.Itoa(uid) + "/" + launchdLabel
+	out, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("launchctl kickstart: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }

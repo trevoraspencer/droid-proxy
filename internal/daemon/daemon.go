@@ -61,6 +61,7 @@ func CleanStalePID() bool {
 	}
 	if !processAlive(pid) {
 		RemovePID()
+		RemoveRuntimeMetadata()
 		return true
 	}
 	return false
@@ -74,6 +75,7 @@ func IsRunning() (int, bool) {
 	}
 	if !processAlive(pid) {
 		RemovePID()
+		RemoveRuntimeMetadata()
 		return 0, false
 	}
 	return pid, true
@@ -110,6 +112,7 @@ func StopWithTimeout(timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		if !processAlive(pid) {
 			RemovePID()
+			RemoveRuntimeMetadata()
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)

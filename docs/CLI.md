@@ -18,6 +18,8 @@ droid-proxy logs    [-n LINES] [PATH]
 droid-proxy service install   [--config PATH]
 droid-proxy service uninstall
 
+droid-proxy update [--repo PATH] [--remote origin] [--branch main] [--binary PATH] [--no-restart] [--dry-run]
+
 droid-proxy auth codex|xai [--config PATH] [--no-browser] [--device]
 droid-proxy auth status [codex|xai] [--config PATH]
 droid-proxy auth enable|disable|logout <provider> <account> [--config PATH]
@@ -160,6 +162,32 @@ The plist runs `droid-proxy start --foreground --config <abs> --env-file <resolv
 
 On Linux or other platforms, use `start` with your own process supervisor
 (systemd user unit, `tmux`, etc.) — there is no built-in service installer.
+
+## Update from GitHub
+
+Update a source checkout from the GitHub `origin/main` branch and rebuild the
+local binary:
+
+```bash
+./droid-proxy update --dry-run
+./droid-proxy update
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--repo` | Current directory, then executable directory | Path to the `droid-proxy` source checkout |
+| `--remote` | `origin` | Git remote to fetch |
+| `--branch` | `main` | Branch to update from |
+| `--binary` | Current executable | Binary path to replace after a successful build |
+| `--no-restart` | false | Leave a running proxy alone after updating the binary |
+| `--dry-run` | false | Print planned actions without fetching, merging, building, or restarting |
+
+The updater is intentionally conservative: it refuses to run with uncommitted
+files, untracked files, local-only commits, or a diverged branch. It fetches
+from `https://github.com/trevoraspencer/droid-proxy`, fast-forwards only, builds
+with Go, and atomically replaces the target binary. If the background proxy is
+running, it restarts it after the new binary is installed unless `--no-restart`
+is set.
 
 ## OAuth login
 
