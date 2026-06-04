@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,9 +25,10 @@ import (
 
 // failoverTestAccount describes a Codex account for failover tests.
 type failoverTestAccount struct {
-	email     string
-	accountID string
-	disabled  bool
+	email        string
+	accountID    string
+	disabled     bool
+	usedPercent  float64 // optional Codex primary-window used_percent for quota routing
 }
 
 // failoverTestOptions configures a failover test API.
@@ -101,6 +103,11 @@ func newCodexFailoverTestAPI(t *testing.T, opts failoverTestOptions) *testAPI {
 			Disabled:     acct.disabled,
 			Expired:      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 		}
+		if acct.usedPercent > 0 {
+			token.CodexQuota = &oauth.CodexQuota{
+				Primary: &oauth.CodexQuotaWindow{UsedPercent: acct.usedPercent},
+			}
+		}
 		if _, err := manager.SaveToken(token); err != nil {
 			t.Fatal(err)
 		}
@@ -110,8 +117,22 @@ func newCodexFailoverTestAPI(t *testing.T, opts failoverTestOptions) *testAPI {
 	if err != nil {
 		t.Fatal(err)
 	}
+	lb := config.LoadBalancing{
+		Strategy:          strategy,
+		MaxFailovers:      opts.maxFailovers,
+		RateLimitCooldown: rlc,
+		ErrorCooldown:     ec,
+	}
+	var affinity *oauth.AffinityStore
+	if strategy == config.LoadBalancingSticky {
+		affinityPath := filepath.Join(authDir, "conversation_affinity.json")
+		affinity, err = oauth.NewAffinityStore(oauth.AffinityOptions{Path: affinityPath})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	sel := oauth.NewSelector(strategy)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, sel)
+	pool := oauth.NewAccountPool(tokens, time.Now, lb, affinity, sel)
 
 	router, err := upstream.NewRouter(cfg.Models)
 	if err != nil {
@@ -199,6 +220,108 @@ func TestResponsesCodexFailover429BoundedReplay(t *testing.T) {
 		if string(capturedBodies[i]) != string(capturedBodies[0]) {
 			t.Fatalf("payload mismatch between attempt 0 and %d:\n  %s\n  %s", i, capturedBodies[0], capturedBodies[i])
 		}
+	}
+}
+
+func TestResponsesStickyClearsAffinityOnNonRetryable4xx(t *testing.T) {
+	var mu sync.Mutex
+	var attempts []string
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		strategy:     config.LoadBalancingSticky,
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a", usedPercent: 90},
+			{email: "b@test.com", accountID: "acct_b", usedPercent: 10},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			mu.Lock()
+			attempts = append(attempts, auth)
+			mu.Unlock()
+			if auth == "access-token-0" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"message":"bad request"}}`))
+				return
+			}
+			codexSuccessResponse(w)
+		},
+	})
+
+	tokens, err := api.api.OAuth.LoadTokens(config.OAuthProviderCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens) < 2 {
+		t.Fatal("expected two codex tokens")
+	}
+	api.api.Pool.BindConversation("sticky-sess", tokens[0].Path())
+
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	req1.Header.Set("session_id", "sticky-sess")
+	w1 := httptest.NewRecorder()
+	api.engine.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusBadRequest {
+		t.Fatalf("request 1: expected 400, got %d body=%s", w1.Code, w1.Body.String())
+	}
+
+	attempts = nil
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	req2.Header.Set("session_id", "sticky-sess")
+	w2 := httptest.NewRecorder()
+	api.engine.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("request 2: expected 200, got %d body=%s", w2.Code, w2.Body.String())
+	}
+	if len(attempts) != 1 || attempts[0] != "access-token-1" {
+		t.Fatalf("request 2: expected only access-token-1, got %v", attempts)
+	}
+}
+
+func TestResponsesStickyBindsOnSuccess(t *testing.T) {
+	var mu sync.Mutex
+	var attempts []string
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		strategy: config.LoadBalancingSticky,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a", usedPercent: 10},
+			{email: "b@test.com", accountID: "acct_b", usedPercent: 90},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			mu.Lock()
+			attempts = append(attempts, auth)
+			mu.Unlock()
+			if auth != "access-token-0" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":{"message":"wrong account"}}`))
+				return
+			}
+			codexSuccessResponse(w)
+		},
+	})
+
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	req1.Header.Set("session_id", "sticky-ok")
+	w1 := httptest.NewRecorder()
+	api.engine.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("request 1: expected 200, got %d body=%s", w1.Code, w1.Body.String())
+	}
+
+	attempts = nil
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	req2.Header.Set("session_id", "sticky-ok")
+	w2 := httptest.NewRecorder()
+	api.engine.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("request 2: expected 200, got %d body=%s", w2.Code, w2.Body.String())
+	}
+	if len(attempts) != 1 || attempts[0] != "access-token-0" {
+		t.Fatalf("request 2: expected sticky access-token-0, got %v", attempts)
 	}
 }
 

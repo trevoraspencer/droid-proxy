@@ -59,6 +59,7 @@ func TestPool_Select_StickySameConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pool.BindConversation("session-1", first.Path)
 	second, err := pool.Select("", nil, "session-1")
 	if err != nil {
 		t.Fatal(err)
@@ -98,9 +99,28 @@ func TestPool_Select_StickyFailoverRebind(t *testing.T) {
 	if second.Path == first.Path {
 		t.Fatal("expected different account after exclude")
 	}
+	pool.BindConversation("conv-x", second.Path)
 	third, _ := pool.Select("", nil, "conv-x")
 	if third.Path != second.Path {
 		t.Fatalf("expected rebound to %s, got %s", second.Path, third.Path)
+	}
+}
+
+func TestAffinityStore_Unbind(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "affinity.json")
+	store, err := NewAffinityStore(AffinityOptions{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Bind("conv-a", "/tmp/a.json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Unbind("conv-a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Lookup("conv-a"); got != "" {
+		t.Fatalf("lookup after unbind = %q, want empty", got)
 	}
 }
 

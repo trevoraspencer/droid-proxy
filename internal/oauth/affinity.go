@@ -151,6 +151,24 @@ func (s *AffinityStore) Lookup(conversationID string) string {
 	return rec.AccountPath
 }
 
+// Unbind removes a conversation binding and persists the updated map.
+func (s *AffinityStore) Unbind(conversationID string) error {
+	if s == nil {
+		return nil
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.entries[conversationID]; !ok {
+		return nil
+	}
+	delete(s.entries, conversationID)
+	return s.saveLocked()
+}
+
 // Bind associates a conversation with an account path and persists to disk.
 func (s *AffinityStore) Bind(conversationID, accountPath string) error {
 	if s == nil {

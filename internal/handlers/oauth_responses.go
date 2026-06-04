@@ -408,6 +408,7 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		}
 
 		// Non-retryable 4xx: relay directly to the client.
+		a.Pool.ClearConversation(codexConversation)
 		if downstreamStream {
 			a.writeResponsesStreamError(c, resp.StatusCode, lastUpstreamBody)
 		} else {
@@ -491,6 +492,7 @@ func (a *API) codexAuthReplay(
 
 	// Success path.
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		a.Pool.BindConversation(codexConversation, entry.Path)
 		if downstreamStream {
 			a.forwardOAuthResponsesStreamAndRelease(c, m, resp, token, entry.Path)
 			return true, 0, nil, ""

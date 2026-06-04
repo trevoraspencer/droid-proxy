@@ -290,6 +290,14 @@ func (p *AccountPool) BindConversation(conversationID, accountPath string) {
 	_ = p.affinity.Bind(conversationID, accountPath)
 }
 
+// ClearConversation removes a persisted conversation binding when sticky is enabled.
+func (p *AccountPool) ClearConversation(conversationID string) {
+	if p == nil || p.strategy != config.LoadBalancingSticky || p.affinity == nil {
+		return
+	}
+	_ = p.affinity.Unbind(conversationID)
+}
+
 // updateEntry updates identity and metadata fields of an existing entry
 // while preserving runtime state.
 func (p *AccountPool) updateEntry(entry *AccountEntry, tok *Token, now time.Time) {
@@ -538,17 +546,8 @@ func (p *AccountPool) Select(account string, exclude map[string]bool, conversati
 		picked, err = p.selector.Select(eligible)
 	}
 
-	bindConv := ""
-	bindPath := ""
-	if err == nil && picked != nil && p.strategy == config.LoadBalancingSticky && strings.TrimSpace(conversationID) != "" {
-		bindConv = strings.TrimSpace(conversationID)
-		bindPath = picked.Path
-	}
 	p.mu.Unlock()
 
-	if bindConv != "" && bindPath != "" {
-		p.BindConversation(bindConv, bindPath)
-	}
 	if err != nil {
 		return nil, err
 	}
