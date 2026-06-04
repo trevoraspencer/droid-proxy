@@ -205,6 +205,10 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		token, refreshErr := a.OAuth.RefreshIfNeeded(c.Request.Context(), token)
 		if refreshErr != nil {
 			a.Pool.End(entry.Path)
+			// If the client went away during refresh, do not mark unhealthy.
+			if ctxErr := c.Request.Context().Err(); ctxErr != nil {
+				return
+			}
 			a.Pool.MarkUnhealthy(entry.Path)
 			tried[entry.Path] = true
 			continue
@@ -237,10 +241,22 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		}
 
 		if doErr != nil {
+			// Downstream cancellation: the client went away. Do not fail over
+			// or mark cooldown — just release the lease and return.
+			if ctxErr := c.Request.Context().Err(); ctxErr != nil {
+				a.Pool.End(entry.Path)
+				return
+			}
 			// Transport error: mark cooldown and try next account.
 			a.Pool.End(entry.Path)
 			a.Pool.MarkCooldown(entry.Path, time.Now().Add(errorCooldown))
 			tried[entry.Path] = true
+			// Track transport errors for exhaustion relay so we produce a
+			// 502 (matching single-account behavior) instead of 503.
+			hadUpstreamAttempt = true
+			lastUpstreamStatus = http.StatusBadGateway
+			lastUpstreamBody = []byte(`{"error":{"message":"upstream_error","type":"upstream_error"}}`)
+			lastUpstreamContentType = "application/json"
 			continue
 		}
 

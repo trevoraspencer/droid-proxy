@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,13 +31,14 @@ type failoverTestAccount struct {
 
 // failoverTestOptions configures a failover test API.
 type failoverTestOptions struct {
-	maxFailovers      int
-	rateLimitCooldown time.Duration
-	errorCooldown     time.Duration
-	strategy          config.LoadBalancingStrategy
-	accounts          []failoverTestAccount
-	upstreamHandler   http.HandlerFunc
-	pinnedAccount     string
+	maxFailovers         int
+	rateLimitCooldown    time.Duration
+	errorCooldown        time.Duration
+	strategy             config.LoadBalancingStrategy
+	accounts             []failoverTestAccount
+	upstreamHandler      http.HandlerFunc
+	pinnedAccount        string
+	responseBodyMaxBytes int64 // if > 0, override default response body limit
 }
 
 // newCodexFailoverTestAPI creates a test API with a Codex account pool
@@ -72,8 +74,9 @@ func newCodexFailoverTestAPI(t *testing.T, opts failoverTestOptions) *testAPI {
 			},
 		},
 		Upstream: config.Upstream{
-			HTTPTimeout:     5 * time.Second,
-			StreamKeepAlive: 200 * time.Millisecond,
+			HTTPTimeout:          5 * time.Second,
+			StreamKeepAlive:      200 * time.Millisecond,
+			ResponseBodyMaxBytes: opts.responseBodyMaxBytes,
 		},
 		Models: []*config.Model{{
 			Alias:            "droid-oauth",
@@ -2507,5 +2510,1117 @@ func TestResponsesCodexFailoverXAI401DoesNotUseCodexPool(t *testing.T) {
 		if acct.InFlight != 0 {
 			t.Fatalf("Codex pool should have no in-flight from xAI request, got %d for %s", acct.InFlight, acct.Selector)
 		}
+	}
+}
+
+// ============================================================================
+// VAL-FAILOVER-007: Streaming retry boundary is before downstream commit
+// ============================================================================
+
+func TestResponsesCodexStreamingPreCommit5xxFailover(t *testing.T) {
+	// Streaming request gets 500 before SSE starts → should fail over to next account.
+	var attemptCount int32
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			n := int(atomic.AddInt32(&attemptCount, 1))
+			if n == 1 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":{"message":"internal error"}}`))
+				return
+			}
+			// Second attempt: streaming success.
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			_, _ = w.Write([]byte("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n"))
+			flusher.Flush()
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after 5xx streaming failover, got %d body=%s", w.Code, w.Body.String())
+	}
+	if atomic.LoadInt32(&attemptCount) != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attemptCount)
+	}
+	if !strings.Contains(w.Body.String(), "response.completed") {
+		t.Fatalf("expected streaming response, got %s", w.Body.String())
+	}
+}
+
+func TestResponsesCodexStreamingPreCommitTransportErrorFailover(t *testing.T) {
+	// Streaming request gets transport error on first attempt → fail over.
+	var attemptCount int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := int(atomic.AddInt32(&attemptCount, 1))
+		if n == 1 {
+			// Force close the connection to simulate transport error.
+			hj, ok := w.(http.Hijacker)
+			if ok {
+				conn, _, _ := hj.Hijack()
+				_ = conn.Close()
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		_, _ = w.Write([]byte("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n"))
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	authDir := t.TempDir()
+	cfg := &config.Config{
+		OAuth: config.OAuth{
+			AuthDir: authDir,
+			LoadBalancing: config.LoadBalancing{
+				Strategy:          config.LoadBalancingFillFirst,
+				MaxFailovers:      1,
+				RateLimitCooldown: 60 * time.Second,
+				ErrorCooldown:     30 * time.Second,
+			},
+		},
+		Upstream: config.Upstream{
+			HTTPTimeout:     5 * time.Second,
+			StreamKeepAlive: 200 * time.Millisecond,
+		},
+		Models: []*config.Model{{
+			Alias:            "droid-oauth",
+			DisplayName:      "OAuth Test",
+			FactoryProvider:  config.FactoryProviderOpenAI,
+			UpstreamProtocol: config.UpstreamCodexResponses,
+			OAuthProvider:    config.OAuthProviderCodex,
+			BaseURL:          srv.URL,
+			UpstreamModel:    "codex-upstream",
+		}},
+	}
+
+	manager := oauth.NewManager(cfg)
+	for i, email := range []string{"a@test.com", "b@test.com"} {
+		token := &oauth.Token{
+			Type:         string(config.OAuthProviderCodex),
+			AccessToken:  fmt.Sprintf("access-token-%d", i),
+			RefreshToken: fmt.Sprintf("refresh-token-%d", i),
+			Email:        email,
+			AccountID:    fmt.Sprintf("acct_%d", i),
+			Expired:      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		}
+		if _, err := manager.SaveToken(token); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	router, _ := upstream.NewRouter(cfg.Models)
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	api := &API{Cfg: cfg, Router: router, Client: upstream.NewClient(cfg), OAuth: manager, Pool: pool, Logger: logger}
+	engine := gin.New()
+	engine.POST("/v1/responses", api.Responses)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after transport error failover, got %d body=%s", w.Code, w.Body.String())
+	}
+	if atomic.LoadInt32(&attemptCount) != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attemptCount)
+	}
+}
+
+func TestResponsesCodexStreamingPreCommit401Failover(t *testing.T) {
+	// Streaming request gets 401 → force refresh + replay. If replay also
+	// returns 401, fail over to the next account.
+	var mu sync.Mutex
+	var attempts []string
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "refreshed-access-token-0",
+			"refresh_token": "refresh-token-0",
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenSrv.Close()
+	restore := oauth.SetTestCodexTokenURL(tokenSrv.URL)
+	defer restore()
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			mu.Lock()
+			attempts = append(attempts, auth)
+			mu.Unlock()
+
+			// Both original and refreshed tokens for account 0 return 401.
+			if auth == "access-token-0" || auth == "refreshed-access-token-0" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+				return
+			}
+			// Account 1 succeeds with streaming.
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			_, _ = w.Write([]byte("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n"))
+			flusher.Flush()
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after 401 streaming failover, got %d body=%s", w.Code, w.Body.String())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	// 3 attempts: initial 401 (acct 0) + replay 401 (acct 0 refreshed) + success (acct 1)
+	if len(attempts) != 3 {
+		t.Fatalf("expected 3 upstream attempts, got %d: %v", len(attempts), attempts)
+	}
+	if !strings.Contains(w.Body.String(), "response.completed") {
+		t.Fatalf("expected streaming response, got %s", w.Body.String())
+	}
+}
+
+func TestResponsesCodexStreamingPostCommitNoRetryOnMidStreamFailure(t *testing.T) {
+	// Once streaming begins (200 OK + SSE headers committed), later failure
+	// does NOT trigger retry on another account.
+	var attemptCount int32
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			// Start streaming successfully, then truncate without terminal marker.
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"))
+			flusher.Flush()
+			// Then close the response body to simulate truncation.
+			// The stream forwarder will detect this as a non-terminal EOF.
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	api.engine.ServeHTTP(w, req)
+
+	// Only 1 attempt should have been made (no retry after streaming commit).
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("expected exactly 1 upstream attempt (no retry after commit), got %d", attemptCount)
+	}
+	// Response should show the truncated stream error, not a second account's response.
+	if !strings.Contains(w.Body.String(), "upstream stream ended before terminal marker") {
+		t.Fatalf("expected truncation error in body, got %s", w.Body.String())
+	}
+}
+
+// ============================================================================
+// VAL-FAILOVER-008: In-flight accounting spans request and stream lifetime
+// ============================================================================
+
+func TestCodexInFlightNonStreamingReturnsToZero(t *testing.T) {
+	// Non-streaming request: in-flight should be 0 before request, >0 during,
+	// and 0 after completion.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 0,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			codexSuccessResponse(w)
+		},
+	})
+
+	snapBefore := api.api.Pool.Snapshot()
+	for _, acct := range snapBefore.Accounts {
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight before request, got %d for %s", acct.InFlight, acct.Selector)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	snapAfter := api.api.Pool.Snapshot()
+	for _, acct := range snapAfter.Accounts {
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight after completion, got %d for %s", acct.InFlight, acct.Selector)
+		}
+	}
+}
+
+func TestCodexInFlightStreamingReturnsToZeroAfterCompletion(t *testing.T) {
+	// Streaming request: in-flight should return to 0 after stream completes.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 0,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			_, _ = w.Write([]byte("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n"))
+			flusher.Flush()
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	snapAfter := api.api.Pool.Snapshot()
+	for _, acct := range snapAfter.Accounts {
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight after streaming completion, got %d for %s", acct.InFlight, acct.Selector)
+		}
+	}
+}
+
+func TestCodexInFlightReturnsToZeroOnTransportError(t *testing.T) {
+	// Transport error during request: in-flight should return to 0.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if ok {
+			conn, _, _ := hj.Hijack()
+			_ = conn.Close()
+			return
+		}
+	}))
+	defer srv.Close()
+
+	authDir := t.TempDir()
+	cfg := &config.Config{
+		OAuth: config.OAuth{
+			AuthDir: authDir,
+			LoadBalancing: config.LoadBalancing{
+				Strategy:          config.LoadBalancingFillFirst,
+				MaxFailovers:      0,
+				RateLimitCooldown: 60 * time.Second,
+				ErrorCooldown:     30 * time.Second,
+			},
+		},
+		Upstream: config.Upstream{
+			HTTPTimeout:     5 * time.Second,
+			StreamKeepAlive: 200 * time.Millisecond,
+		},
+		Models: []*config.Model{{
+			Alias:            "droid-oauth",
+			DisplayName:      "OAuth Test",
+			FactoryProvider:  config.FactoryProviderOpenAI,
+			UpstreamProtocol: config.UpstreamCodexResponses,
+			OAuthProvider:    config.OAuthProviderCodex,
+			BaseURL:          srv.URL,
+			UpstreamModel:    "codex-upstream",
+		}},
+	}
+
+	manager := oauth.NewManager(cfg)
+	token := &oauth.Token{
+		Type:         string(config.OAuthProviderCodex),
+		AccessToken:  "access-token-0",
+		RefreshToken: "refresh-token-0",
+		Email:        "a@test.com",
+		AccountID:    "acct_a",
+		Expired:      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	}
+	if _, err := manager.SaveToken(token); err != nil {
+		t.Fatal(err)
+	}
+	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	router, _ := upstream.NewRouter(cfg.Models)
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	api := &API{Cfg: cfg, Router: router, Client: upstream.NewClient(cfg), OAuth: manager, Pool: pool, Logger: logger}
+	engine := gin.New()
+	engine.POST("/v1/responses", api.Responses)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	engine.ServeHTTP(w, req)
+
+	// Transport error should be relayed as 502.
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 for transport error, got %d", w.Code)
+	}
+
+	snapAfter := api.Pool.Snapshot()
+	for _, acct := range snapAfter.Accounts {
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight after transport error, got %d for %s", acct.InFlight, acct.Selector)
+		}
+	}
+}
+
+func TestCodexInFlightReturnsToZeroOnRetryable429(t *testing.T) {
+	// 429 on first account with failover: in-flight should return to 0 after each attempt
+	// and after final exhaustion.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 0,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", w.Code)
+	}
+
+	snapAfter := api.api.Pool.Snapshot()
+	for _, acct := range snapAfter.Accounts {
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight after 429, got %d for %s", acct.InFlight, acct.Selector)
+		}
+	}
+}
+
+func TestCodexInFlightReturnsToZeroOnOversizedSuccessBody(t *testing.T) {
+	// When a successful non-streaming response body exceeds the size limit,
+	// the pool lease should still be released.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:         0,
+		responseBodyMaxBytes: 1024, // 1 KiB limit
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			// Return a response body that exceeds the configured size limit.
+			largeBody := make([]byte, 11*1024) // 11 KiB > 1 KiB limit
+			for i := range largeBody {
+				largeBody[i] = 'a'
+			}
+			_, _ = w.Write(largeBody)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	// Should get an error about oversized body.
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 for oversized body, got %d", w.Code)
+	}
+
+	snapAfter := api.api.Pool.Snapshot()
+	for _, acct := range snapAfter.Accounts {
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight after oversized body error, got %d for %s", acct.InFlight, acct.Selector)
+		}
+	}
+}
+
+func TestCodexInFlightReturnsToZeroOnRefreshFailure(t *testing.T) {
+	// When token refresh fails, the pool lease should still be released.
+	restore := oauth.SetTestCodexTokenURL("http://127.0.0.1:0") // unreachable
+	defer restore()
+
+	// Create an expired token that needs refresh.
+	authDir := t.TempDir()
+	cfg := &config.Config{
+		OAuth: config.OAuth{
+			AuthDir: authDir,
+			LoadBalancing: config.LoadBalancing{
+				Strategy:          config.LoadBalancingFillFirst,
+				MaxFailovers:      0,
+				RateLimitCooldown: 60 * time.Second,
+				ErrorCooldown:     30 * time.Second,
+			},
+		},
+		Upstream: config.Upstream{
+			HTTPTimeout:     2 * time.Second,
+			StreamKeepAlive: 200 * time.Millisecond,
+		},
+		Models: []*config.Model{{
+			Alias:            "droid-oauth",
+			DisplayName:      "OAuth Test",
+			FactoryProvider:  config.FactoryProviderOpenAI,
+			UpstreamProtocol: config.UpstreamCodexResponses,
+			OAuthProvider:    config.OAuthProviderCodex,
+			BaseURL:          "http://unused",
+			UpstreamModel:    "codex-upstream",
+		}},
+	}
+
+	manager := oauth.NewManager(cfg)
+	token := &oauth.Token{
+		Type:         string(config.OAuthProviderCodex),
+		AccessToken:  "access-token-0",
+		RefreshToken: "refresh-token-0",
+		Email:        "a@test.com",
+		AccountID:    "acct_a",
+		Expired:      time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339), // expired
+	}
+	if _, err := manager.SaveToken(token); err != nil {
+		t.Fatal(err)
+	}
+	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	router, _ := upstream.NewRouter(cfg.Models)
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	api := &API{Cfg: cfg, Router: router, Client: upstream.NewClient(cfg), OAuth: manager, Pool: pool, Logger: logger}
+	engine := gin.New()
+	engine.POST("/v1/responses", api.Responses)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	engine.ServeHTTP(w, req)
+
+	snapAfter := pool.Snapshot()
+	for _, acct := range snapAfter.Accounts {
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight after refresh failure, got %d for %s", acct.InFlight, acct.Selector)
+		}
+	}
+}
+
+func TestCodexInFlightStreamingTruncationReturnsToZero(t *testing.T) {
+	// When a streaming response truncates (idle timeout / no terminal marker),
+	// the pool lease should still be released.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 0,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			// Send a non-terminal event then close.
+			_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"))
+			flusher.Flush()
+			// Body ends here without terminal marker → truncation.
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	api.engine.ServeHTTP(w, req)
+
+	snapAfter := api.api.Pool.Snapshot()
+	for _, acct := range snapAfter.Accounts {
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight after stream truncation, got %d for %s", acct.InFlight, acct.Selector)
+		}
+	}
+}
+
+func TestCodexInFlightStreamingFailoverReturnsToZero(t *testing.T) {
+	// After streaming failover (pre-commit), all accounts should have 0 in-flight.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			if auth == "access-token-0" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			_, _ = w.Write([]byte("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}\n\n"))
+			flusher.Flush()
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	snapAfter := api.api.Pool.Snapshot()
+	for _, acct := range snapAfter.Accounts {
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight for %s after streaming failover, got %d", acct.Selector, acct.InFlight)
+		}
+	}
+}
+
+// ============================================================================
+// VAL-FAILOVER-015: Downstream cancellation does not cause failover or cooldown
+// ============================================================================
+
+func TestCodexDownstreamCancellationDuringStreamingNoFailover(t *testing.T) {
+	// When the client cancels during SSE forwarding, the proxy should NOT
+	// try another account and should NOT mark the attempted account in cooldown.
+	var (
+		attemptCount    int32
+		upstreamStarted = make(chan struct{})
+		handlerDone     = make(chan struct{})
+	)
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			close(upstreamStarted)
+			defer close(handlerDone)
+			// Write events slowly; client will cancel during streaming.
+			for i := 0; i < 100; i++ {
+				_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"chunk%d\"}\n\n", i)
+				flusher.Flush()
+				time.Sleep(50 * time.Millisecond)
+			}
+		},
+	})
+
+	// Use a real HTTP server so we can cancel the request context.
+	srv := httptest.NewServer(api.engine)
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Start the request in a goroutine.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		// Read until error/EOF.
+		buf := make([]byte, 1024)
+		for {
+			_, err := resp.Body.Read(buf)
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	// Wait for upstream to start streaming, then cancel the client.
+	select {
+	case <-upstreamStarted:
+		// Give a small delay to ensure the stream has committed headers.
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream never started")
+	}
+
+	// Wait for the request goroutine to finish.
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("request goroutine did not finish")
+	}
+
+	// Wait for the handler to finish so pool state is settled.
+	select {
+	case <-handlerDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("handler goroutine did not finish")
+	}
+
+	// Only 1 upstream attempt should have been made.
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("expected exactly 1 upstream attempt (no failover on cancel), got %d", attemptCount)
+	}
+
+	// Verify no cooldown on the attempted account.
+	snap := api.api.Pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.CooldownUntil != nil {
+			t.Fatalf("account %s should not be in cooldown after cancellation, got %v", acct.Selector, acct.CooldownUntil)
+		}
+		if acct.InFlight != 0 {
+			t.Fatalf("account %s should have 0 in-flight after cancellation, got %d", acct.Selector, acct.InFlight)
+		}
+	}
+}
+
+func TestCodexDownstreamCancellationBeforeUpstreamNoFailover(t *testing.T) {
+	// When the client cancels before the upstream responds, the proxy should
+	// NOT try another account and should NOT mark the attempted account in cooldown.
+	var (
+		attemptCount int32
+		gotRequest   = make(chan struct{})
+		handlerDone  = make(chan struct{})
+	)
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			close(gotRequest)
+			defer close(handlerDone)
+			// Wait for client or a reasonable timeout.
+			select {
+			case <-r.Context().Done():
+			case <-time.After(10 * time.Second):
+			}
+		},
+	})
+
+	srv := httptest.NewServer(api.engine)
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = http.DefaultClient.Do(req)
+	}()
+
+	// Wait for upstream to receive the request, then cancel.
+	select {
+	case <-gotRequest:
+		cancel()
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream never received request")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("request goroutine did not finish")
+	}
+
+	// Wait for the upstream handler to finish (bounded by the select timeout).
+	select {
+	case <-handlerDone:
+	case <-time.After(15 * time.Second):
+		t.Fatal("handler goroutine did not finish")
+	}
+
+	// Only 1 upstream attempt (no failover on client cancel).
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("expected exactly 1 upstream attempt, got %d", attemptCount)
+	}
+
+	// No cooldown should be applied.
+	snap := api.api.Pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.CooldownUntil != nil {
+			t.Fatalf("account %s should not be in cooldown after cancellation, got %v", acct.Selector, acct.CooldownUntil)
+		}
+		if acct.InFlight != 0 {
+			t.Fatalf("account %s should have 0 in-flight after cancellation, got %d", acct.Selector, acct.InFlight)
+		}
+	}
+}
+
+func TestCodexDownstreamCancellationDuringNonStreamBodyNoFailover(t *testing.T) {
+	// When the client cancels during non-stream body reading, the proxy
+	// should NOT try another account.
+	var (
+		attemptCount int32
+		gotRequest   = make(chan struct{})
+		handlerDone  = make(chan struct{})
+	)
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			close(gotRequest)
+			defer close(handlerDone)
+			// Wait for client to cancel with timeout.
+			select {
+			case <-r.Context().Done():
+			case <-time.After(10 * time.Second):
+			}
+		},
+	})
+
+	srv := httptest.NewServer(api.engine)
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Non-streaming request.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = http.DefaultClient.Do(req)
+	}()
+
+	select {
+	case <-gotRequest:
+		cancel()
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream never received request")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("request goroutine did not finish")
+	}
+
+	// Wait for handler to finish so pool state is settled.
+	select {
+	case <-handlerDone:
+	case <-time.After(15 * time.Second):
+		t.Fatal("handler goroutine did not finish")
+	}
+
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("expected exactly 1 upstream attempt, got %d", attemptCount)
+	}
+
+	snap := api.api.Pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.CooldownUntil != nil {
+			t.Fatalf("account %s should not be in cooldown, got %v", acct.Selector, acct.CooldownUntil)
+		}
+		if acct.InFlight != 0 {
+			t.Fatalf("account %s should have 0 in-flight, got %d", acct.Selector, acct.InFlight)
+		}
+	}
+}
+
+// ============================================================================
+// VAL-FAILOVER-016: Streaming commit boundary includes header commit
+// ============================================================================
+
+func TestCodexStreamingHeadersCommittedNoRetryBeforeFirstDataFrame(t *testing.T) {
+	// Once the proxy commits downstream SSE headers/status (200), later failure
+	// before any upstream data: frame has been forwarded does NOT cause retry.
+	var attemptCount int32
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			// Return 200 OK with SSE headers but immediately close.
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			flusher.Flush()
+			// No data frames — just close. This simulates an upstream that
+			// commits headers then truncates before any data.
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	api.engine.ServeHTTP(w, req)
+
+	// Should get 200 OK (headers committed) but with truncation error in body.
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 (headers committed before truncation), got %d", w.Code)
+	}
+	// Only 1 attempt — no retry after headers committed.
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("expected exactly 1 upstream attempt (no retry after header commit), got %d", attemptCount)
+	}
+	// Body should contain truncation error, not a second attempt's data.
+	if !strings.Contains(w.Body.String(), "upstream stream ended before terminal marker") {
+		t.Fatalf("expected truncation error in SSE body, got %s", w.Body.String())
+	}
+}
+
+func TestCodexStreamingIdleTimeoutAfterHeaderCommitNoRetry(t *testing.T) {
+	// Idle timeout after header commit but before first data frame should not
+	// trigger retry on another account. Uses a real server so the proxy can
+	// get the 200 response and start streaming before the upstream stalls.
+	var attemptCount int32
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			flusher.Flush()
+			// Don't send any data frames — the idle timeout will fire.
+			// Wait for the connection to close or a timeout.
+			select {
+			case <-r.Context().Done():
+			case <-time.After(30 * time.Second):
+			}
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("expected exactly 1 upstream attempt, got %d", attemptCount)
+	}
+}
+
+// ============================================================================
+// VAL-FAILOVER-018: Non-streaming body-read errors have defined retry behavior
+// ============================================================================
+
+func TestCodexNonStreamingBodyReadErrorAfter2xxNotRetried(t *testing.T) {
+	// For non-streaming requests, if the upstream returns 200 but the body
+	// read fails (e.g., oversized body), the proxy should NOT retry on another
+	// account. This preserves single-account compatibility and avoids
+	// unbounded duplicate Codex work.
+	var attemptCount int32
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:         1,
+		responseBodyMaxBytes: 1024, // 1 KiB limit
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			// Return a 2xx response with a body exceeding the configured limit.
+			largeBody := make([]byte, 11*1024) // 11 KiB > 1 KiB limit
+			for i := range largeBody {
+				largeBody[i] = 'a'
+			}
+			_, _ = w.Write(largeBody)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	// Should get an error about the oversized body, not a retry.
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 for oversized body, got %d body=%s", w.Code, w.Body.String())
+	}
+	// Only 1 attempt — body-read errors after 2xx are NOT retried.
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("expected exactly 1 upstream attempt (no retry on body-read error), got %d", attemptCount)
+	}
+	// Verify the error message is about the body size.
+	if !strings.Contains(w.Body.String(), "too large") {
+		t.Fatalf("expected 'too large' in error, got %s", w.Body.String())
+	}
+
+	// In-flight should be 0.
+	snap := api.api.Pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight, got %d for %s", acct.InFlight, acct.Selector)
+		}
+	}
+}
+
+func TestCodexNonStreamingTransportErrorBeforeHeadersIsRetried(t *testing.T) {
+	// Transport errors before response headers ARE retryable — this is
+	// distinct from body-read errors after 2xx.
+	var attemptCount int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := int(atomic.AddInt32(&attemptCount, 1))
+		if n == 1 {
+			hj, ok := w.(http.Hijacker)
+			if ok {
+				conn, _, _ := hj.Hijack()
+				_ = conn.Close()
+				return
+			}
+		}
+		codexSuccessResponse(w)
+	}))
+	defer srv.Close()
+
+	authDir := t.TempDir()
+	cfg := &config.Config{
+		OAuth: config.OAuth{
+			AuthDir: authDir,
+			LoadBalancing: config.LoadBalancing{
+				Strategy:          config.LoadBalancingFillFirst,
+				MaxFailovers:      1,
+				RateLimitCooldown: 60 * time.Second,
+				ErrorCooldown:     30 * time.Second,
+			},
+		},
+		Upstream: config.Upstream{
+			HTTPTimeout:     5 * time.Second,
+			StreamKeepAlive: 200 * time.Millisecond,
+		},
+		Models: []*config.Model{{
+			Alias:            "droid-oauth",
+			DisplayName:      "OAuth Test",
+			FactoryProvider:  config.FactoryProviderOpenAI,
+			UpstreamProtocol: config.UpstreamCodexResponses,
+			OAuthProvider:    config.OAuthProviderCodex,
+			BaseURL:          srv.URL,
+			UpstreamModel:    "codex-upstream",
+		}},
+	}
+
+	manager := oauth.NewManager(cfg)
+	for i, email := range []string{"a@test.com", "b@test.com"} {
+		token := &oauth.Token{
+			Type:         string(config.OAuthProviderCodex),
+			AccessToken:  fmt.Sprintf("access-token-%d", i),
+			RefreshToken: fmt.Sprintf("refresh-token-%d", i),
+			Email:        email,
+			AccountID:    fmt.Sprintf("acct_%d", i),
+			Expired:      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		}
+		if _, err := manager.SaveToken(token); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	router, _ := upstream.NewRouter(cfg.Models)
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	api := &API{Cfg: cfg, Router: router, Client: upstream.NewClient(cfg), OAuth: manager, Pool: pool, Logger: logger}
+	engine := gin.New()
+	engine.POST("/v1/responses", api.Responses)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	engine.ServeHTTP(w, req)
+
+	// Should succeed after failover (transport error is retryable).
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after transport error failover, got %d body=%s", w.Code, w.Body.String())
+	}
+	if atomic.LoadInt32(&attemptCount) != 2 {
+		t.Fatalf("expected 2 attempts (transport error then success), got %d", attemptCount)
+	}
+}
+
+func TestCodexNonStreamingBodyReadErrorPreservesSingleAccountBehavior(t *testing.T) {
+	// With a single account, a body-read error after 2xx should produce the
+	// same error shape as the multi-account case (no special single-account
+	// handling needed for this edge case — it's not retried in either mode).
+	var attemptCount int32
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:         2,
+		responseBodyMaxBytes: 1024, // 1 KiB limit
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			// Return an oversized body.
+			largeBody := make([]byte, 11*1024) // 11 KiB > 1 KiB limit
+			for i := range largeBody {
+				largeBody[i] = 'a'
+			}
+			_, _ = w.Write(largeBody)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d body=%s", w.Code, w.Body.String())
+	}
+	// Exactly 1 attempt — body-read errors are never retried.
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("expected exactly 1 attempt, got %d", attemptCount)
 	}
 }
