@@ -17,6 +17,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"droid-proxy/internal/config"
+	"droid-proxy/internal/testutil"
 )
 
 func mustConfig(t *testing.T, raw string) *config.Config {
@@ -1745,28 +1746,6 @@ models:
 	}
 }
 
-// assertOAuthHealth checks that a model entry's oauth_auth sub-object contains
-// the expected introspection fields and values.
-func assertOAuthHealth(t *testing.T, model map[string]any, provider, pinned string, matching, active, disabled, expired int, missing bool) {
-	t.Helper()
-	health, ok := model["oauth_auth"].(map[string]any)
-	if !ok {
-		t.Fatalf("missing oauth_auth in %#v", model)
-	}
-	if health["provider"] != provider || health["pinned_account"] != pinned || health["missing_auth"] != missing {
-		t.Fatalf("bad auth health identity: provider=%v pinned=%v missing=%v, want provider=%s pinned=%s missing=%v",
-			health["provider"], health["pinned_account"], health["missing_auth"], provider, pinned, missing)
-	}
-	if int(health["matching_account_count"].(float64)) != matching ||
-		int(health["active_count"].(float64)) != active ||
-		int(health["disabled_count"].(float64)) != disabled ||
-		int(health["expired_or_expiring_count"].(float64)) != expired {
-		t.Fatalf("bad auth health counts: matching=%v active=%v disabled=%v expired=%v, want matching=%d active=%d disabled=%d expired=%d",
-			health["matching_account_count"], health["active_count"], health["disabled_count"], health["expired_or_expiring_count"],
-			matching, active, disabled, expired)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // VAL-CROSS-005: /v1/models OAuth auth introspection remains compatible
 // ---------------------------------------------------------------------------
@@ -1913,34 +1892,34 @@ models:
 			// disabled: codex-disabled
 			// expired: codex-expired
 			codexUnpinned := byID["codex-unpinned"]
-			assertOAuthHealth(t, codexUnpinned, "codex", "", 4, 2, 1, 1, false)
+			testutil.AssertOAuthHealth(t, codexUnpinned, "codex", "", 4, 2, 1, 1, false)
 
 			// Codex pinned to specific account
 			codexPinned := byID["codex-pinned"]
-			assertOAuthHealth(t, codexPinned, "codex", "pinned@codex.example", 1, 1, 0, 0, false)
+			testutil.AssertOAuthHealth(t, codexPinned, "codex", "pinned@codex.example", 1, 1, 0, 0, false)
 
 			// Codex pinned to nonexistent account → missing_auth
 			codexMissingPin := byID["codex-missing-pin"]
-			assertOAuthHealth(t, codexMissingPin, "codex", "nonexistent@codex.example", 0, 0, 0, 0, true)
+			testutil.AssertOAuthHealth(t, codexMissingPin, "codex", "nonexistent@codex.example", 0, 0, 0, 0, true)
 
 			// xAI unpinned: matches all 3 xAI tokens
 			// active: xai-active (not expired, not disabled)
 			// disabled: xai-disabled
 			// expired: xai-expired
 			xaiUnpinned := byID["xai-unpinned"]
-			assertOAuthHealth(t, xaiUnpinned, "xai", "", 3, 1, 1, 1, false)
+			testutil.AssertOAuthHealth(t, xaiUnpinned, "xai", "", 3, 1, 1, 1, false)
 
 			// xAI pinned to active account
 			xaiPinned := byID["xai-pinned"]
-			assertOAuthHealth(t, xaiPinned, "xai", "xai-active@example.com", 1, 1, 0, 0, false)
+			testutil.AssertOAuthHealth(t, xaiPinned, "xai", "xai-active@example.com", 1, 1, 0, 0, false)
 
 			// xAI pinned to disabled account
 			xaiPinnedDisabled := byID["xai-pinned-disabled"]
-			assertOAuthHealth(t, xaiPinnedDisabled, "xai", "xai-disabled@example.com", 1, 0, 1, 0, false)
+			testutil.AssertOAuthHealth(t, xaiPinnedDisabled, "xai", "xai-disabled@example.com", 1, 0, 1, 0, false)
 
 			// xAI pinned to expired account
 			xaiPinnedExpired := byID["xai-pinned-expired"]
-			assertOAuthHealth(t, xaiPinnedExpired, "xai", "xai-expired@example.com", 1, 0, 0, 1, false)
+			testutil.AssertOAuthHealth(t, xaiPinnedExpired, "xai", "xai-expired@example.com", 1, 0, 0, 1, false)
 		})
 	}
 }
@@ -2028,57 +2007,61 @@ models:
 		t.Fatalf("server new: %v", err)
 	}
 
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	s.Engine().ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Data []map[string]any `json:"data"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatal(err)
-	}
+	for _, path := range []string{"/v1/models", "/models"} {
+		t.Run(path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+			}
+			var resp struct {
+				Data []map[string]any `json:"data"`
+			}
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatal(err)
+			}
 
-	oauthAuth := resp.Data[0]["oauth_auth"].(map[string]any)
+			oauthAuth := resp.Data[0]["oauth_auth"].(map[string]any)
 
-	// Verify all required fields are present
-	requiredFields := []string{
-		"provider",
-		"pinned_account",
-		"matching_account_count",
-		"active_count",
-		"disabled_count",
-		"expired_or_expiring_count",
-		"missing_auth",
-	}
-	for _, field := range requiredFields {
-		if _, ok := oauthAuth[field]; !ok {
-			t.Errorf("missing required oauth_auth field: %s", field)
-		}
-	}
+			// Verify all required fields are present
+			requiredFields := []string{
+				"provider",
+				"pinned_account",
+				"matching_account_count",
+				"active_count",
+				"disabled_count",
+				"expired_or_expiring_count",
+				"missing_auth",
+			}
+			for _, field := range requiredFields {
+				if _, ok := oauthAuth[field]; !ok {
+					t.Errorf("missing required oauth_auth field: %s", field)
+				}
+			}
 
-	// Verify specific values
-	if oauthAuth["provider"] != "codex" {
-		t.Errorf("expected provider=codex, got %v", oauthAuth["provider"])
-	}
-	if oauthAuth["pinned_account"] != "user@codex.example" {
-		t.Errorf("expected pinned_account=user@codex.example, got %v", oauthAuth["pinned_account"])
-	}
-	if oauthAuth["missing_auth"] != false {
-		t.Errorf("expected missing_auth=false, got %v", oauthAuth["missing_auth"])
-	}
-	if int(oauthAuth["matching_account_count"].(float64)) != 1 {
-		t.Errorf("expected matching_account_count=1, got %v", oauthAuth["matching_account_count"])
-	}
-	if int(oauthAuth["active_count"].(float64)) != 1 {
-		t.Errorf("expected active_count=1, got %v", oauthAuth["active_count"])
-	}
-	if int(oauthAuth["disabled_count"].(float64)) != 0 {
-		t.Errorf("expected disabled_count=0, got %v", oauthAuth["disabled_count"])
-	}
-	if int(oauthAuth["expired_or_expiring_count"].(float64)) != 0 {
-		t.Errorf("expected expired_or_expiring_count=0, got %v", oauthAuth["expired_or_expiring_count"])
+			// Verify specific values
+			if oauthAuth["provider"] != "codex" {
+				t.Errorf("expected provider=codex, got %v", oauthAuth["provider"])
+			}
+			if oauthAuth["pinned_account"] != "user@codex.example" {
+				t.Errorf("expected pinned_account=user@codex.example, got %v", oauthAuth["pinned_account"])
+			}
+			if oauthAuth["missing_auth"] != false {
+				t.Errorf("expected missing_auth=false, got %v", oauthAuth["missing_auth"])
+			}
+			if int(oauthAuth["matching_account_count"].(float64)) != 1 {
+				t.Errorf("expected matching_account_count=1, got %v", oauthAuth["matching_account_count"])
+			}
+			if int(oauthAuth["active_count"].(float64)) != 1 {
+				t.Errorf("expected active_count=1, got %v", oauthAuth["active_count"])
+			}
+			if int(oauthAuth["disabled_count"].(float64)) != 0 {
+				t.Errorf("expected disabled_count=0, got %v", oauthAuth["disabled_count"])
+			}
+			if int(oauthAuth["expired_or_expiring_count"].(float64)) != 0 {
+				t.Errorf("expected expired_or_expiring_count=0, got %v", oauthAuth["expired_or_expiring_count"])
+			}
+		})
 	}
 }

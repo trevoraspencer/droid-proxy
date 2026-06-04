@@ -13,6 +13,7 @@ import (
 
 	"droid-proxy/internal/config"
 	"droid-proxy/internal/oauth"
+	"droid-proxy/internal/testutil"
 	"droid-proxy/internal/upstream"
 )
 
@@ -215,28 +216,11 @@ func TestModels_OAuthAuthHealthMetadata(t *testing.T) {
 	for _, model := range resp.Data {
 		byID[model["id"].(string)] = model
 	}
-	assertOAuthHealth(t, byID["present"], "xai", "user@example.com", 1, 1, 0, 0, false)
-	assertOAuthHealth(t, byID["missing"], "xai", "missing@example.com", 0, 0, 0, 0, true)
-	assertOAuthHealth(t, byID["disabled"], "xai", "disabled@example.com", 1, 0, 1, 0, false)
-	assertOAuthHealth(t, byID["expired"], "xai", "expired@example.com", 1, 0, 0, 1, false)
+	testutil.AssertOAuthHealth(t, byID["present"], "xai", "user@example.com", 1, 1, 0, 0, false)
+	testutil.AssertOAuthHealth(t, byID["missing"], "xai", "missing@example.com", 0, 0, 0, 0, true)
+	testutil.AssertOAuthHealth(t, byID["disabled"], "xai", "disabled@example.com", 1, 0, 1, 0, false)
+	testutil.AssertOAuthHealth(t, byID["expired"], "xai", "expired@example.com", 1, 0, 0, 1, false)
 }
 
 // boolPtr is a test helper.
 func boolPtr(b bool) *bool { return &b }
-
-func assertOAuthHealth(t *testing.T, model map[string]any, provider, pinned string, matching, active, disabled, expired int, missing bool) {
-	t.Helper()
-	health, ok := model["oauth_auth"].(map[string]any)
-	if !ok {
-		t.Fatalf("missing oauth_auth in %#v", model)
-	}
-	if health["provider"] != provider || health["pinned_account"] != pinned || health["missing_auth"] != missing {
-		t.Fatalf("bad auth health identity: %#v", health)
-	}
-	if int(health["matching_account_count"].(float64)) != matching ||
-		int(health["active_count"].(float64)) != active ||
-		int(health["disabled_count"].(float64)) != disabled ||
-		int(health["expired_or_expiring_count"].(float64)) != expired {
-		t.Fatalf("bad auth health counts: %#v", health)
-	}
-}
