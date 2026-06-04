@@ -1073,3 +1073,50 @@ func poolWithin(t *testing.T, pool *AccountPool, timeout time.Duration, conditio
 	}
 	return false
 }
+
+// TestWatcher_WatchingParentMutexSync verifies that watchingParent is accessed
+// under w.mu in both watchAuthDir and removeParentWatch, preventing a data
+// race between the loop goroutine and external readers.
+func TestWatcher_WatchingParentMutexSync(t *testing.T) {
+	parentDir := t.TempDir()
+	dir := filepath.Join(parentDir, "auth")
+
+	mgr := newTestManager(t, dir)
+	pool := NewAccountPool(nil, fakeTime)
+
+	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	// Verify initial state: watchingParent should be set (dir doesn't exist)
+	w.mu.Lock()
+	initial := w.watchingParent
+	w.mu.Unlock()
+	if initial == "" {
+		t.Fatal("expected watchingParent to be set when auth dir is missing")
+	}
+
+	// Create the auth dir and a token to trigger removeParentWatch
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tok := makeToken("race@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
+	saveTokenFile(t, dir, tok)
+
+	// Wait for watcher to process
+	if !poolWithin(t, pool, 5*time.Second, func(s *PoolSnapshot) bool {
+		return len(s.Accounts) == 1
+	}) {
+		t.Fatal("watcher did not detect dir creation")
+	}
+
+	// Verify watchingParent was cleared
+	w.mu.Lock()
+	after := w.watchingParent
+	w.mu.Unlock()
+	if after != "" {
+		t.Fatalf("expected watchingParent to be cleared after auth dir creation, got %q", after)
+	}
+}

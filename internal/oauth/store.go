@@ -96,7 +96,7 @@ func (m *Manager) LoadTokens(provider config.OAuthProvider) ([]*Token, error) {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	var out []*Token
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+		if entry.IsDir() || !IsTokenFileName(entry.Name()) {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())

@@ -145,7 +145,9 @@ func (w *Watcher) watchAuthDir() {
 			if err := w.fswatcher.Add(parent); err != nil {
 				w.logger.WithError(err).WithField("dir", parent).Warn("watcher: cannot watch parent dir")
 			} else {
+				w.mu.Lock()
 				w.watchingParent = parent
+				w.mu.Unlock()
 			}
 		}
 	}
@@ -225,9 +227,13 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 // removeParentWatch removes the parent-directory watch if one is active,
 // preventing spurious reload events from sibling entries.
 func (w *Watcher) removeParentWatch() {
-	if w.watchingParent != "" {
-		_ = w.fswatcher.Remove(w.watchingParent)
-		w.watchingParent = ""
+	w.mu.Lock()
+	parent := w.watchingParent
+	w.watchingParent = ""
+	w.mu.Unlock()
+
+	if parent != "" {
+		_ = w.fswatcher.Remove(parent)
 	}
 }
 

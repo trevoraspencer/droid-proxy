@@ -195,6 +195,57 @@ func TestTokenStoreDisableEnableAndLogout(t *testing.T) {
 	}
 }
 
+// TestLoadTokens_UsesIsTokenFileName verifies that LoadTokens applies the same
+// file filtering as IsTokenFileName: hidden .json files and .lock files are
+// excluded, not just non-.json files.
+func TestLoadTokens_UsesIsTokenFileName(t *testing.T) {
+	authDir := t.TempDir()
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})
+
+	// Save a valid Codex token
+	_, err := manager.SaveToken(&Token{
+		Type:         string(ProviderCodex),
+		AccessToken:  "valid-access",
+		RefreshToken: "valid-refresh",
+		Email:        "visible@example.com",
+		Expired:      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a hidden .json file (should be excluded)
+	if err := os.WriteFile(filepath.Join(authDir, ".hidden.json"), []byte(`{"type":"codex","access_token":"hidden-access"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Write a lock file (should be excluded)
+	if err := os.WriteFile(filepath.Join(authDir, "user.json.lock"), []byte("lock"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Write an atomic-save temp file (should be excluded)
+	if err := os.WriteFile(filepath.Join(authDir, ".user.json.tmp-12345"), []byte(`{"type":"codex","access_token":"tmp-access"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tokens, err := manager.LoadTokens(ProviderCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(tokens) != 1 {
+		t.Fatalf("expected 1 token (hidden/lock/temp excluded), got %d", len(tokens))
+	}
+	if tokens[0].Email != "visible@example.com" {
+		t.Fatalf("expected visible@example.com, got %s", tokens[0].Email)
+	}
+	// Verify hidden/temp secrets are not present
+	for _, tok := range tokens {
+		if strings.Contains(tok.AccessToken, "hidden-access") || strings.Contains(tok.AccessToken, "tmp-access") {
+			t.Fatal("hidden or temp file token was incorrectly loaded by LoadTokens")
+		}
+	}
+}
+
 func TestRefreshCodexSavesRefreshedToken(t *testing.T) {
 	authDir := t.TempDir()
 	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})
