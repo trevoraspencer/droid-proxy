@@ -328,12 +328,21 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 					return // success after refresh+replay
 				}
 
+				// Client cancellation during replay: return immediately
+				// without marking unhealthy or overwriting status.
+				if replayStatus == -1 {
+					return
+				}
 				// Replay failed: mark unhealthy, release lease, try next account.
 				// Note: lease is already released inside codexAuthReplay on failure.
 				a.Pool.MarkUnhealthy(entry.Path)
 				tried[entry.Path] = true
 				hadUpstreamAttempt = true
-				lastUpstreamStatus = replayStatus
+				// Preserve the original 401/403 status when the replay
+				// failed due to URL/request construction (status 0).
+				if replayStatus != 0 {
+					lastUpstreamStatus = replayStatus
+				}
 				if replayBody != nil {
 					lastUpstreamBody = replayBody
 					lastUpstreamContentType = replayCT
@@ -412,6 +421,10 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 // token refresh. The pool lease (Begin) for entry.Path must already be held.
 // Returns (true, 0, nil, "") on success (lease is released on the success path).
 // Returns (false, status, body, contentType) on failure (lease is also released).
+// A status of -1 indicates client cancellation (context cancelled); callers
+// should return immediately without marking the account unhealthy.
+// A status of 0 indicates a URL or request construction error; callers should
+// preserve the original upstream status rather than overwriting with 0.
 func (a *API) codexAuthReplay(
 	c *gin.Context,
 	m *config.Model,
@@ -447,6 +460,13 @@ func (a *API) codexAuthReplay(
 
 	if doErr != nil {
 		a.Pool.End(entry.Path)
+		// Client cancellation: do not propagate status that would cause
+		// the caller to mark this account unhealthy or overwrite the
+		// original 401/403 status. Return a sentinel so the caller can
+		// distinguish cancellation from real upstream failures.
+		if ctxErr := c.Request.Context().Err(); ctxErr != nil {
+			return false, -1, nil, ""
+		}
 		return false, 0, nil, ""
 	}
 

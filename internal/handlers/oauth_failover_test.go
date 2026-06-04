@@ -3624,3 +3624,180 @@ func TestCodexNonStreamingBodyReadErrorPreservesSingleAccountBehavior(t *testing
 		t.Fatalf("expected exactly 1 attempt, got %d", attemptCount)
 	}
 }
+
+// ============================================================================
+// Code cleanups: context cancellation and status preservation in codexAuthReplay
+// ============================================================================
+
+func TestCodexAuthReplayContextCancellationDoesNotMarkUnhealthy(t *testing.T) {
+	// When codexAuthReplay encounters doErr and the client context is
+	// cancelled, the account must NOT be marked unhealthy. The handler
+	// should return immediately without failover or cooldown marking.
+	var mu sync.Mutex
+	var attempts []string
+	var cancelFn context.CancelFunc
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "refreshed-access-token-0",
+			"refresh_token": "refresh-token-0",
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenSrv.Close()
+	restore := oauth.SetTestCodexTokenURL(tokenSrv.URL)
+	defer restore()
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			mu.Lock()
+			attempts = append(attempts, auth)
+			mu.Unlock()
+
+			if auth == "access-token-0" {
+				// Initial request: return 401 to trigger auth replay.
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+				return
+			}
+			// Replay request: cancel the client context before responding,
+			// then close the connection to trigger a transport error.
+			if cancelFn != nil {
+				cancelFn()
+			}
+			hj, ok := w.(http.Hijacker)
+			if ok {
+				conn, _, _ := hj.Hijack()
+				_ = conn.Close()
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+		},
+	})
+
+	// Use a cancellable context so the replay sees cancellation.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancelFn = cancel
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`)).WithContext(ctx)
+	api.engine.ServeHTTP(w, req)
+
+	// The handler should have returned after cancellation without writing
+	// a complete response (context was cancelled).
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Verify first account was NOT marked unhealthy — context cancellation
+	// should suppress unhealthy marking.
+	snap := api.api.Pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.Selector == "a@test.com" && !acct.Healthy {
+			t.Fatalf("account a should NOT be marked unhealthy after client cancellation during replay, got unhealthy=true")
+		}
+	}
+
+	// Verify no leases are stuck.
+	for _, acct := range snap.Accounts {
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight for %s, got %d", acct.Selector, acct.InFlight)
+		}
+	}
+}
+
+func TestCodexAuthReplayTransportErrorPreservesOriginalStatus(t *testing.T) {
+	// When codexAuthReplay encounters a transport error (doErr != nil) that
+	// is NOT due to client cancellation, the original 401/403 status should
+	// be preserved for relay rather than overwritten to 0.
+	var mu sync.Mutex
+	var attempts []string
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "refreshed-access-token-0",
+			"refresh_token": "refresh-token-0",
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenSrv.Close()
+	restore := oauth.SetTestCodexTokenURL(tokenSrv.URL)
+	defer restore()
+
+	// Upstream handler that returns 403 on the initial request, then
+	// force-closes the connection on the replay (refreshed token).
+	upstreamHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := authTokenFromRequest(r)
+		mu.Lock()
+		attempts = append(attempts, auth)
+		mu.Unlock()
+
+		if auth == "access-token-0" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"message":"forbidden","type":"permission_error"}}`))
+			return
+		}
+		// Replay with refreshed token: close connection to simulate transport error.
+		hj, ok := w.(http.Hijacker)
+		if ok {
+			conn, _, _ := hj.Hijack()
+			_ = conn.Close()
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 0, // No additional failovers — we want exhaustion relay
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"}, // second account needed for isMultiAccount=true
+		},
+		upstreamHandler: upstreamHandler,
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Should have seen the initial attempt and the replay attempt.
+	if len(attempts) < 2 {
+		t.Fatalf("expected at least 2 upstream attempts (initial + replay), got %d: %v", len(attempts), attempts)
+	}
+
+	// The response should relay the original 403, not a 0 or 502.
+	// Without the fix, lastUpstreamStatus would be overwritten to 0
+	// from the replay's transport error.
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 (preserved from original), got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "forbidden") {
+		t.Fatalf("expected original error body relayed, got %s", w.Body.String())
+	}
+
+	// The account should be marked unhealthy after the replay transport error.
+	snap := api.api.Pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.Selector == "a@test.com" {
+			if acct.Healthy {
+				t.Fatal("expected account to be marked unhealthy after replay transport error")
+			}
+		}
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight, got %d for %s", acct.InFlight, acct.Selector)
+		}
+	}
+}

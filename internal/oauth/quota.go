@@ -202,13 +202,22 @@ func RetryAfterTime(headers http.Header, now time.Time) *time.Time {
 	return nil // unparseable
 }
 
-// LatestQuotaReset returns the latest future reset timestamp across all quota
-// windows, or nil if no valid future reset exists. This is the deterministic
-// quota-reset selection rule used for cooldown timestamp computation.
+// LatestQuotaReset returns the latest reset timestamp across all quota
+// windows, or nil if no valid reset exists. It does NOT filter for future-only
+// timestamps — the returned timestamp may be in the past. Callers that need
+// only future reset times must compare the result against time.Now() themselves
+// (as codexRateLimitCooldown does). This is the deterministic quota-reset
+// selection rule used for cooldown timestamp computation.
 func LatestQuotaReset(quota *CodexQuota) *time.Time {
 	return latestQuotaReset(quota)
 }
 
+// retryAfterReset parses the Retry-After header and returns a time.Time.
+// Unlike RetryAfterTime, which filters for future-only values and accepts an
+// explicit "now" parameter for testability, retryAfterReset always computes
+// relative to time.Now() for numeric-seconds values and returns past HTTP-date
+// values without filtering. Callers that need future-only semantics should use
+// RetryAfterTime instead, or check the returned timestamp themselves.
 func retryAfterReset(headers http.Header) *time.Time {
 	if headers == nil {
 		return nil
