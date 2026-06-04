@@ -132,6 +132,23 @@ func isRetryableCodexStatus(status int) bool {
 	return status == http.StatusTooManyRequests || status >= 500
 }
 
+// codexRateLimitCooldown computes the cooldown timestamp for a rate-limited
+// Codex account. Priority: future Retry-After header > deterministic future
+// quota reset > configured fallback duration.
+func codexRateLimitCooldown(headers http.Header, quota *oauth.CodexQuota, fallback time.Duration) time.Time {
+	now := time.Now()
+	// 1. Try future Retry-After header (numeric seconds or HTTP-date).
+	if ra := oauth.RetryAfterTime(headers, now); ra != nil {
+		return *ra
+	}
+	// 2. Try deterministic future quota reset from parsed quota windows.
+	if reset := oauth.LatestQuotaReset(quota); reset != nil && reset.After(now) {
+		return *reset
+	}
+	// 3. Fallback: configured rate_limit_cooldown.
+	return now.Add(fallback)
+}
+
 // responsesViaCodexFailover implements bounded account failover for Codex
 // requests using the AccountPool. It replays the prepared payload across
 // eligible alternate accounts within the configured max_failovers budget.
@@ -267,7 +284,8 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		// Classify: retryable or non-retryable.
 		if isRetryableCodexStatus(resp.StatusCode) {
 			if resp.StatusCode == http.StatusTooManyRequests {
-				a.Pool.MarkRateLimited(entry.Path, time.Now().Add(rateLimitCooldown))
+				cooldownUntil := codexRateLimitCooldown(resp.Header, quota, rateLimitCooldown)
+				a.Pool.MarkRateLimited(entry.Path, cooldownUntil)
 			} else {
 				a.Pool.MarkCooldown(entry.Path, time.Now().Add(errorCooldown))
 			}

@@ -1018,3 +1018,731 @@ func TestResponsesCodexFailoverStreaming429FailsOver(t *testing.T) {
 		t.Fatalf("expected streaming response, got %s", w.Body.String())
 	}
 }
+
+// --------------- VAL-FAILOVER-002: 429 cooldown uses Retry-After, quota reset, then fallback ---------------
+
+func TestCodexRateLimitCooldownUsesRetryAfterNumeric(t *testing.T) {
+	// When a 429 has Retry-After: 120 (numeric seconds), the pool's
+	// rate-limited timestamp should be approximately 120s from now.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      0,
+		rateLimitCooldown: 60 * time.Second,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", "120")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		},
+	})
+
+	before := time.Now()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", w.Code)
+	}
+
+	snap := api.api.Pool.Snapshot()
+	if len(snap.Accounts) != 1 {
+		t.Fatalf("expected 1 account, got %d", len(snap.Accounts))
+	}
+	rl := snap.Accounts[0].RateLimitedUntil
+	if rl == nil {
+		t.Fatal("expected rate-limited timestamp on account")
+	}
+	// Should be approximately 120s from now (allow 5s tolerance).
+	expectedMin := before.Add(115 * time.Second)
+	expectedMax := before.Add(125 * time.Second)
+	if rl.Before(expectedMin) || rl.After(expectedMax) {
+		t.Fatalf("expected rate-limited until ~%v (120s from request), got %v", before.Add(120*time.Second), rl)
+	}
+}
+
+func TestCodexRateLimitCooldownUsesRetryAfterHTTPDate(t *testing.T) {
+	// When a 429 has Retry-After with an HTTP-date, the pool's rate-limited
+	// timestamp should match that date.
+	futureTime := time.Now().Add(5 * time.Minute).UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT")
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      0,
+		rateLimitCooldown: 60 * time.Second,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", futureTime)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", w.Code)
+	}
+
+	snap := api.api.Pool.Snapshot()
+	rl := snap.Accounts[0].RateLimitedUntil
+	if rl == nil {
+		t.Fatal("expected rate-limited timestamp on account")
+	}
+	parsed, err := http.ParseTime(futureTime)
+	if err != nil {
+		t.Fatalf("could not parse test future time: %v", err)
+	}
+	if !rl.Truncate(time.Second).Equal(parsed.Truncate(time.Second)) {
+		t.Fatalf("expected rate-limited until %v, got %v", parsed, rl)
+	}
+}
+
+func TestCodexRateLimitCooldownUsesQuotaResetWhenNoRetryAfter(t *testing.T) {
+	// When a 429 has quota headers with a future reset-at but no Retry-After,
+	// the pool's rate-limited timestamp should use the deterministic quota reset.
+	resetAt := time.Now().Add(10 * time.Minute).Unix() // future unix timestamp
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      0,
+		rateLimitCooldown: 60 * time.Second,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("x-codex-primary-used-percent", "100")
+			w.Header().Set("x-codex-primary-reset-at", fmt.Sprintf("%d", resetAt))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", w.Code)
+	}
+
+	snap := api.api.Pool.Snapshot()
+	rl := snap.Accounts[0].RateLimitedUntil
+	if rl == nil {
+		t.Fatal("expected rate-limited timestamp on account")
+	}
+	expected := time.Unix(resetAt, 0).UTC()
+	if !rl.Truncate(time.Second).Equal(expected.Truncate(time.Second)) {
+		t.Fatalf("expected rate-limited until %v (quota reset), got %v", expected, rl)
+	}
+}
+
+func TestCodexRateLimitCooldownRetryAfterOverridesQuotaReset(t *testing.T) {
+	// When both Retry-After and quota reset are present, Retry-After wins.
+	resetAt := time.Now().Add(10 * time.Minute).Unix()
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      0,
+		rateLimitCooldown: 60 * time.Second,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", "30")
+			w.Header().Set("x-codex-primary-used-percent", "100")
+			w.Header().Set("x-codex-primary-reset-at", fmt.Sprintf("%d", resetAt))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		},
+	})
+
+	before := time.Now()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", w.Code)
+	}
+
+	snap := api.api.Pool.Snapshot()
+	rl := snap.Accounts[0].RateLimitedUntil
+	if rl == nil {
+		t.Fatal("expected rate-limited timestamp on account")
+	}
+	// Should be ~30s (Retry-After), not 10min (quota reset).
+	expectedMin := before.Add(25 * time.Second)
+	expectedMax := before.Add(35 * time.Second)
+	if rl.Before(expectedMin) || rl.After(expectedMax) {
+		t.Fatalf("expected rate-limited until ~30s (Retry-After), got %v", rl)
+	}
+}
+
+func TestCodexRateLimitCooldownFallsBackToConfiguredDefault(t *testing.T) {
+	// When no Retry-After and no quota reset, use configured rate_limit_cooldown.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      0,
+		rateLimitCooldown: 45 * time.Second,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		},
+	})
+
+	before := time.Now()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", w.Code)
+	}
+
+	snap := api.api.Pool.Snapshot()
+	rl := snap.Accounts[0].RateLimitedUntil
+	if rl == nil {
+		t.Fatal("expected rate-limited timestamp on account")
+	}
+	// Should be approximately 45s from now (configured fallback).
+	expectedMin := before.Add(40 * time.Second)
+	expectedMax := before.Add(50 * time.Second)
+	if rl.Before(expectedMin) || rl.After(expectedMax) {
+		t.Fatalf("expected rate-limited until ~%v (45s fallback), got %v", before.Add(45*time.Second), rl)
+	}
+}
+
+func TestCodexRateLimitCooldownInvalidRetryAfterFallsThrough(t *testing.T) {
+	// Invalid Retry-After should fall through to quota reset or fallback.
+	resetAt := time.Now().Add(5 * time.Minute).Unix()
+	for _, badHeader := range []string{"not-a-number", "-10", "0", "abc"} {
+		t.Run("retry_after_"+badHeader, func(t *testing.T) {
+			api := newCodexFailoverTestAPI(t, failoverTestOptions{
+				maxFailovers:      0,
+				rateLimitCooldown: 60 * time.Second,
+				accounts: []failoverTestAccount{
+					{email: "a@test.com", accountID: "acct_a"},
+				},
+				upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Retry-After", badHeader)
+					w.Header().Set("x-codex-primary-used-percent", "100")
+					w.Header().Set("x-codex-primary-reset-at", fmt.Sprintf("%d", resetAt))
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusTooManyRequests)
+					_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+				},
+			})
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+			api.engine.ServeHTTP(w, req)
+
+			snap := api.api.Pool.Snapshot()
+			rl := snap.Accounts[0].RateLimitedUntil
+			if rl == nil {
+				t.Fatal("expected rate-limited timestamp from quota reset fallback")
+			}
+			expected := time.Unix(resetAt, 0).UTC()
+			if !rl.Truncate(time.Second).Equal(expected.Truncate(time.Second)) {
+				t.Fatalf("expected quota reset %v, got %v", expected, rl)
+			}
+		})
+	}
+}
+
+func TestCodexRateLimitCooldownMultipleWindowsPicksLatest(t *testing.T) {
+	// When multiple quota windows have reset-at, the latest (maximum) is used.
+	earlierReset := time.Now().Add(3 * time.Minute).Unix()
+	laterReset := time.Now().Add(8 * time.Minute).Unix()
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      0,
+		rateLimitCooldown: 60 * time.Second,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("x-codex-primary-used-percent", "100")
+			w.Header().Set("x-codex-primary-reset-at", fmt.Sprintf("%d", earlierReset))
+			w.Header().Set("x-codex-secondary-used-percent", "100")
+			w.Header().Set("x-codex-secondary-reset-at", fmt.Sprintf("%d", laterReset))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	snap := api.api.Pool.Snapshot()
+	rl := snap.Accounts[0].RateLimitedUntil
+	if rl == nil {
+		t.Fatal("expected rate-limited timestamp")
+	}
+	expected := time.Unix(laterReset, 0).UTC()
+	if !rl.Truncate(time.Second).Equal(expected.Truncate(time.Second)) {
+		t.Fatalf("expected latest quota reset %v, got %v", expected, rl)
+	}
+}
+
+func TestCodexRateLimitCooldownOnlyMarksAttemptedAccount(t *testing.T) {
+	// Only the account that got 429 is marked rate-limited, not other accounts.
+	var mu sync.Mutex
+	var firstToken string
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      1,
+		rateLimitCooldown: 60 * time.Second,
+		strategy:          config.LoadBalancingFillFirst,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			if firstToken == "" {
+				firstToken = authTokenFromRequest(r)
+			}
+			mu.Unlock()
+
+			auth := authTokenFromRequest(r)
+			if auth == firstToken {
+				w.Header().Set("Retry-After", "120")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+				return
+			}
+			codexSuccessResponse(w)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after failover, got %d", w.Code)
+	}
+
+	snap := api.api.Pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.Selector == "a@test.com" {
+			if acct.RateLimitedUntil == nil {
+				t.Fatal("expected first account to be rate-limited")
+			}
+		}
+		if acct.Selector == "b@test.com" {
+			if acct.RateLimitedUntil != nil {
+				t.Fatalf("second account should NOT be rate-limited, got %v", acct.RateLimitedUntil)
+			}
+		}
+	}
+}
+
+// --------------- VAL-FAILOVER-009: Codex quota recording remains per selected account ---------------
+
+func TestCodexQuotaRecordingRetryableErrorsPersistToAttemptedAccount(t *testing.T) {
+	// Quota headers from a 429 response should persist to the failed account's token file.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      1,
+		rateLimitCooldown: 60 * time.Second,
+		strategy:          config.LoadBalancingFillFirst,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			if auth == "access-token-0" {
+				w.Header().Set("x-codex-primary-used-percent", "100")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+				return
+			}
+			codexSuccessResponse(w)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	// Verify quota was persisted to account a's token file by reloading tokens.
+	tokens, err := api.api.OAuth.LoadTokens(config.OAuthProviderCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tok := range tokens {
+		if tok.Email == "a@test.com" {
+			if tok.CodexQuota == nil || tok.CodexQuota.Primary == nil {
+				t.Fatalf("expected quota on first account token (the one that got 429), got nil")
+			}
+			if tok.CodexQuota.Primary.UsedPercent != 100 {
+				t.Fatalf("expected 100%% used on first account quota, got %v", tok.CodexQuota.Primary.UsedPercent)
+			}
+		}
+	}
+}
+
+func TestCodexQuotaRecordingSSEQuotaPersistsToSuccessAccount(t *testing.T) {
+	// SSE quota events from a successful response should persist to the
+	// successful account's token file, not to previously failed accounts.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      1,
+		rateLimitCooldown: 60 * time.Second,
+		strategy:          config.LoadBalancingFillFirst,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			if auth == "access-token-0" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+				return
+			}
+			// Success response with SSE quota event in non-streaming body.
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprintln(w, `data: {"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":55,"window_minutes":60}}}`)
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "event: response.completed")
+			fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`)
+			fmt.Fprintln(w)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	// Verify SSE quota was persisted to account b's token file (the successful one).
+	tokens, err := api.api.OAuth.LoadTokens(config.OAuthProviderCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tok := range tokens {
+		if tok.Email == "b@test.com" {
+			if tok.CodexQuota == nil || tok.CodexQuota.Primary == nil {
+				t.Fatalf("expected quota on second account token (the one that succeeded), got nil")
+			}
+			if tok.CodexQuota.Primary.UsedPercent != 55 {
+				t.Fatalf("expected 55%% used on second account quota, got %v", tok.CodexQuota.Primary.UsedPercent)
+			}
+		}
+	}
+}
+
+func TestCodexQuotaRecordingNoCrossAccountOverwrite(t *testing.T) {
+	// Verify that quota metadata is never cross-account overwritten.
+	// Account A gets 429 with quota → its token gets quota.
+	// Account B succeeds with different quota → its token gets its own quota.
+	// Account A's quota should still reflect the 429 values, not B's.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      1,
+		rateLimitCooldown: 60 * time.Second,
+		strategy:          config.LoadBalancingFillFirst,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			if auth == "access-token-0" {
+				w.Header().Set("x-codex-primary-used-percent", "100")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+				return
+			}
+			// Account B succeeds with different quota.
+			w.Header().Set("x-codex-primary-used-percent", "30")
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprintln(w, `data: {"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":30}}}`)
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "event: response.completed")
+			fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`)
+			fmt.Fprintln(w)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	// Verify quota was persisted per account without cross-overwrite.
+	tokens, err := api.api.OAuth.LoadTokens(config.OAuthProviderCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tok := range tokens {
+		switch tok.Email {
+		case "a@test.com":
+			if tok.CodexQuota == nil || tok.CodexQuota.Primary == nil {
+				t.Fatal("expected quota on account A token")
+			}
+			// Should be 100 from the 429 headers, not overwritten by B's 30.
+			if tok.CodexQuota.Primary.UsedPercent != 100 {
+				t.Fatalf("account A quota should be 100 (from 429), got %v", tok.CodexQuota.Primary.UsedPercent)
+			}
+		case "b@test.com":
+			if tok.CodexQuota == nil || tok.CodexQuota.Primary == nil {
+				t.Fatal("expected quota on account B token")
+			}
+			// SSE quota updates: the SSE quota event said 30.
+			if tok.CodexQuota.Primary.UsedPercent != 30 {
+				t.Fatalf("account B quota should be 30 (from success), got %v", tok.CodexQuota.Primary.UsedPercent)
+			}
+		}
+	}
+}
+
+func TestCodexQuotaRecordingNoSecretLeakage(t *testing.T) {
+	// Verify that quota recording does not leak secrets into pool snapshots
+	// or token files.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      1,
+		rateLimitCooldown: 60 * time.Second,
+		strategy:          config.LoadBalancingFillFirst,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			if auth == "access-token-0" {
+				w.Header().Set("x-codex-primary-used-percent", "100")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+				return
+			}
+			codexSuccessResponse(w)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	// Check pool snapshot has no secrets.
+	snap := api.api.Pool.Snapshot()
+	snapJSON, _ := json.Marshal(snap)
+	snapStr := string(snapJSON)
+	for _, secret := range []string{"access-token-", "refresh-token-", "Bearer "} {
+		if strings.Contains(snapStr, secret) {
+			t.Fatalf("pool snapshot contains secret %q: %s", secret, snapStr)
+		}
+	}
+
+	// Check response body has no secrets.
+	respBody := w.Body.String()
+	for _, secret := range []string{"access-token-", "refresh-token-"} {
+		if strings.Contains(respBody, secret) {
+			t.Fatalf("response body contains secret %q: %s", secret, respBody)
+		}
+	}
+}
+
+// --------------- VAL-FAILOVER-017: Quota headers persist for non-retryable and exhausted errors ---------------
+
+func TestCodexQuotaRecordingNonRetryable4xxPersistsQuota(t *testing.T) {
+	// A non-retryable 4xx (e.g. 400) with quota headers should still record
+	// quota to the attempted account's token.
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      2,
+		rateLimitCooldown: 60 * time.Second,
+		strategy:          config.LoadBalancingFillFirst,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("x-codex-primary-used-percent", "75")
+			w.Header().Set("x-codex-primary-window-minutes", "60")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"bad request","type":"invalid_request_error"}}`))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	// Verify quota was persisted to account A's token file (the one that was attempted).
+	tokens, err := api.api.OAuth.LoadTokens(config.OAuthProviderCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tok := range tokens {
+		if tok.Email == "a@test.com" {
+			if tok.CodexQuota == nil || tok.CodexQuota.Primary == nil {
+				t.Fatalf("expected quota on first account token despite non-retryable 4xx, got nil")
+			}
+			if tok.CodexQuota.Primary.UsedPercent != 75 {
+				t.Fatalf("expected 75%% used, got %v", tok.CodexQuota.Primary.UsedPercent)
+			}
+		}
+		// Account B should NOT have quota (was never attempted).
+		if tok.Email == "b@test.com" {
+			if tok.CodexQuota != nil {
+				t.Fatalf("account B should have no quota (never attempted), got %v", tok.CodexQuota)
+			}
+		}
+	}
+}
+
+func TestCodexQuotaRecordingExhaustedErrorsPersistQuotaPerAccount(t *testing.T) {
+	// When all attempts fail with 429, each account should have its own
+	// quota headers persisted. The last attempted account's quota should
+	// be the one visible in the pool snapshot.
+	var mu sync.Mutex
+	var attemptTokens []string
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      1,
+		rateLimitCooldown: 60 * time.Second,
+		strategy:          config.LoadBalancingFillFirst,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			mu.Lock()
+			attemptTokens = append(attemptTokens, auth)
+			mu.Unlock()
+
+			if auth == "access-token-0" {
+				w.Header().Set("x-codex-primary-used-percent", "80")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+				return
+			}
+			w.Header().Set("x-codex-primary-used-percent", "95")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 (exhausted), got %d body=%s", w.Code, w.Body.String())
+	}
+
+	// Both accounts should have been attempted.
+	if len(attemptTokens) != 2 {
+		t.Fatalf("expected 2 attempts, got %d", len(attemptTokens))
+	}
+
+	// Verify quota was persisted per account via token files.
+	tokens, err := api.api.OAuth.LoadTokens(config.OAuthProviderCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tok := range tokens {
+		switch tok.Email {
+		case "a@test.com":
+			if tok.CodexQuota == nil || tok.CodexQuota.Primary == nil {
+				t.Fatal("expected quota on account A token")
+			}
+			if tok.CodexQuota.Primary.UsedPercent != 80 {
+				t.Fatalf("account A quota should be 80, got %v", tok.CodexQuota.Primary.UsedPercent)
+			}
+		case "b@test.com":
+			if tok.CodexQuota == nil || tok.CodexQuota.Primary == nil {
+				t.Fatal("expected quota on account B token")
+			}
+			if tok.CodexQuota.Primary.UsedPercent != 95 {
+				t.Fatalf("account B quota should be 95, got %v", tok.CodexQuota.Primary.UsedPercent)
+			}
+		}
+	}
+}
+
+func TestCodexQuotaRecordingExhaustedFinalErrorPreservesLastQuota(t *testing.T) {
+	// When budget is exhausted, the last upstream error is relayed.
+	// Quota from the final attempt should be recorded to the correct account.
+	var attemptCount int32
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:      0, // only 1 attempt
+		rateLimitCooldown: 60 * time.Second,
+		strategy:          config.LoadBalancingFillFirst,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			w.Header().Set("x-codex-primary-used-percent", "99")
+			w.Header().Set("x-codex-primary-window-minutes", "60")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":{"message":"bad gateway"}}`))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "bad gateway") {
+		t.Fatalf("expected error body preserved, got %s", w.Body.String())
+	}
+
+	// Verify quota was persisted despite the exhausted error via token file.
+	tokens, err := api.api.OAuth.LoadTokens(config.OAuthProviderCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens) != 1 {
+		t.Fatalf("expected 1 token, got %d", len(tokens))
+	}
+	tok := tokens[0]
+	if tok.CodexQuota == nil || tok.CodexQuota.Primary == nil {
+		t.Fatal("expected quota persisted even for exhausted error")
+	}
+	if tok.CodexQuota.Primary.UsedPercent != 99 {
+		t.Fatalf("expected 99%% used, got %v", tok.CodexQuota.Primary.UsedPercent)
+	}
+}

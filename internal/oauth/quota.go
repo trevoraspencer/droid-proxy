@@ -173,6 +173,42 @@ func numericValue(value any) (float64, bool) {
 	}
 }
 
+// RetryAfterTime parses the Retry-After header and returns a future timestamp
+// if the value is valid and in the future relative to now. It supports numeric
+// seconds and HTTP-date forms. Invalid, zero, negative, or past values return nil.
+func RetryAfterTime(headers http.Header, now time.Time) *time.Time {
+	if headers == nil {
+		return nil
+	}
+	raw := strings.TrimSpace(headers.Get("Retry-After"))
+	if raw == "" {
+		return nil
+	}
+	// Numeric seconds
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		if seconds > 0 {
+			tm := now.Add(time.Duration(seconds) * time.Second)
+			return &tm
+		}
+		return nil // zero or negative
+	}
+	// HTTP-date
+	if tm, err := http.ParseTime(raw); err == nil {
+		if tm.After(now) {
+			return &tm
+		}
+		return nil // past date
+	}
+	return nil // unparseable
+}
+
+// LatestQuotaReset returns the latest future reset timestamp across all quota
+// windows, or nil if no valid future reset exists. This is the deterministic
+// quota-reset selection rule used for cooldown timestamp computation.
+func LatestQuotaReset(quota *CodexQuota) *time.Time {
+	return latestQuotaReset(quota)
+}
+
 func retryAfterReset(headers http.Header) *time.Time {
 	if headers == nil {
 		return nil
