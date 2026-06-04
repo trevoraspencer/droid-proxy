@@ -106,26 +106,36 @@ func callbackHandler(path, wantState string, out chan<- CallbackResult) http.Han
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
+		state := q.Get("state")
+		code := q.Get("code")
+		errMsg := firstNonEmpty(q.Get("error_description"), q.Get("error"))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if state != wantState {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("<html><body><h1>Authentication failed</h1><p>You can close this window.</p></body></html>"))
+			return
+		}
+		if errMsg != "" {
+			select {
+			case out <- CallbackResult{State: state, Err: errMsg}:
+			default:
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("<html><body><h1>Authentication failed</h1><p>You can close this window.</p></body></html>"))
+			return
+		}
+		if code == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("<html><body><h1>Authentication failed</h1><p>You can close this window.</p></body></html>"))
+			return
+		}
 		result := CallbackResult{
-			Code:  q.Get("code"),
-			State: q.Get("state"),
-			Err:   firstNonEmpty(q.Get("error_description"), q.Get("error")),
-		}
-		if result.Err == "" && result.Code == "" {
-			result.Err = "missing authorization code"
-		}
-		if result.Err == "" && result.State != wantState {
-			result.Err = "state mismatch"
+			Code:  code,
+			State: state,
 		}
 		select {
 		case out <- result:
 		default:
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if result.Err != "" {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte("<html><body><h1>Authentication failed</h1><p>You can close this window.</p></body></html>"))
-			return
 		}
 		_, _ = w.Write([]byte("<html><body><h1>Authentication complete</h1><p>You can close this window and return to droid-proxy.</p></body></html>"))
 	})

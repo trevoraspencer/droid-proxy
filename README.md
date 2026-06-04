@@ -49,7 +49,7 @@ git clone <this-repo> droid-proxy && cd droid-proxy
 go build -o droid-proxy ./cmd/droid-proxy
 ```
 
-Requires Go 1.26.3 or newer in the Go 1.26 line. The build produces a single static binary.
+Requires Go 1.26.4 or newer in the Go 1.26 line. The build produces a single static binary.
 
 To run `droid-proxy` commands from any directory, put the built binary on your
 shell `PATH`. On macOS or Linux, a symlink in `~/.local/bin` keeps the source

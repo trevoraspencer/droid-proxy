@@ -446,6 +446,49 @@ models:
 	}
 }
 
+func TestLoad_OAuthCallbackHostsMustBeLoopback(t *testing.T) {
+	cases := []struct {
+		name    string
+		field   string
+		host    string
+		wantErr string
+	}{
+		{name: "codex localhost allowed", field: "codex_callback_host", host: "localhost"},
+		{name: "codex IPv4 loopback allowed", field: "codex_callback_host", host: "127.0.0.1"},
+		{name: "codex IPv6 loopback allowed", field: "codex_callback_host", host: "::1"},
+		{name: "xai localhost allowed", field: "xai_callback_host", host: "localhost"},
+		{name: "xai IPv4 loopback allowed", field: "xai_callback_host", host: "127.0.0.1"},
+		{name: "xai IPv6 loopback allowed", field: "xai_callback_host", host: "::1"},
+		{name: "codex wildcard rejected", field: "codex_callback_host", host: "0.0.0.0", wantErr: "oauth.codex_callback_host"},
+		{name: "codex remote rejected", field: "codex_callback_host", host: "192.0.2.10", wantErr: "oauth.codex_callback_host"},
+		{name: "xai wildcard rejected", field: "xai_callback_host", host: "::", wantErr: "oauth.xai_callback_host"},
+		{name: "xai remote rejected", field: "xai_callback_host", host: "callback.example.test", wantErr: "oauth.xai_callback_host"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := `
+oauth:
+  ` + tc.field + `: "` + tc.host + `"
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`
+			_, err := parse([]byte(in))
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected error containing %q, got: %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected ok, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestLoad_UpstreamURLValidation(t *testing.T) {
 	t.Setenv("REMOTE_KEY", "secret")
 	cases := []struct {

@@ -461,6 +461,51 @@ func TestWatcher_MissingDirRecoveryOnTokenCreation(t *testing.T) {
 	}
 }
 
+func TestWatcher_AuthDirRemovalAndRecreationReloadsPool(t *testing.T) {
+	parentDir := t.TempDir()
+	dir := filepath.Join(parentDir, "auth")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	oldTok := makeToken("old@example.com", "old-access-SENTINEL", "old-refresh-SENTINEL", false)
+	saveTokenFile(t, dir, oldTok)
+	mgr := newTestManager(t, dir)
+	pool := NewAccountPool([]*Token{oldTok}, fakeTime)
+
+	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	if !poolWithin(t, pool, 3*time.Second, func(s *PoolSnapshot) bool {
+		return len(s.Accounts) == 1 && s.Accounts[0].Selector == "old@example.com"
+	}) {
+		t.Fatalf("expected initial account; snapshot: %+v", pool.Snapshot())
+	}
+
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if !poolWithin(t, pool, 5*time.Second, func(s *PoolSnapshot) bool {
+		return len(s.Accounts) == 0
+	}) {
+		t.Fatalf("watcher did not clear pool after auth dir removal; snapshot: %+v", pool.Snapshot())
+	}
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	newTok := makeToken("new@example.com", "new-access-SENTINEL", "new-refresh-SENTINEL", false)
+	saveTokenFile(t, dir, newTok)
+	if !poolWithin(t, pool, 5*time.Second, func(s *PoolSnapshot) bool {
+		return len(s.Accounts) == 1 && s.Accounts[0].Selector == "new@example.com"
+	}) {
+		t.Fatalf("watcher did not recover after auth dir recreation; snapshot: %+v", pool.Snapshot())
+	}
+}
+
 func TestWatcher_AtomicSaveNoiseIgnored(t *testing.T) {
 	dir := t.TempDir()
 	mgr := newTestManager(t, dir)

@@ -12,7 +12,7 @@
 
 **Architecture:** Single binary HTTP server (gin) that accepts the three Factory Droid endpoint protocols (`anthropic` / `openai` / `generic-chat-completion-api`) and forwards each request to a configured upstream, translating between protocols where needed. Models are declared in `config.yaml` with explicit Factory provider mode + upstream protocol so the proxy knows which translation path applies. DeepSeek reasoning replay is ported narrowly from the reference codebase.
 
-**Tech Stack:** Go 1.26.3+, gin (router), logrus (logger), gopkg.in/yaml.v3 (config), tidwall/gjson + sjson (JSON shaping), tiktoken-go/tokenizer (token counting fallback), `net/http/httptest` (tests).
+**Tech Stack:** Go 1.26.4+, gin (router), logrus (logger), gopkg.in/yaml.v3 (config), tidwall/gjson + sjson (JSON shaping), tiktoken-go/tokenizer (token counting fallback), `net/http/httptest` (tests).
 
 **Module path:** `droid-proxy` (local module name; no github reference). Renaming to a hosted path is a one-liner if/when the repo is published.
 

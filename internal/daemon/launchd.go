@@ -95,12 +95,6 @@ func InstallLaunchd(configPath string) error {
 		return err
 	}
 
-	f, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("creating plist: %w", err)
-	}
-	defer f.Close()
-
 	data := plistData{
 		Label:      launchdLabel,
 		Executable: exe,
@@ -109,11 +103,42 @@ func InstallLaunchd(configPath string) error {
 		WorkDir:    workDir,
 		LogDir:     stateDir,
 	}
-	if err := plistTemplate.Execute(f, data); err != nil {
-		return fmt.Errorf("writing plist: %w", err)
+	if err := writeLaunchdPlist(path, data); err != nil {
+		return err
 	}
 
 	return loadLaunchAgent(path)
+}
+
+func writeLaunchdPlist(path string, data plistData) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("creating plist: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("setting plist permissions: %w", err)
+	}
+	if err := plistTemplate.Execute(tmp, data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("writing plist: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing plist: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		return fmt.Errorf("setting plist permissions: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("installing plist: %w", err)
+	}
+	return nil
 }
 
 func loadLaunchAgent(path string) error {

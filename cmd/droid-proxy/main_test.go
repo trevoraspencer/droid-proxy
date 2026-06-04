@@ -62,6 +62,36 @@ func TestResolveDefaultConfigPathFallsBackToConfigYAML(t *testing.T) {
 	}
 }
 
+func TestTailLinesReturnsLastNLines(t *testing.T) {
+	got, err := tailLines(strings.NewReader("one\ntwo\nthree\nfour\n"), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, "|") != "three|four" {
+		t.Fatalf("tailLines = %#v", got)
+	}
+}
+
+func TestTailLinesPreservesInteriorBlankLines(t *testing.T) {
+	got, err := tailLines(strings.NewReader("\n\none\n\ntwo\n\n"), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, "|") != "one||two" {
+		t.Fatalf("tailLines = %#v", got)
+	}
+}
+
+func TestTailLinesNonPositiveShowsAllContentLines(t *testing.T) {
+	got, err := tailLines(strings.NewReader("\none\ntwo\n"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, "|") != "one|two" {
+		t.Fatalf("tailLines = %#v", got)
+	}
+}
+
 func TestFormatAuthStatusDoesNotExposeSecrets(t *testing.T) {
 	manager := oauth.NewManager(&config.Config{OAuth: config.OAuth{AuthDir: t.TempDir()}})
 	expires := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)

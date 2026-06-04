@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"net"
@@ -189,6 +190,21 @@ models:
 	s.Engine().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("raw key expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestClientAPIKeyMatchesExactDigest(t *testing.T) {
+	keys := [][sha256.Size]byte{
+		sha256.Sum256([]byte("tenant-a")),
+		sha256.Sum256([]byte("tenant-b")),
+	}
+	if !clientAPIKeyMatches("tenant-b", keys) {
+		t.Fatal("expected exact key match")
+	}
+	for _, got := range []string{"tenant", "tenant-b ", "Tenant-B", "tenant-c"} {
+		if clientAPIKeyMatches(got, keys) {
+			t.Fatalf("unexpected key match for %q", got)
+		}
 	}
 }
 

@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 	"strings"
@@ -188,13 +190,13 @@ func ClientAuth(cfg *config.Config) gin.HandlerFunc {
 		header = "Authorization"
 	}
 	scheme := cfg.ClientAuth.Scheme
-	keys := make(map[string]struct{}, len(cfg.ClientAuth.APIKeys))
+	keys := make([][sha256.Size]byte, 0, len(cfg.ClientAuth.APIKeys))
 	for _, k := range cfg.ClientAuth.APIKeys {
 		k = strings.TrimSpace(k)
 		if k == "" {
 			continue
 		}
-		keys[k] = struct{}{}
+		keys = append(keys, sha256.Sum256([]byte(k)))
 	}
 	return func(c *gin.Context) {
 		raw := strings.TrimSpace(c.GetHeader(header))
@@ -213,13 +215,22 @@ func ClientAuth(cfg *config.Config) gin.HandlerFunc {
 			}
 			got = strings.TrimSpace(strings.TrimPrefix(raw, prefix))
 		}
-		if _, ok := keys[got]; !ok {
+		if !clientAPIKeyMatches(got, keys) {
 			handlers.WriteJSONError(c, http.StatusUnauthorized, "authentication_error", "invalid api key")
 			c.Abort()
 			return
 		}
 		c.Next()
 	}
+}
+
+func clientAPIKeyMatches(got string, keys [][sha256.Size]byte) bool {
+	gotHash := sha256.Sum256([]byte(got))
+	match := 0
+	for i := range keys {
+		match |= subtle.ConstantTimeCompare(gotHash[:], keys[i][:])
+	}
+	return match == 1
 }
 
 // ensure imported (logging is used elsewhere; avoid the unused-import warning if a future refactor removes references)

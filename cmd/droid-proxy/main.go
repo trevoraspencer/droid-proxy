@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -307,22 +308,59 @@ func runLogs(args []string) {
 	}
 	defer f.Close()
 
-	data, err := io.ReadAll(f)
+	out, err := tailLines(f, *lines)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "droid-proxy logs error: %v\n", err)
 		os.Exit(1)
 	}
-	text := strings.TrimSpace(string(data))
-	if text == "" {
+	if len(out) == 0 {
 		fmt.Println("(no log output yet)")
 		return
 	}
-	all := strings.Split(text, "\n")
-	start := 0
-	if *lines > 0 && len(all) > *lines {
-		start = len(all) - *lines
+	fmt.Println(strings.Join(out, "\n"))
+}
+
+func tailLines(r io.Reader, n int) ([]string, error) {
+	reader := bufio.NewReader(r)
+	var lines []string
+	var pendingBlank []string
+	seenContent := false
+	for {
+		line, err := reader.ReadString('\n')
+		if len(line) > 0 {
+			line = strings.TrimRight(line, "\r\n")
+			if strings.TrimSpace(line) == "" {
+				if seenContent {
+					pendingBlank = append(pendingBlank, line)
+				}
+			} else {
+				if seenContent {
+					for _, blank := range pendingBlank {
+						lines = appendTailLine(lines, blank, n)
+					}
+				}
+				pendingBlank = pendingBlank[:0]
+				lines = appendTailLine(lines, line, n)
+				seenContent = true
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
-	fmt.Println(strings.Join(all[start:], "\n"))
+	return lines, nil
+}
+
+func appendTailLine(lines []string, line string, n int) []string {
+	if n > 0 && len(lines) == n {
+		copy(lines, lines[1:])
+		lines[n-1] = line
+		return lines
+	}
+	return append(lines, line)
 }
 
 func defaultConfigPath() string {

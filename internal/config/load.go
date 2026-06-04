@@ -166,6 +166,12 @@ func (c *Config) Validate() error {
 	if c.OAuth.XAICallbackPort < 0 || c.OAuth.XAICallbackPort > 65535 {
 		errs = append(errs, fmt.Sprintf("oauth.xai_callback_port %d out of range", c.OAuth.XAICallbackPort))
 	}
+	if !isLoopbackHost(c.OAuth.CodexCallbackHost) {
+		errs = append(errs, fmt.Sprintf("oauth.codex_callback_host %q is not loopback", c.OAuth.CodexCallbackHost))
+	}
+	if !isLoopbackHost(c.OAuth.XAICallbackHost) {
+		errs = append(errs, fmt.Sprintf("oauth.xai_callback_host %q is not loopback", c.OAuth.XAICallbackHost))
+	}
 	if lb := c.OAuth.LoadBalancing; lb.Strategy != "" && !lb.Strategy.IsValid() {
 		errs = append(errs, fmt.Sprintf("oauth.load_balancing.strategy %q is invalid (must be one of: round-robin, fill-first, least-connections, random)", lb.Strategy))
 	}

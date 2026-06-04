@@ -3,6 +3,7 @@ package daemon
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,6 +16,10 @@ const dirName = ".droid-proxy"
 var (
 	stateDir = filepath.Join(os.Getenv("HOME"), dirName)
 	pidFile  = filepath.Join(stateDir, "droid-proxy.pid")
+
+	processAlive            = processAliveDefault
+	findProcess             = findProcessDefault
+	verifyProcessExecutable = verifyProcessExecutableDefault
 )
 
 // StateDir returns ~/.droid-proxy (created on demand by callers).
@@ -59,7 +64,7 @@ func CleanStalePID() bool {
 	if err != nil {
 		return false
 	}
-	if !processAlive(pid) {
+	if stale, _ := daemonPIDState(pid); stale {
 		RemovePID()
 		RemoveRuntimeMetadata()
 		return true
@@ -73,20 +78,159 @@ func IsRunning() (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	if !processAlive(pid) {
+	stale, verified := daemonPIDState(pid)
+	if stale {
 		RemovePID()
 		RemoveRuntimeMetadata()
+		return 0, false
+	}
+	if !verified {
 		return 0, false
 	}
 	return pid, true
 }
 
-func processAlive(pid int) bool {
+func processAliveDefault(pid int) bool {
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return false
 	}
 	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+type processSignaler interface {
+	Signal(os.Signal) error
+}
+
+func findProcessDefault(pid int) (processSignaler, error) {
+	return os.FindProcess(pid)
+}
+
+type processIdentity int
+
+const (
+	processIdentityUnknown processIdentity = iota
+	processIdentityMatch
+	processIdentityMismatch
+)
+
+func daemonPIDState(pid int) (stale bool, verified bool) {
+	if !processAlive(pid) {
+		return true, false
+	}
+	meta, err := ReadRuntimeMetadata()
+	if err != nil {
+		return false, false
+	}
+	if meta.PID != pid || strings.TrimSpace(meta.Executable) == "" {
+		return true, false
+	}
+	switch verifyProcessExecutable(pid, meta.Executable) {
+	case processIdentityMatch:
+		return false, true
+	case processIdentityMismatch:
+		return true, false
+	default:
+		return false, false
+	}
+}
+
+func verifyProcessExecutableDefault(pid int, expected string) processIdentity {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return processIdentityUnknown
+	}
+	if actual, ok := procExecutablePath(pid); ok {
+		return compareExecutableIdentity(actual, expected)
+	}
+	if actual, ok := processCommandLine(pid); ok {
+		return compareCommandLineIdentity(actual, expected)
+	}
+	if actual, ok := processCommandName(pid); ok {
+		return compareExecutableIdentity(actual, expected)
+	}
+	return processIdentityUnknown
+}
+
+func procExecutablePath(pid int) (string, bool) {
+	path, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
+	if err != nil || strings.TrimSpace(path) == "" {
+		return "", false
+	}
+	return path, true
+}
+
+func processCommandName(pid int) (string, bool) {
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+	if err != nil {
+		return "", false
+	}
+	name := strings.TrimSpace(string(out))
+	return name, name != ""
+}
+
+func processCommandLine(pid int) (string, bool) {
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
+	if err != nil {
+		return "", false
+	}
+	command := strings.TrimSpace(string(out))
+	return command, command != ""
+}
+
+func compareCommandLineIdentity(command, expected string) processIdentity {
+	command = strings.TrimSpace(command)
+	expected = strings.TrimSpace(expected)
+	if command == "" || expected == "" {
+		return processIdentityUnknown
+	}
+	expectedAbs, err := filepath.Abs(expected)
+	if err == nil {
+		if expectedReal, realErr := filepath.EvalSymlinks(expectedAbs); realErr == nil {
+			expectedAbs = expectedReal
+		}
+		if command == expectedAbs || strings.HasPrefix(command, expectedAbs+" ") {
+			return processIdentityMatch
+		}
+	}
+	if command == expected || strings.HasPrefix(command, expected+" ") {
+		return processIdentityMatch
+	}
+	firstArg := strings.Fields(command)
+	if len(firstArg) > 0 && filepath.IsAbs(firstArg[0]) {
+		return compareExecutableIdentity(firstArg[0], expected)
+	}
+	return processIdentityUnknown
+}
+
+func compareExecutableIdentity(actual, expected string) processIdentity {
+	actual = strings.TrimSpace(actual)
+	expected = strings.TrimSpace(expected)
+	if actual == "" || expected == "" {
+		return processIdentityUnknown
+	}
+	if sameExecutablePath(actual, expected) {
+		return processIdentityMatch
+	}
+	if filepath.Base(actual) == filepath.Base(expected) {
+		return processIdentityMatch
+	}
+	return processIdentityMismatch
+}
+
+func sameExecutablePath(actual, expected string) bool {
+	actualAbs, actualErr := filepath.Abs(actual)
+	expectedAbs, expectedErr := filepath.Abs(expected)
+	if actualErr != nil || expectedErr != nil {
+		return false
+	}
+	if actualReal, err := filepath.EvalSymlinks(actualAbs); err == nil {
+		actualAbs = actualReal
+	}
+	if expectedReal, err := filepath.EvalSymlinks(expectedAbs); err == nil {
+		expectedAbs = expectedReal
+	}
+	return actualAbs == expectedAbs
 }
 
 // Stop sends SIGTERM and waits for the process to exit.
@@ -100,7 +244,7 @@ func StopWithTimeout(timeout time.Duration) error {
 	if !running {
 		return fmt.Errorf("droid-proxy is not running")
 	}
-	proc, err := os.FindProcess(pid)
+	proc, err := findProcess(pid)
 	if err != nil {
 		return err
 	}

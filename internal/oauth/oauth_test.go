@@ -97,9 +97,41 @@ func TestCallbackHandler(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 		}
+		select {
+		case result := <-out:
+			t.Fatalf("state mismatch should not complete login, got %+v", result)
+		default:
+		}
+	})
+
+	t.Run("missing code", func(t *testing.T) {
+		out := make(chan CallbackResult, 1)
+		handler := callbackHandler("/auth/callback", "state-ok", out)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=state-ok", nil)
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		select {
+		case result := <-out:
+			t.Fatalf("missing code should not complete login, got %+v", result)
+		default:
+		}
+	})
+
+	t.Run("provider error with matching state", func(t *testing.T) {
+		out := make(chan CallbackResult, 1)
+		handler := callbackHandler("/auth/callback", "state-ok", out)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/auth/callback?error=access_denied&state=state-ok", nil)
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
 		result := <-out
-		if !strings.Contains(result.Err, "state mismatch") {
-			t.Fatalf("expected state mismatch, got %+v", result)
+		if !strings.Contains(result.Err, "access_denied") || result.State != "state-ok" {
+			t.Fatalf("expected matching-state provider error, got %+v", result)
 		}
 	})
 }

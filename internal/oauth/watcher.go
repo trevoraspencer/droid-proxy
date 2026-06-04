@@ -138,19 +138,11 @@ func (w *Watcher) watchAuthDir() {
 		if err := w.fswatcher.Add(dir); err != nil {
 			w.logger.WithError(err).WithField("dir", dir).Warn("watcher: cannot watch auth dir")
 		}
-	} else {
-		// Directory doesn't exist; watch the parent so we detect creation
-		parent := filepath.Dir(dir)
-		if fi, err := os.Stat(parent); err == nil && fi.IsDir() {
-			if err := w.fswatcher.Add(parent); err != nil {
-				w.logger.WithError(err).WithField("dir", parent).Warn("watcher: cannot watch parent dir")
-			} else {
-				w.mu.Lock()
-				w.watchingParent = parent
-				w.mu.Unlock()
-			}
-		}
+		return
 	}
+
+	// Directory doesn't exist; watch the parent so we detect creation.
+	w.watchParentDir(dir)
 }
 
 // loop processes fsnotify events.
@@ -210,8 +202,9 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 		// (fsnotify may send a separate Create event for the destination)
 
 	case event.Has(fsnotify.Remove):
-		if w.isAuthDir(event.Name) {
-			// Auth dir was removed; re-watch parent
+		if w.isAuthDirPath(event.Name) || w.isAuthDir(event.Name) {
+			// Auth dir was removed; re-watch parent so recreation is detected.
+			w.watchParentDir(event.Name)
 			w.scheduleReload()
 			return
 		}
@@ -235,6 +228,28 @@ func (w *Watcher) removeParentWatch() {
 	if parent != "" {
 		_ = w.fswatcher.Remove(parent)
 	}
+}
+
+func (w *Watcher) watchParentDir(dir string) {
+	parent := filepath.Dir(dir)
+	if fi, err := os.Stat(parent); err != nil || !fi.IsDir() {
+		return
+	}
+
+	w.mu.Lock()
+	alreadyWatching := w.watchingParent == parent
+	w.mu.Unlock()
+	if alreadyWatching {
+		return
+	}
+
+	if err := w.fswatcher.Add(parent); err != nil {
+		w.logger.WithError(err).WithField("dir", parent).Warn("watcher: cannot watch parent dir")
+		return
+	}
+	w.mu.Lock()
+	w.watchingParent = parent
+	w.mu.Unlock()
 }
 
 // scheduleReload debounces reload events.
@@ -261,14 +276,16 @@ func (w *Watcher) reload() {
 	}
 	w.pool.Reload(tokens)
 
-	// Re-ensure we're watching the auth dir (it may have been recreated)
+	// Re-ensure we're watching the auth dir, or its parent if it is absent.
 	dir, err := w.mgr.AuthDir()
 	if err != nil {
 		return
 	}
 	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
 		_ = w.fswatcher.Add(dir)
+		return
 	}
+	w.watchParentDir(dir)
 }
 
 // isAuthDir checks if the given path is the configured auth dir using
@@ -288,4 +305,17 @@ func (w *Watcher) isAuthDir(path string) bool {
 		return false
 	}
 	return os.SameFile(pathInfo, dirInfo)
+}
+
+func (w *Watcher) isAuthDirPath(path string) bool {
+	dir, err := w.mgr.AuthDir()
+	if err != nil {
+		return false
+	}
+	pathAbs, pathErr := filepath.Abs(path)
+	dirAbs, dirErr := filepath.Abs(dir)
+	if pathErr == nil && dirErr == nil {
+		return filepath.Clean(pathAbs) == filepath.Clean(dirAbs)
+	}
+	return filepath.Clean(path) == filepath.Clean(dir)
 }
