@@ -83,6 +83,7 @@ func registerAPIRoutes(rg *gin.RouterGroup, api *handlers.API) {
 		rg.Handle(method, path, h)
 	}
 	mount(http.MethodGet, "/models", api.Models)
+	mount(http.MethodGet, "/oauth/pool-health", api.PoolHealth)
 	mount(http.MethodPost, "/chat/completions", api.ChatCompletions)
 	mount(http.MethodPost, "/responses", api.Responses)
 	mount(http.MethodPost, "/messages", api.Messages)

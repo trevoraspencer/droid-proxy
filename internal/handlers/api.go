@@ -15,6 +15,7 @@ type API struct {
 	Router         *upstream.Router
 	Client         *upstream.Client
 	OAuth          *oauth.Manager
+	Pool           *oauth.AccountPool
 	Logger         *logrus.Logger
 	ReasoningCache *reasoning.Cache
 }
@@ -25,7 +26,7 @@ func NewAPI(d Deps, logger *logrus.Logger) *API {
 	if oauthManager == nil {
 		oauthManager = oauth.NewManager(d.Cfg)
 	}
-	api := &API{Cfg: d.Cfg, Router: d.Router, Client: d.Client, OAuth: oauthManager, Logger: logger}
+	api := &API{Cfg: d.Cfg, Router: d.Router, Client: d.Client, OAuth: oauthManager, Pool: d.Pool, Logger: logger}
 	if d.Cfg.ReasoningCache.Enabled {
 		api.ReasoningCache = reasoning.NewCache(d.Cfg.ReasoningCache.MaxEntries, d.Cfg.ReasoningCache.TTL)
 	}

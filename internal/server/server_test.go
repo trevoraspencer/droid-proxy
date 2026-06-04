@@ -725,3 +725,831 @@ models:
 		t.Fatalf("expected selector user@example.com, got %q", snap.Accounts[0].Selector)
 	}
 }
+
+// --- Pool Health Endpoint Tests (VAL-API-001 through VAL-API-010) ---
+
+// helperAuthDirServer creates a server with a temp auth dir containing the given
+// token JSON files. Each entry is filename -> JSON content.
+func helperAuthDirServer(t *testing.T, authDirFiles map[string]string, extraConfig string) (*Server, func()) {
+	t.Helper()
+	authDir := t.TempDir()
+	for name, content := range authDirFiles {
+		if err := os.WriteFile(filepath.Join(authDir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+authDir+`
+`+extraConfig+`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	return s, func() {}
+}
+
+// VAL-API-001: Versioned and prefixless routes expose pool health
+func TestPoolHealthRoutes_Return200WhenAuthorized(t *testing.T) {
+	authDir := t.TempDir()
+	token := `{"type":"codex","access_token":"tok","refresh_token":"rt","email":"user@example.com","expired":"2099-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "codex-user.json"), []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	for _, path := range []string{"/v1/oauth/pool-health", "/oauth/pool-health"} {
+		t.Run(path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+			}
+			var body map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatalf("json: %v", err)
+			}
+			if body["object"] != "oauth_pool_health" {
+				t.Errorf("expected object=oauth_pool_health, got %v", body["object"])
+			}
+			if body["provider"] != "codex" {
+				t.Errorf("expected provider=codex, got %v", body["provider"])
+			}
+		})
+	}
+}
+
+// VAL-API-001: Empty pool returns successful response with empty accounts array
+func TestPoolHealthRoutes_EmptyPoolReturnsEmptyAccounts(t *testing.T) {
+	authDir := t.TempDir()
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	for _, path := range []string{"/v1/oauth/pool-health", "/oauth/pool-health"} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		s.Engine().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d", path, w.Code)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("json: %v", err)
+		}
+		accounts, ok := body["accounts"].([]any)
+		if !ok || len(accounts) != 0 {
+			t.Fatalf("%s: expected empty accounts array, got %v", path, body["accounts"])
+		}
+	}
+}
+
+// VAL-API-002: Pool health is auth-gated like other non-health routes
+func TestPoolHealth_AuthGated(t *testing.T) {
+	cfg := mustConfig(t, `
+client_auth:
+  enabled: true
+  api_keys:
+    - "test-key"
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	for _, path := range []string{"/v1/oauth/pool-health", "/oauth/pool-health"} {
+		t.Run("missing_auth_"+path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401, got %d body=%s", w.Code, w.Body.String())
+			}
+		})
+		t.Run("invalid_auth_"+path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer wrong")
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401, got %d body=%s", w.Code, w.Body.String())
+			}
+		})
+		t.Run("valid_auth_"+path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer test-key")
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+	// Health endpoints remain unauthenticated
+	for _, path := range []string{"/health", "/healthz"} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		s.Engine().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s should remain unauthenticated, got %d", path, w.Code)
+		}
+	}
+}
+
+// VAL-API-002: Auth matches /v1/models pattern including custom/raw schemes
+func TestPoolHealth_AuthMatchesModelsRoute(t *testing.T) {
+	cfg := mustConfig(t, `
+client_auth:
+  enabled: true
+  api_keys:
+    - "raw-key"
+  scheme: ""
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	for _, path := range []string{"/v1/oauth/pool-health", "/v1/models"} {
+		t.Run("raw_scheme_ok_"+path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "raw-key")
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200 for raw scheme on %s, got %d body=%s", path, w.Code, w.Body.String())
+			}
+		})
+		t.Run("bearer_scheme_fails_"+path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer raw-key")
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401 for bearer scheme on %s, got %d", path, w.Code)
+			}
+		})
+	}
+}
+
+// VAL-API-003: Pool health includes safe operational state
+func TestPoolHealth_IncludesSafeOperationalState(t *testing.T) {
+	authDir := t.TempDir()
+	token := `{"type":"codex","access_token":"tok-SENTINEL","refresh_token":"rt-SENTINEL","email":"user@example.com","expired":"2099-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "codex-user.json"), []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/oauth/pool-health", nil)
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	accounts, ok := body["accounts"].([]any)
+	if !ok || len(accounts) != 1 {
+		t.Fatalf("expected 1 account, got %v", body["accounts"])
+	}
+	acct := accounts[0].(map[string]any)
+
+	// Verify safe operational fields are present
+	for _, key := range []string{"selector", "provider", "disabled", "healthy", "in_flight"} {
+		if _, exists := acct[key]; !exists {
+			t.Errorf("missing key %q in account: %v", key, acct)
+		}
+	}
+	if acct["selector"] != "user@example.com" {
+		t.Errorf("expected selector user@example.com, got %v", acct["selector"])
+	}
+	if acct["provider"] != "codex" {
+		t.Errorf("expected provider codex, got %v", acct["provider"])
+	}
+	if acct["disabled"] != false {
+		t.Errorf("expected disabled=false, got %v", acct["disabled"])
+	}
+	if acct["healthy"] != true {
+		t.Errorf("expected healthy=true, got %v", acct["healthy"])
+	}
+	if inFlight, ok := acct["in_flight"].(float64); !ok || inFlight != 0 {
+		t.Errorf("expected in_flight=0, got %v", acct["in_flight"])
+	}
+}
+
+// VAL-API-004: Pool health is read-only and secret-safe
+func TestPoolHealth_ReadOnlyAndSecretSafe(t *testing.T) {
+	authDir := t.TempDir()
+	secretAccessToken := "SENTINEL-ACCESS-TOKEN-abc123"
+	secretRefreshToken := "SENTINEL-REFRESH-TOKEN-xyz789"
+	token := `{"type":"codex","access_token":"` + secretAccessToken + `","refresh_token":"` + secretRefreshToken + `","email":"user@example.com","expired":"2099-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "codex-user.json"), []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+
+	// Capture pool state before pool-health call
+	snapBefore := s.pool.Snapshot()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/oauth/pool-health", nil)
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	bodyStr := w.Body.String()
+
+	// Response must not contain secrets
+	for _, secret := range []string{secretAccessToken, secretRefreshToken, "access_token", "refresh_token"} {
+		if strings.Contains(bodyStr, secret) {
+			t.Errorf("response contains secret %q: %s", secret, bodyStr)
+		}
+	}
+
+	// Pool state must be unchanged
+	snapAfter := s.pool.Snapshot()
+	if len(snapAfter.Accounts) != len(snapBefore.Accounts) {
+		t.Fatalf("pool accounts changed from %d to %d", len(snapBefore.Accounts), len(snapAfter.Accounts))
+	}
+	if snapAfter.Accounts[0].InFlight != snapBefore.Accounts[0].InFlight {
+		t.Errorf("in_flight changed from %d to %d", snapBefore.Accounts[0].InFlight, snapAfter.Accounts[0].InFlight)
+	}
+
+	// Token files must be unchanged
+	rawAfter, _ := os.ReadFile(filepath.Join(authDir, "codex-user.json"))
+	if strings.Contains(string(rawAfter), "in_flight") || strings.Contains(string(rawAfter), "last_used") {
+		t.Errorf("token file was mutated with runtime state: %s", string(rawAfter))
+	}
+}
+
+// VAL-API-005: Only GET is part of the pool health contract
+func TestPoolHealth_NonGetMethodsNotAccepted(t *testing.T) {
+	cfg := mustConfig(t, `
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	for _, method := range []string{http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions} {
+		for _, path := range []string{"/v1/oauth/pool-health", "/oauth/pool-health"} {
+			t.Run(method+"_"+path, func(t *testing.T) {
+				w := httptest.NewRecorder()
+				req := httptest.NewRequest(method, path, nil)
+				s.Engine().ServeHTTP(w, req)
+				if w.Code == http.StatusOK {
+					t.Fatalf("non-GET %s on %s should not return 200, got %d", method, path, w.Code)
+				}
+			})
+		}
+	}
+}
+
+// VAL-API-006: Pool health uses the standard route group and middleware
+func TestPoolHealth_UsesStandardRouteGroup(t *testing.T) {
+	cfg := mustConfig(t, `
+client_auth:
+  enabled: true
+  api_keys:
+    - "test-key"
+server:
+  request_body_max_bytes: 8
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	// Both pool-health aliases should require auth before body limit (like /v1/models)
+	for _, path := range []string{"/v1/oauth/pool-health", "/oauth/pool-health"} {
+		t.Run("auth_before_body_limit_"+path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("expected auth 401 before body work, got %d", w.Code)
+			}
+		})
+	}
+	// Authenticated request should succeed
+	for _, path := range []string{"/v1/oauth/pool-health", "/oauth/pool-health"} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer test-key")
+		s.Engine().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s with valid auth: expected 200, got %d body=%s", path, w.Code, w.Body.String())
+		}
+	}
+}
+
+// VAL-API-006: Pool health auth behavior matches /v1/models for exact scheme matching
+func TestPoolHealth_AuthMatchesModelsExactScheme(t *testing.T) {
+	cfg := mustConfig(t, `
+client_auth:
+  enabled: true
+  api_keys:
+    - "test-key"
+  scheme: "Bearer"
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	for _, path := range []string{"/v1/oauth/pool-health", "/oauth/pool-health", "/v1/models", "/models"} {
+		t.Run("valid_scheme_"+path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer test-key")
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200 for %s, got %d", path, w.Code)
+			}
+		})
+		t.Run("no_scheme_"+path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "test-key")
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401 without Bearer prefix on %s, got %d", path, w.Code)
+			}
+		})
+	}
+}
+
+// VAL-API-007: Success response shape is deterministic
+func TestPoolHealth_DeterministicResponseShape(t *testing.T) {
+	authDir := t.TempDir()
+	token1 := `{"type":"codex","access_token":"tok1","refresh_token":"rt1","email":"beta@example.com","expired":"2099-01-01T00:00:00Z"}` + "\n"
+	token2 := `{"type":"codex","access_token":"tok2","refresh_token":"rt2","email":"alpha@example.com","expired":"2099-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "codex-beta.json"), []byte(token1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(authDir, "codex-alpha.json"), []byte(token2), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/oauth/pool-health", nil)
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	// Verify JSON content type
+	ct := w.Header().Get("Content-Type")
+	if !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("expected application/json content type, got %q", ct)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if body["object"] != "oauth_pool_health" {
+		t.Errorf("expected object=oauth_pool_health, got %v", body["object"])
+	}
+	if body["provider"] != "codex" {
+		t.Errorf("expected provider=codex, got %v", body["provider"])
+	}
+
+	accounts := body["accounts"].([]any)
+	if len(accounts) != 2 {
+		t.Fatalf("expected 2 accounts, got %d", len(accounts))
+	}
+	// Deterministic order: alpha before beta (sorted by selector)
+	first := accounts[0].(map[string]any)
+	second := accounts[1].(map[string]any)
+	if first["selector"] != "alpha@example.com" {
+		t.Errorf("expected first account selector=alpha@example.com, got %v", first["selector"])
+	}
+	if second["selector"] != "beta@example.com" {
+		t.Errorf("expected second account selector=beta@example.com, got %v", second["selector"])
+	}
+
+	// Verify in_flight is a non-negative integer
+	for i, acct := range accounts {
+		a := acct.(map[string]any)
+		if inFlight, ok := a["in_flight"].(float64); !ok || inFlight < 0 {
+			t.Errorf("account %d: in_flight should be non-negative number, got %v", i, a["in_flight"])
+		}
+	}
+
+	// Both paths return the same shape
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodGet, "/oauth/pool-health", nil)
+	s.Engine().ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("prefixless: expected 200, got %d", w2.Code)
+	}
+	var body2 map[string]any
+	if err := json.Unmarshal(w2.Body.Bytes(), &body2); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if body["object"] != body2["object"] || body["provider"] != body2["provider"] {
+		t.Errorf("versioned and prefixless shapes differ: %v vs %v", body, body2)
+	}
+	acc1 := body["accounts"].([]any)
+	acc2 := body2["accounts"].([]any)
+	if len(acc1) != len(acc2) {
+		t.Errorf("account count differs: %d vs %d", len(acc1), len(acc2))
+	}
+}
+
+// VAL-API-008: Invalid token files and non-Codex tokens do not pollute the endpoint
+func TestPoolHealth_InvalidTokenFilesAndXaiTokensDoNotPollute(t *testing.T) {
+	authDir := t.TempDir()
+	// Invalid JSON file
+	if err := os.WriteFile(filepath.Join(authDir, "broken.json"), []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Non-JSON file
+	if err := os.WriteFile(filepath.Join(authDir, "notes.txt"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// xAI token
+	xaiToken := `{"type":"xai","access_token":"xai-tok-SENTINEL","refresh_token":"xai-rt-SENTINEL","email":"xai@example.com","expired":"2099-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "xai-user.json"), []byte(xaiToken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Valid Codex token
+	codexToken := `{"type":"codex","access_token":"codex-tok","refresh_token":"codex-rt","email":"codex@example.com","expired":"2099-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "codex-user.json"), []byte(codexToken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/oauth/pool-health", nil)
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	accounts := body["accounts"].([]any)
+	if len(accounts) != 1 {
+		t.Fatalf("expected 1 Codex account, got %d", len(accounts))
+	}
+	acct := accounts[0].(map[string]any)
+	if acct["selector"] != "codex@example.com" {
+		t.Errorf("expected Codex account, got %v", acct["selector"])
+	}
+	// No xAI entries or secrets
+	bodyStr := w.Body.String()
+	for _, secret := range []string{"xai-tok-SENTINEL", "xai-rt-SENTINEL", "xai@example.com"} {
+		if strings.Contains(bodyStr, secret) {
+			t.Errorf("response contains xAI secret or label: %s", bodyStr)
+		}
+	}
+}
+
+// VAL-API-008: Empty auth dir returns 200 with empty accounts
+func TestPoolHealth_MissingAuthDirReturnsEmptyAccounts(t *testing.T) {
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+t.TempDir()+`/nonexistent
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/oauth/pool-health", nil)
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	accounts, ok := body["accounts"].([]any)
+	if !ok || len(accounts) != 0 {
+		t.Fatalf("expected empty accounts, got %v", body["accounts"])
+	}
+}
+
+// VAL-API-009: Selector label policy is safe
+func TestPoolHealth_SafeSelectorLabels(t *testing.T) {
+	authDir := t.TempDir()
+	// Token with email — should use email, not account_id
+	emailToken := `{"type":"codex","access_token":"tok1","refresh_token":"rt1","email":"email@example.com","sub":"sub-123","account_id":"accid-456","expired":"2099-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "codex-email.json"), []byte(emailToken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/oauth/pool-health", nil)
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	accounts := body["accounts"].([]any)
+	acct := accounts[0].(map[string]any)
+
+	// Email takes precedence
+	if acct["selector"] != "email@example.com" {
+		t.Errorf("expected email selector, got %v", acct["selector"])
+	}
+	// Raw account_id should not appear at top level
+	bodyStr := w.Body.String()
+	if strings.Contains(bodyStr, "accid-456") {
+		t.Errorf("response contains raw account_id: %s", bodyStr)
+	}
+}
+
+// VAL-API-009: Subject-only fallback
+func TestPoolHealth_SubjectOnlySelectorFallback(t *testing.T) {
+	authDir := t.TempDir()
+	subjectToken := `{"type":"codex","access_token":"tok2","sub":"sub-only-789","expired":"2099-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "codex-sub.json"), []byte(subjectToken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/oauth/pool-health", nil)
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	accounts := body["accounts"].([]any)
+	acct := accounts[0].(map[string]any)
+	if acct["selector"] != "sub-only-789" {
+		t.Errorf("expected subject-based selector, got %v", acct["selector"])
+	}
+}
+
+// VAL-API-010: Pool health has no refresh or upstream side effects
+func TestPoolHealth_NoRefreshOrUpstreamSideEffects(t *testing.T) {
+	authDir := t.TempDir()
+	// Expired token that would normally need refresh
+	token := `{"type":"codex","access_token":"EXPIRED-ACCESS-SENTINEL","refresh_token":"REFRESH-SENTINEL","email":"expired@example.com","expired":"2000-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "codex-expired.json"), []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+
+	// Capture state before
+	snapBefore := s.pool.Snapshot()
+
+	// Call pool health multiple times
+	for i := 0; i < 3; i++ {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/v1/oauth/pool-health", nil)
+		s.Engine().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("call %d: expected 200, got %d", i, w.Code)
+		}
+	}
+
+	// Verify state is unchanged after repeated reads
+	snapAfter := s.pool.Snapshot()
+	if len(snapAfter.Accounts) != len(snapBefore.Accounts) {
+		t.Fatalf("account count changed")
+	}
+	if snapAfter.Accounts[0].InFlight != snapBefore.Accounts[0].InFlight {
+		t.Errorf("in_flight changed: %d -> %d", snapBefore.Accounts[0].InFlight, snapAfter.Accounts[0].InFlight)
+	}
+
+	// Token file must not be modified (no refresh, no token-save)
+	raw, _ := os.ReadFile(filepath.Join(authDir, "codex-expired.json"))
+	if strings.Contains(string(raw), "last_used") || strings.Contains(string(raw), "in_flight") {
+		t.Errorf("token file was mutated: %s", string(raw))
+	}
+	// Token file should still contain the expired token (no refresh happened)
+	if !strings.Contains(string(raw), "EXPIRED-ACCESS-SENTINEL") {
+		t.Errorf("access token was changed (refresh occurred?): %s", string(raw))
+	}
+}
+
+// VAL-API-011 regression: Existing routes are not disturbed by pool health addition
+func TestPoolHealthRoutes_ExistingRoutesUnaffected(t *testing.T) {
+	cfg := mustConfig(t, `
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+	// /v1/models should still work
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected /v1/models 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	// /models should still work
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/models", nil)
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected /models 200, got %d", w.Code)
+	}
+	// /health should still work without auth
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/health", nil)
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected /health 200, got %d", w.Code)
+	}
+	// /healthz HEAD should still work
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodHead, "/healthz", nil)
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected /healthz HEAD 200, got %d", w.Code)
+	}
+}
