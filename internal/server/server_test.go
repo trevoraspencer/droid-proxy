@@ -1553,3 +1553,532 @@ models:
 		t.Fatalf("expected /healthz HEAD 200, got %d", w.Code)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// VAL-API-011 comprehensive regression: Route alias and auth smoke matrix
+// ---------------------------------------------------------------------------
+// Exercises every public route listed in the assertion to confirm that
+// adding pool-health and pool/watcher wiring does not change existing
+// route registration, alias resolution, auth gating, or response shapes.
+
+func TestRouteAliasAndAuthSmokeMatrix_VAL_API_011(t *testing.T) {
+	upstreamSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer upstreamSrv.Close()
+
+	authDir := t.TempDir()
+	// Write a valid Codex token so the pool/watcher wiring is exercised
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	codexToken := `{"type":"codex","access_token":"smoke-access-SENTINEL","refresh_token":"smoke-refresh-SENTINEL","email":"smoke@codex.example","expired":"` + future + `"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "codex-smoke.json"), []byte(codexToken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := mustConfig(t, `
+client_auth:
+  enabled: true
+  api_keys:
+    - "matrix-key"
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: static-chat
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: `+upstreamSrv.URL+`/v1
+  - alias: static-responses
+    factory_provider: openai
+    upstream_protocol: openai-responses
+    base_url: `+upstreamSrv.URL+`/v1
+  - alias: codex-resp
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    oauth_account: "smoke@codex.example"
+    base_url: `+upstreamSrv.URL+`/v1
+  - alias: static-msg
+    factory_provider: anthropic
+    upstream_protocol: anthropic-messages
+    base_url: `+upstreamSrv.URL+`/v1
+`)
+
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+
+	// GET routes that return 200 without body
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/v1/models"},
+		{http.MethodGet, "/models"},
+		{http.MethodGet, "/v1/oauth/pool-health"},
+		{http.MethodGet, "/oauth/pool-health"},
+	} {
+		t.Run("auth_ok_"+tc.method+"_"+tc.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req.Header.Set("Authorization", "Bearer matrix-key")
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	// POST routes that return 200 with valid body
+	for _, tc := range []struct {
+		path string
+		body string
+	}{
+		{"/v1/chat/completions", `{"model":"static-chat","messages":[{"role":"user","content":"hi"}],"stream":false}`},
+		{"/chat/completions", `{"model":"static-chat","messages":[{"role":"user","content":"hi"}],"stream":false}`},
+		{"/v1/responses", `{"model":"static-responses","input":"hi","stream":false}`},
+		{"/responses", `{"model":"static-responses","input":"hi","stream":false}`},
+		{"/v1/messages", `{"model":"static-msg","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`},
+		{"/messages", `{"model":"static-msg","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`},
+		{"/v1/messages/count_tokens", `{"model":"static-msg","messages":[{"role":"user","content":"hi"}]}`},
+		{"/messages/count_tokens", `{"model":"static-msg","messages":[{"role":"user","content":"hi"}]}`},
+	} {
+		t.Run("auth_ok_POST_"+tc.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Authorization", "Bearer matrix-key")
+			req.Header.Set("Content-Type", "application/json")
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	// Health endpoints are unauthenticated
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/health"},
+		{http.MethodGet, "/healthz"},
+		{http.MethodHead, "/healthz"},
+	} {
+		t.Run("no_auth_ok_"+tc.method+"_"+tc.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", w.Code)
+			}
+		})
+	}
+
+	// Auth-gated routes reject without credentials
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/v1/models"},
+		{http.MethodGet, "/models"},
+		{http.MethodGet, "/v1/oauth/pool-health"},
+		{http.MethodGet, "/oauth/pool-health"},
+		{http.MethodPost, "/v1/chat/completions"},
+		{http.MethodPost, "/chat/completions"},
+		{http.MethodPost, "/v1/responses"},
+		{http.MethodPost, "/responses"},
+		{http.MethodPost, "/v1/messages"},
+		{http.MethodPost, "/messages"},
+		{http.MethodPost, "/v1/messages/count_tokens"},
+		{http.MethodPost, "/messages/count_tokens"},
+	} {
+		t.Run("no_auth_reject_"+tc.method+"_"+tc.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401, got %d body=%s", w.Code, w.Body.String())
+			}
+			// Verify consistent error shape
+			var errBody map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &errBody); err != nil {
+				t.Fatalf("error body is not JSON: %s", w.Body.String())
+			}
+			errDetail, ok := errBody["error"].(map[string]any)
+			if !ok {
+				t.Fatalf("missing error.detail: %v", errBody)
+			}
+			if errDetail["type"] != "authentication_error" {
+				t.Errorf("expected type=authentication_error, got %v", errDetail["type"])
+			}
+		})
+	}
+
+	// Unknown model returns 404 with standard error shape
+	for _, path := range []string{"/v1/chat/completions", "/chat/completions"} {
+		t.Run("unknown_model_"+path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"nonexistent","messages":[{"role":"user","content":"hi"}]}`))
+			req.Header.Set("Authorization", "Bearer matrix-key")
+			req.Header.Set("Content-Type", "application/json")
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("expected 404 for unknown model, got %d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	// Unsupported provider on wrong route returns expected error
+	for _, path := range []string{"/v1/responses", "/responses"} {
+		t.Run("unsupported_provider_responses_"+path, func(t *testing.T) {
+			body := `{"model":"static-msg","input":"hi"}`
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer matrix-key")
+			req.Header.Set("Content-Type", "application/json")
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for non-openai factory on /responses, got %d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+// assertOAuthHealth checks that a model entry's oauth_auth sub-object contains
+// the expected introspection fields and values.
+func assertOAuthHealth(t *testing.T, model map[string]any, provider, pinned string, matching, active, disabled, expired int, missing bool) {
+	t.Helper()
+	health, ok := model["oauth_auth"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing oauth_auth in %#v", model)
+	}
+	if health["provider"] != provider || health["pinned_account"] != pinned || health["missing_auth"] != missing {
+		t.Fatalf("bad auth health identity: provider=%v pinned=%v missing=%v, want provider=%s pinned=%s missing=%v",
+			health["provider"], health["pinned_account"], health["missing_auth"], provider, pinned, missing)
+	}
+	if int(health["matching_account_count"].(float64)) != matching ||
+		int(health["active_count"].(float64)) != active ||
+		int(health["disabled_count"].(float64)) != disabled ||
+		int(health["expired_or_expiring_count"].(float64)) != expired {
+		t.Fatalf("bad auth health counts: matching=%v active=%v disabled=%v expired=%v, want matching=%d active=%d disabled=%d expired=%d",
+			health["matching_account_count"], health["active_count"], health["disabled_count"], health["expired_or_expiring_count"],
+			matching, active, disabled, expired)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// VAL-CROSS-005: /v1/models OAuth auth introspection remains compatible
+// ---------------------------------------------------------------------------
+// Verifies that pool/watcher wiring does not regress /v1/models oauth_auth
+// introspection fields for Codex and xAI models.
+
+func TestModelsOAuthIntrospection_CodexAndXAI_VAL_CROSS_005(t *testing.T) {
+	authDir := t.TempDir()
+	now := time.Now()
+	future := now.Add(time.Hour).UTC().Format(time.RFC3339)
+	past := now.Add(-time.Hour).UTC().Format(time.RFC3339)
+
+	// Write Codex tokens: one active, one disabled, one expired, one active for pinned test
+	for _, tok := range []struct {
+		filename string
+		content  string
+	}{
+		{"codex-active.json", `{"type":"codex","access_token":"codex-access-ACTIVE","refresh_token":"codex-refresh-ACTIVE","email":"codex-active@example.com","expired":"` + future + `"}`},
+		{"codex-disabled.json", `{"type":"codex","access_token":"codex-access-DISABLED","refresh_token":"codex-refresh-DISABLED","email":"codex-disabled@example.com","expired":"` + future + `","disabled":true}`},
+		{"codex-expired.json", `{"type":"codex","access_token":"codex-access-EXPIRED","refresh_token":"codex-refresh-EXPIRED","email":"codex-expired@example.com","expired":"` + past + `"}`},
+		{"codex-pinned.json", `{"type":"codex","access_token":"codex-access-PINNED","refresh_token":"codex-refresh-PINNED","email":"pinned@codex.example","expired":"` + future + `"}`},
+	} {
+		if err := os.WriteFile(filepath.Join(authDir, tok.filename), []byte(tok.content+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Write xAI tokens: one active, one disabled, one expired
+	for _, tok := range []struct {
+		filename string
+		content  string
+	}{
+		{"xai-active.json", `{"type":"xai","access_token":"xai-access-ACTIVE","refresh_token":"xai-refresh-ACTIVE","email":"xai-active@example.com","expired":"` + future + `"}`},
+		{"xai-disabled.json", `{"type":"xai","access_token":"xai-access-DISABLED","refresh_token":"xai-refresh-DISABLED","email":"xai-disabled@example.com","expired":"` + future + `","disabled":true}`},
+		{"xai-expired.json", `{"type":"xai","access_token":"xai-access-EXPIRED","refresh_token":"xai-refresh-EXPIRED","email":"xai-expired@example.com","expired":"` + past + `"}`},
+	} {
+		if err := os.WriteFile(filepath.Join(authDir, tok.filename), []byte(tok.content+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := mustConfig(t, `
+oauth:
+  auth_dir: `+authDir+`
+models:
+  # Static model — no oauth_auth field
+  - alias: static-chat
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+
+  # Codex model — no pin (all Codex tokens match)
+  - alias: codex-unpinned
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    base_url: http://127.0.0.1:1/v1
+
+  # Codex model — pinned to specific account
+  - alias: codex-pinned
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    oauth_account: "pinned@codex.example"
+    base_url: http://127.0.0.1:1/v1
+
+  # Codex model — pinned to nonexistent account
+  - alias: codex-missing-pin
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    oauth_account: "nonexistent@codex.example"
+    base_url: http://127.0.0.1:1/v1
+
+  # xAI model — no pin (all xAI tokens match)
+  - alias: xai-unpinned
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    base_url: http://127.0.0.1:1/v1
+
+  # xAI model — pinned to specific account
+  - alias: xai-pinned
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    oauth_account: "xai-active@example.com"
+    base_url: http://127.0.0.1:1/v1
+
+  # xAI model — pinned to disabled account
+  - alias: xai-pinned-disabled
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    oauth_account: "xai-disabled@example.com"
+    base_url: http://127.0.0.1:1/v1
+
+  # xAI model — pinned to expired account
+  - alias: xai-pinned-expired
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    oauth_account: "xai-expired@example.com"
+    base_url: http://127.0.0.1:1/v1
+`)
+
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+
+	// Hit /v1/models via both aliases
+	for _, path := range []string{"/v1/models", "/models"} {
+		t.Run("path_"+path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+			}
+			var resp struct {
+				Object string                   `json:"object"`
+				Data   []map[string]interface{} `json:"data"`
+			}
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatal(err)
+			}
+			if resp.Object != "list" {
+				t.Fatalf("expected object=list, got %s", resp.Object)
+			}
+
+			byID := map[string]map[string]any{}
+			for _, m := range resp.Data {
+				byID[m["id"].(string)] = m
+			}
+
+			// Static model has no oauth_auth
+			if _, has := byID["static-chat"]["oauth_auth"]; has {
+				t.Error("static-chat should not have oauth_auth field")
+			}
+
+			// Codex unpinned: matches all 4 Codex tokens (3 active, 1 disabled, 1 expired)
+			// active: codex-active, codex-pinned (not expired)
+			// disabled: codex-disabled
+			// expired: codex-expired
+			codexUnpinned := byID["codex-unpinned"]
+			assertOAuthHealth(t, codexUnpinned, "codex", "", 4, 2, 1, 1, false)
+
+			// Codex pinned to specific account
+			codexPinned := byID["codex-pinned"]
+			assertOAuthHealth(t, codexPinned, "codex", "pinned@codex.example", 1, 1, 0, 0, false)
+
+			// Codex pinned to nonexistent account → missing_auth
+			codexMissingPin := byID["codex-missing-pin"]
+			assertOAuthHealth(t, codexMissingPin, "codex", "nonexistent@codex.example", 0, 0, 0, 0, true)
+
+			// xAI unpinned: matches all 3 xAI tokens
+			// active: xai-active (not expired, not disabled)
+			// disabled: xai-disabled
+			// expired: xai-expired
+			xaiUnpinned := byID["xai-unpinned"]
+			assertOAuthHealth(t, xaiUnpinned, "xai", "", 3, 1, 1, 1, false)
+
+			// xAI pinned to active account
+			xaiPinned := byID["xai-pinned"]
+			assertOAuthHealth(t, xaiPinned, "xai", "xai-active@example.com", 1, 1, 0, 0, false)
+
+			// xAI pinned to disabled account
+			xaiPinnedDisabled := byID["xai-pinned-disabled"]
+			assertOAuthHealth(t, xaiPinnedDisabled, "xai", "xai-disabled@example.com", 1, 0, 1, 0, false)
+
+			// xAI pinned to expired account
+			xaiPinnedExpired := byID["xai-pinned-expired"]
+			assertOAuthHealth(t, xaiPinnedExpired, "xai", "xai-expired@example.com", 1, 0, 0, 1, false)
+		})
+	}
+}
+
+// VAL-CROSS-005: Verify that models response does not leak secrets through oauth_auth
+func TestModelsOAuthIntrospection_NoSecretLeakage_VAL_CROSS_005(t *testing.T) {
+	authDir := t.TempDir()
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+
+	secretAccessToken := "****************************"
+	secretRefreshToken := "*****************************"
+	codexToken := `{"type":"codex","access_token":"` + secretAccessToken + `","refresh_token":"` + secretRefreshToken + `","email":"secret@codex.example","expired":"` + future + `"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "codex-secret.json"), []byte(codexToken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	xaiToken := `{"type":"xai","access_token":"` + secretAccessToken + `","refresh_token":"` + secretRefreshToken + `","email":"secret@xai.example","expired":"` + future + `"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "xai-secret.json"), []byte(xaiToken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := mustConfig(t, `
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: codex-model
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    base_url: http://127.0.0.1:1/v1
+  - alias: xai-model
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    base_url: http://127.0.0.1:1/v1
+`)
+
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+
+	for _, path := range []string{"/v1/models", "/models"} {
+		t.Run(path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			s.Engine().ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", w.Code)
+			}
+			bodyStr := w.Body.String()
+			for _, secret := range []string{secretAccessToken, secretRefreshToken} {
+				if strings.Contains(bodyStr, secret) {
+					t.Errorf("response leaked secret %q via %s: %s", secret, path, bodyStr)
+				}
+			}
+		})
+	}
+}
+
+// VAL-CROSS-005: Verify /v1/models oauth_auth fields include all required keys
+func TestModelsOAuthIntrospection_FieldStructure_VAL_CROSS_005(t *testing.T) {
+	authDir := t.TempDir()
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+
+	codexToken := `{"type":"codex","access_token":"tok","refresh_token":"rt","email":"user@codex.example","expired":"` + future + `"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "codex-user.json"), []byte(codexToken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := mustConfig(t, `
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: codex-model
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    oauth_account: "user@codex.example"
+    base_url: http://127.0.0.1:1/v1
+`)
+
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+
+	oauthAuth := resp.Data[0]["oauth_auth"].(map[string]any)
+
+	// Verify all required fields are present
+	requiredFields := []string{
+		"provider",
+		"pinned_account",
+		"matching_account_count",
+		"active_count",
+		"disabled_count",
+		"expired_or_expiring_count",
+		"missing_auth",
+	}
+	for _, field := range requiredFields {
+		if _, ok := oauthAuth[field]; !ok {
+			t.Errorf("missing required oauth_auth field: %s", field)
+		}
+	}
+
+	// Verify specific values
+	if oauthAuth["provider"] != "codex" {
+		t.Errorf("expected provider=codex, got %v", oauthAuth["provider"])
+	}
+	if oauthAuth["pinned_account"] != "user@codex.example" {
+		t.Errorf("expected pinned_account=user@codex.example, got %v", oauthAuth["pinned_account"])
+	}
+	if oauthAuth["missing_auth"] != false {
+		t.Errorf("expected missing_auth=false, got %v", oauthAuth["missing_auth"])
+	}
+	if int(oauthAuth["matching_account_count"].(float64)) != 1 {
+		t.Errorf("expected matching_account_count=1, got %v", oauthAuth["matching_account_count"])
+	}
+	if int(oauthAuth["active_count"].(float64)) != 1 {
+		t.Errorf("expected active_count=1, got %v", oauthAuth["active_count"])
+	}
+	if int(oauthAuth["disabled_count"].(float64)) != 0 {
+		t.Errorf("expected disabled_count=0, got %v", oauthAuth["disabled_count"])
+	}
+	if int(oauthAuth["expired_or_expiring_count"].(float64)) != 0 {
+		t.Errorf("expected expired_or_expiring_count=0, got %v", oauthAuth["expired_or_expiring_count"])
+	}
+}
