@@ -143,11 +143,41 @@ type Upstream struct {
 }
 
 type OAuth struct {
-	AuthDir           string `yaml:"auth_dir"`
-	CodexCallbackHost string `yaml:"codex_callback_host"`
-	CodexCallbackPort int    `yaml:"codex_callback_port"`
-	XAICallbackHost   string `yaml:"xai_callback_host"`
-	XAICallbackPort   int    `yaml:"xai_callback_port"`
+	AuthDir           string        `yaml:"auth_dir"`
+	CodexCallbackHost string        `yaml:"codex_callback_host"`
+	CodexCallbackPort int           `yaml:"codex_callback_port"`
+	XAICallbackHost   string        `yaml:"xai_callback_host"`
+	XAICallbackPort   int           `yaml:"xai_callback_port"`
+	LoadBalancing     LoadBalancing `yaml:"load_balancing"`
+}
+
+// LoadBalancingStrategy enumerates the supported account selection strategies.
+type LoadBalancingStrategy string
+
+const (
+	LoadBalancingRoundRobin       LoadBalancingStrategy = "round-robin"
+	LoadBalancingFillFirst        LoadBalancingStrategy = "fill-first"
+	LoadBalancingLeastConnections LoadBalancingStrategy = "least-connections"
+	LoadBalancingRandom           LoadBalancingStrategy = "random"
+)
+
+// IsValid reports whether s is a recognised load-balancing strategy.
+func (s LoadBalancingStrategy) IsValid() bool {
+	switch s {
+	case LoadBalancingRoundRobin, LoadBalancingFillFirst,
+		LoadBalancingLeastConnections, LoadBalancingRandom:
+		return true
+	}
+	return false
+}
+
+// LoadBalancing holds OAuth multi-account pool configuration.
+// It applies only to Codex OAuth accounts.
+type LoadBalancing struct {
+	Strategy          LoadBalancingStrategy `yaml:"strategy"`
+	MaxFailovers      int                   `yaml:"max_failovers"`
+	RateLimitCooldown time.Duration         `yaml:"rate_limit_cooldown"`
+	ErrorCooldown     time.Duration         `yaml:"error_cooldown"`
 }
 
 type Model struct {

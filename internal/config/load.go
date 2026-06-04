@@ -166,6 +166,18 @@ func (c *Config) Validate() error {
 	if c.OAuth.XAICallbackPort < 0 || c.OAuth.XAICallbackPort > 65535 {
 		errs = append(errs, fmt.Sprintf("oauth.xai_callback_port %d out of range", c.OAuth.XAICallbackPort))
 	}
+	if lb := c.OAuth.LoadBalancing; lb.Strategy != "" && !lb.Strategy.IsValid() {
+		errs = append(errs, fmt.Sprintf("oauth.load_balancing.strategy %q is invalid (must be one of: round-robin, fill-first, least-connections, random)", lb.Strategy))
+	}
+	if c.OAuth.LoadBalancing.MaxFailovers < 0 {
+		errs = append(errs, "oauth.load_balancing.max_failovers must not be negative")
+	}
+	if c.OAuth.LoadBalancing.RateLimitCooldown < 0 {
+		errs = append(errs, "oauth.load_balancing.rate_limit_cooldown must not be negative")
+	}
+	if c.OAuth.LoadBalancing.ErrorCooldown < 0 {
+		errs = append(errs, "oauth.load_balancing.error_cooldown must not be negative")
+	}
 	if len(c.Models) == 0 {
 		errs = append(errs, "at least one model must be configured")
 	}

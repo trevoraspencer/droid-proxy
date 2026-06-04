@@ -79,6 +79,18 @@ func (c *Config) applyDefaults() {
 	if c.OAuth.XAICallbackPort == 0 {
 		c.OAuth.XAICallbackPort = 56121
 	}
+	if !c.wasPresent("oauth.load_balancing.strategy") && c.OAuth.LoadBalancing.Strategy == "" {
+		c.OAuth.LoadBalancing.Strategy = LoadBalancingRoundRobin
+	}
+	if !c.wasPresent("oauth.load_balancing.max_failovers") && c.OAuth.LoadBalancing.MaxFailovers == 0 {
+		c.OAuth.LoadBalancing.MaxFailovers = 2
+	}
+	if !c.wasPresent("oauth.load_balancing.rate_limit_cooldown") && c.OAuth.LoadBalancing.RateLimitCooldown == 0 {
+		c.OAuth.LoadBalancing.RateLimitCooldown = 60 * time.Second
+	}
+	if !c.wasPresent("oauth.load_balancing.error_cooldown") && c.OAuth.LoadBalancing.ErrorCooldown == 0 {
+		c.OAuth.LoadBalancing.ErrorCooldown = 30 * time.Second
+	}
 }
 
 func (c *Config) wasPresent(path string) bool {

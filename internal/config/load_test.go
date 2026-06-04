@@ -943,3 +943,456 @@ func nestedString(m map[string]any, key, nested string) string {
 	got, _ := child[nested].(string)
 	return got
 }
+
+// --- VAL-CONFIG-001: Existing configs load with load-balancing defaults ---
+
+func TestLoad_OAuthLoadBalancingDefaults(t *testing.T) {
+	cfg, err := parse([]byte(minimalValid))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lb := cfg.OAuth.LoadBalancing
+	if lb.Strategy != LoadBalancingRoundRobin {
+		t.Fatalf("default strategy = %q, want round-robin", lb.Strategy)
+	}
+	if lb.MaxFailovers != 2 {
+		t.Fatalf("default max_failovers = %d, want 2", lb.MaxFailovers)
+	}
+	if lb.RateLimitCooldown != 60*time.Second {
+		t.Fatalf("default rate_limit_cooldown = %v, want 60s", lb.RateLimitCooldown)
+	}
+	if lb.ErrorCooldown != 30*time.Second {
+		t.Fatalf("default error_cooldown = %v, want 30s", lb.ErrorCooldown)
+	}
+}
+
+// Codex-only config without load_balancing also gets defaults.
+func TestLoad_OAuthLoadBalancingDefaults_CodexConfig(t *testing.T) {
+	in := `
+models:
+  - alias: codex
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: gpt-5.3-codex
+`
+	cfg, err := parse([]byte(in))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lb := cfg.OAuth.LoadBalancing
+	if lb.Strategy != LoadBalancingRoundRobin {
+		t.Fatalf("default strategy = %q, want round-robin", lb.Strategy)
+	}
+	if lb.MaxFailovers != 2 {
+		t.Fatalf("default max_failovers = %d, want 2", lb.MaxFailovers)
+	}
+}
+
+// --- VAL-CONFIG-002: Explicit and partial load-balancing blocks parse correctly ---
+
+func TestLoad_OAuthLoadBalancingExplicitFull(t *testing.T) {
+	in := `
+oauth:
+  load_balancing:
+    strategy: fill-first
+    max_failovers: 5
+    rate_limit_cooldown: 120s
+    error_cooldown: 45s
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`
+	cfg, err := parse([]byte(in))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lb := cfg.OAuth.LoadBalancing
+	if lb.Strategy != LoadBalancingFillFirst {
+		t.Fatalf("strategy = %q, want fill-first", lb.Strategy)
+	}
+	if lb.MaxFailovers != 5 {
+		t.Fatalf("max_failovers = %d, want 5", lb.MaxFailovers)
+	}
+	if lb.RateLimitCooldown != 120*time.Second {
+		t.Fatalf("rate_limit_cooldown = %v, want 120s", lb.RateLimitCooldown)
+	}
+	if lb.ErrorCooldown != 45*time.Second {
+		t.Fatalf("error_cooldown = %v, want 45s", lb.ErrorCooldown)
+	}
+}
+
+func TestLoad_OAuthLoadBalancingPartialBlocks(t *testing.T) {
+	cases := []struct {
+		name      string
+		yaml      string
+		wantStrat LoadBalancingStrategy
+		wantMax   int
+		wantRLCD  time.Duration
+		wantECD   time.Duration
+	}{
+		{
+			name: "only strategy",
+			yaml: `
+oauth:
+  load_balancing:
+    strategy: random
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`,
+			wantStrat: LoadBalancingRandom,
+			wantMax:   2,
+			wantRLCD:  60 * time.Second,
+			wantECD:   30 * time.Second,
+		},
+		{
+			name: "only max_failovers",
+			yaml: `
+oauth:
+  load_balancing:
+    max_failovers: 3
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`,
+			wantStrat: LoadBalancingRoundRobin,
+			wantMax:   3,
+			wantRLCD:  60 * time.Second,
+			wantECD:   30 * time.Second,
+		},
+		{
+			name: "only rate_limit_cooldown",
+			yaml: `
+oauth:
+  load_balancing:
+    rate_limit_cooldown: 90s
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`,
+			wantStrat: LoadBalancingRoundRobin,
+			wantMax:   2,
+			wantRLCD:  90 * time.Second,
+			wantECD:   30 * time.Second,
+		},
+		{
+			name: "only error_cooldown",
+			yaml: `
+oauth:
+  load_balancing:
+    error_cooldown: 15s
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`,
+			wantStrat: LoadBalancingRoundRobin,
+			wantMax:   2,
+			wantRLCD:  60 * time.Second,
+			wantECD:   15 * time.Second,
+		},
+		{
+			name: "strategy and error_cooldown",
+			yaml: `
+oauth:
+  load_balancing:
+    strategy: least-connections
+    error_cooldown: 10s
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`,
+			wantStrat: LoadBalancingLeastConnections,
+			wantMax:   2,
+			wantRLCD:  60 * time.Second,
+			wantECD:   10 * time.Second,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := parse([]byte(tc.yaml))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			lb := cfg.OAuth.LoadBalancing
+			if lb.Strategy != tc.wantStrat {
+				t.Errorf("strategy = %q, want %q", lb.Strategy, tc.wantStrat)
+			}
+			if lb.MaxFailovers != tc.wantMax {
+				t.Errorf("max_failovers = %d, want %d", lb.MaxFailovers, tc.wantMax)
+			}
+			if lb.RateLimitCooldown != tc.wantRLCD {
+				t.Errorf("rate_limit_cooldown = %v, want %v", lb.RateLimitCooldown, tc.wantRLCD)
+			}
+			if lb.ErrorCooldown != tc.wantECD {
+				t.Errorf("error_cooldown = %v, want %v", lb.ErrorCooldown, tc.wantECD)
+			}
+		})
+	}
+}
+
+// Empty load_balancing block gets all defaults.
+func TestLoad_OAuthLoadBalancingEmptyBlock(t *testing.T) {
+	in := `
+oauth:
+  load_balancing: {}
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`
+	cfg, err := parse([]byte(in))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lb := cfg.OAuth.LoadBalancing
+	if lb.Strategy != LoadBalancingRoundRobin {
+		t.Fatalf("default strategy = %q, want round-robin", lb.Strategy)
+	}
+	if lb.MaxFailovers != 2 {
+		t.Fatalf("default max_failovers = %d, want 2", lb.MaxFailovers)
+	}
+}
+
+// --- VAL-CONFIG-003: Approved strategies are accepted ---
+
+func TestLoad_OAuthLoadBalancingApprovedStrategies(t *testing.T) {
+	for _, strat := range []LoadBalancingStrategy{
+		LoadBalancingRoundRobin,
+		LoadBalancingFillFirst,
+		LoadBalancingLeastConnections,
+		LoadBalancingRandom,
+	} {
+		t.Run(string(strat), func(t *testing.T) {
+			in := `
+oauth:
+  load_balancing:
+    strategy: ` + string(strat) + `
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`
+			cfg, err := parse([]byte(in))
+			if err != nil {
+				t.Fatalf("strategy %q should be accepted, got: %v", strat, err)
+			}
+			if cfg.OAuth.LoadBalancing.Strategy != strat {
+				t.Fatalf("strategy = %q, want %q", cfg.OAuth.LoadBalancing.Strategy, strat)
+			}
+		})
+	}
+}
+
+// --- VAL-CONFIG-004: Invalid strategies and scalar values are rejected ---
+
+func TestLoad_OAuthLoadBalancingInvalidValues(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name: "invalid strategy",
+			body: `
+oauth:
+  load_balancing:
+    strategy: weighted
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`,
+			wantErr: "oauth.load_balancing.strategy",
+		},
+		{
+			name: "negative max_failovers",
+			body: `
+oauth:
+  load_balancing:
+    max_failovers: -1
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`,
+			wantErr: "oauth.load_balancing.max_failovers must not be negative",
+		},
+		{
+			name: "negative rate_limit_cooldown",
+			body: `
+oauth:
+  load_balancing:
+    rate_limit_cooldown: -5s
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`,
+			wantErr: "oauth.load_balancing.rate_limit_cooldown must not be negative",
+		},
+		{
+			name: "negative error_cooldown",
+			body: `
+oauth:
+  load_balancing:
+    error_cooldown: -10s
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`,
+			wantErr: "oauth.load_balancing.error_cooldown must not be negative",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parse([]byte(tc.body))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+// max_failovers=0 is accepted and means no additional failover attempts.
+func TestLoad_OAuthLoadBalancingMaxFailoversZero(t *testing.T) {
+	in := `
+oauth:
+  load_balancing:
+    max_failovers: 0
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`
+	cfg, err := parse([]byte(in))
+	if err != nil {
+		t.Fatalf("max_failovers=0 should be accepted, got: %v", err)
+	}
+	if cfg.OAuth.LoadBalancing.MaxFailovers != 0 {
+		t.Fatalf("max_failovers = %d, want 0", cfg.OAuth.LoadBalancing.MaxFailovers)
+	}
+}
+
+// Zero-duration cooldowns are accepted as no-cooldown values.
+func TestLoad_OAuthLoadBalancingZeroDurationCooldowns(t *testing.T) {
+	in := `
+oauth:
+  load_balancing:
+    rate_limit_cooldown: 0s
+    error_cooldown: 0s
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`
+	cfg, err := parse([]byte(in))
+	if err != nil {
+		t.Fatalf("zero-duration cooldowns should be accepted, got: %v", err)
+	}
+	if cfg.OAuth.LoadBalancing.RateLimitCooldown != 0 {
+		t.Fatalf("rate_limit_cooldown = %v, want 0s", cfg.OAuth.LoadBalancing.RateLimitCooldown)
+	}
+	if cfg.OAuth.LoadBalancing.ErrorCooldown != 0 {
+		t.Fatalf("error_cooldown = %v, want 0s", cfg.OAuth.LoadBalancing.ErrorCooldown)
+	}
+}
+
+// --- VAL-CONFIG-005: Strict YAML rejects unknown load-balancing keys ---
+
+func TestLoad_OAuthLoadBalancingUnknownKeys(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name: "unknown key mode",
+			body: `
+oauth:
+  load_balancing:
+    mode: active
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`,
+			wantErr: "field mode not found",
+		},
+		{
+			name: "misspelled cooldown field",
+			body: `
+oauth:
+  load_balancing:
+    rate_limit_cd: 30s
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`,
+			wantErr: "field rate_limit_cd not found",
+		},
+		{
+			name: "unknown nested key priority",
+			body: `
+oauth:
+  load_balancing:
+    priority: high
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`,
+			wantErr: "field priority not found",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parse([]byte(tc.body))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", tc.wantErr, err)
+			}
+		})
+	}
+}
