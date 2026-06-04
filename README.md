@@ -20,6 +20,13 @@ plus Codex/ChatGPT and xAI OAuth — from a single Go binary.
   Manage accounts with `auth status`, `auth enable`/`auth disable`, and
   `auth logout`, and check per-model OAuth health via `oauth_auth` in
   `/v1/models`.
+- **Codex OAuth multi-account pooling.** Multiple Codex/ChatGPT OAuth accounts
+  are load-balanced across requests. Four selection strategies (`round-robin`,
+  `fill-first`, `least-connections`, `random`), bounded failover on 429/5xx/
+  transport errors with cooldown, and 401/403 force-refresh replay before
+  failover. Auth-dir watcher hot-reloads token files. xAI remains
+  single-account. Single-account mode (no failover, no refresh+replay) is
+  preserved when only one account exists.
 
 ## Endpoints
 
@@ -31,6 +38,7 @@ plus Codex/ChatGPT and xAI OAuth — from a single Go binary.
 | `POST` | `/v1/responses` | `openai` |
 | `POST` | `/v1/messages` | `anthropic` |
 | `POST` | `/v1/messages/count_tokens` | `anthropic` |
+| `GET` | `/v1/oauth/pool-health`, `/oauth/pool-health` | Codex multi-account pool status (read-only) |
 
 The `/v1` prefix is optional on every non-health route.
 
@@ -244,6 +252,9 @@ Full schema: [`docs/CONFIG.md`](docs/CONFIG.md). Highlights:
 - `client_auth` to require Droid to authenticate to the proxy (off by default).
 - `reasoning_cache` for DeepSeek-style reasoning replay.
 - `oauth.auth_dir` for Codex/xAI token storage.
+- `oauth.load_balancing` for Codex multi-account pooling: `strategy`
+  (`round-robin` (default), `fill-first`, `least-connections`, `random`),
+  `max_failovers`, `rate_limit_cooldown`, `error_cooldown`.
 - Per-model `capabilities` drive the `agent_ready` flag.
 
 ## Troubleshooting
@@ -293,6 +304,12 @@ make build      # build the binary
 make test       # run unit + integration tests
 make test-race  # tests with the race detector
 make lint       # gofmt + go vet
+```
+
+OAuth pool and handler tests:
+
+```bash
+go test -race ./internal/oauth/... ./internal/handlers/...
 ```
 
 On low-resource laptops:
