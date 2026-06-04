@@ -568,6 +568,7 @@ func TestDocsNoStaleQuotaNotUsedForLoadBalancing(t *testing.T) {
 	// or contain "yet" qualifiers that suggest future pooling.
 	for _, rel := range []string{
 		"README.md",
+		"docs/README.md",
 		"docs/CONFIG.md",
 		"docs/OAUTH.md",
 		"docs/PROVIDERS.md",
@@ -669,5 +670,155 @@ func TestDocsFencedYAMLExamplesParseable(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// --- VAL-CROSS-002: Donor reference cleanliness ---
+
+func TestDocsNoDonorReferencesOutsideImplementationPlan(t *testing.T) {
+	// Programmatic equivalent of the mission donor-denylist gate.
+	// Denylist patterns are loaded from a separate file to avoid the test
+	// source itself matching the grep.
+	denylistFile := filepath.Join(repoRoot(t), "internal", "config", "testdata", "donor_denylist.txt")
+	raw, err := os.ReadFile(denylistFile)
+	if err != nil {
+		t.Fatalf("read denylist: %v", err)
+	}
+	var denylist []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		denylist = append(denylist, line)
+	}
+	if len(denylist) == 0 {
+		t.Fatal("denylist is empty")
+	}
+
+	allowedFile := filepath.FromSlash("docs/IMPLEMENTATION_PLAN.md")
+	exts := map[string]bool{".go": true, ".md": true, ".yaml": true, ".yml": true}
+
+	pattern := ""
+	for i, s := range denylist {
+		if i > 0 {
+			pattern += "|"
+		}
+		pattern += regexp.QuoteMeta(s)
+	}
+	re := regexp.MustCompile("(?i)(" + pattern + ")")
+
+	root := repoRoot(t)
+	walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			// Skip .git and vendor directories.
+			name := d.Name()
+			if name == ".git" || name == "vendor" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !exts[filepath.Ext(path)] {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			return rerr
+		}
+		if rel == allowedFile {
+			return nil
+		}
+		// Skip this test file itself: the denylist patterns appear here
+		// as validation strings, not as actual donor references.
+		if strings.HasSuffix(rel, "docs_test.go") {
+			return nil
+		}
+		raw, rerr := os.ReadFile(path)
+		if rerr != nil {
+			t.Logf("skip unreadable %s: %v", rel, rerr)
+			return nil
+		}
+		if loc := re.FindIndex(raw); loc != nil {
+			line := strings.Count(string(raw[:loc[0]]), "\n") + 1
+			t.Fatalf("%s:%d contains denied donor reference %q", rel, line, string(raw[loc[0]:loc[1]]))
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk: %v", walkErr)
+	}
+}
+
+// --- VAL-CROSS-007: Skipped feature surfaces are absent or rejected ---
+
+func TestDocsDoNotClaimSkippedFeatures(t *testing.T) {
+	// Docs must not claim support for session affinity, priority tiers,
+	// or add-account mutation endpoints.
+	skippedPhrases := []string{
+		"session affinity",
+		"session_affinity",
+		"priority tier",
+		"priority_tier",
+		"add-account endpoint",
+		"add_account endpoint",
+	}
+	docsToCheck := []string{
+		"README.md",
+		"docs/README.md",
+		"docs/CONFIG.md",
+		"docs/OAUTH.md",
+		"docs/PROVIDERS.md",
+		"docs/CLI.md",
+		"docs/SMOKE.md",
+		"docs/examples/codex-oauth.md",
+		"docs/examples/xai-oauth.md",
+		"config.example.yaml",
+	}
+	for _, rel := range docsToCheck {
+		body := readRepoRel(t, rel)
+		for _, phrase := range skippedPhrases {
+			if strings.Contains(strings.ToLower(body), strings.ToLower(phrase)) {
+				t.Fatalf("%s must not claim support for skipped feature %q", rel, phrase)
+			}
+		}
+	}
+}
+
+func TestConfigRejectsSessionAffinityKey(t *testing.T) {
+	// session_affinity is a skipped feature; strict YAML must reject it.
+	_, err := parse([]byte(`
+oauth:
+  load_balancing:
+    session_affinity: true
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`))
+	if err == nil || !strings.Contains(err.Error(), "field session_affinity not found") {
+		t.Fatalf("expected strict YAML rejection for session_affinity, got: %v", err)
+	}
+}
+
+func TestConfigRejectsAddAccountKey(t *testing.T) {
+	// add_account is a skipped feature; strict YAML must reject it.
+	_, err := parse([]byte(`
+oauth:
+  load_balancing:
+    add_account: true
+models:
+  - alias: m1
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`))
+	if err == nil || !strings.Contains(err.Error(), "field add_account not found") {
+		t.Fatalf("expected strict YAML rejection for add_account, got: %v", err)
 	}
 }

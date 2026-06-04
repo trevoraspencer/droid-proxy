@@ -1,0 +1,9 @@
+# Donor reference denylist patterns, one per line.
+# Used by TestDocsNoDonorReferencesOutsideImplementationPlan.
+# Lines starting with # are comments; blank lines are ignored.
+router-for-me
+CLIProxyAPI
+cli-proxy-api
+cliproxy
+ref-cliproxyplus
+/tmp/ref-cliproxyplus

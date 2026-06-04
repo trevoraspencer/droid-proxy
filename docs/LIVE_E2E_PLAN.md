@@ -1,9 +1,9 @@
 # Live E2E provider test plan
 
 This plan verifies `droid-proxy` against the live providers that matter for this
-repo and removes local `CLIProxyAPIPlus` / `VibeProxy` copies from the test
-machine so they cannot mask failures, bind the same ports, or leave stale
-Factory Droid settings behind.
+repo and removes local legacy-proxy copies from the test machine so they cannot
+mask failures, bind the same ports, or leave stale Factory Droid settings
+behind.
 
 Target date: 2026-05-29
 
@@ -18,7 +18,7 @@ Target date: 2026-05-29
   - Xiaomi MiMo V2.5 Pro through OpenAI-compatible chat with `api-key` auth
     and reasoning replay
 - Exercise direct HTTP proxy calls and real Factory Droid coding-agent flows.
-- Confirm old local `CLIProxyAPIPlus` and `VibeProxy` installs are removed or
+- Confirm old local legacy-proxy installs are removed or
   quarantined before testing begins.
 - Capture reproducible pass/fail evidence without committing secrets, token
   files, or private logs.
@@ -28,8 +28,7 @@ Target date: 2026-05-29
 - No image, video, websocket, quota dashboard, multi-account balancing, or UI
   parity testing.
 - No benchmarking beyond basic latency notes.
-- No attempt to make droid-proxy match every behavior of CLIProxyAPIPlus or
-  VibeProxy.
+- No attempt to make droid-proxy match every behavior of previous proxy tools.
 
 ## References to confirm before spending tokens
 
@@ -85,21 +84,23 @@ Generated local files are intentionally gitignored:
 - `.factory/validation/live-e2e/<run-id>/`
 - OAuth tokens under `~/.droid-proxy/auth`
 
-## Phase 0: Decommission local donor proxies
+## Phase 0: Decommission local legacy proxies
 
 Do this before any live test. The point is to make `droid-proxy` the only proxy
-that Factory Droid can reach.
+that Factory Droid can reach. The commands below search for common process names
+and directory patterns used by previous proxy tools. Adjust the patterns if your
+machine used different names.
 
 ### 0.1 Record current state
 
 ```bash
 mkdir -p .factory/validation/live-e2e/$(date +%Y%m%d-%H%M%S)
 
-pgrep -af 'CLIProxyAPIPlus|CLIProxyAPI|cliproxy|VibeProxy|vibeproxy|droid-proxy|cursor-proxy' \
+pgrep -af 'legacy-proxy|droid-proxy|cursor-proxy' \
   | tee .factory/validation/live-e2e/processes.before.txt || true
 
 lsof -nP -iTCP -sTCP:LISTEN \
-  | rg 'CLIProxy|cliproxy|VibeProxy|vibeproxy|droid-proxy|cursor-proxy|:8787|:1455|:56121|:8000|:11434' \
+  | rg 'legacy-proxy|droid-proxy|cursor-proxy|:8787|:1455|:56121|:8000|:11434' \
   | tee .factory/validation/live-e2e/listeners.before.txt || true
 
 cp ~/.factory/settings.json \
@@ -113,14 +114,14 @@ jq '.customModels[]? | {model, displayName, provider, baseUrl}' \
 ### 0.2 Stop old proxy processes
 
 ```bash
-pkill -f 'CLIProxyAPIPlus|CLIProxyAPI|cliproxy|VibeProxy|vibeproxy' || true
+pkill -f 'legacy-proxy' || true
 ```
 
 Do not kill `cursor-proxy` unless it is binding a port needed by this run. If it
 is active on `127.0.0.1:8787`, stop it for the duration of the test or move
 `droid-proxy` to a different port and update Factory settings accordingly.
 
-### 0.3 Locate, archive, then remove local donor repos
+### 0.3 Locate, archive, then remove local legacy proxy repos
 
 Review the printed directories before removal.
 
@@ -130,12 +131,12 @@ for root in "$HOME/code" "$HOME/Developer" "$HOME/Documents/GitHub"; do
   find "$root" \
     \( -name .git -o -name node_modules -o -name vendor \) -prune -o \
     -type d \
-    \( -iname 'CLIProxyAPIPlus' -o -iname 'CLIProxyAPI' -o -iname 'cliproxyapi' -o -iname 'VibeProxy' -o -iname 'vibeproxy' \) \
-    -print 2>/dev/null
+    \( -iname '*proxy*' \) \
+    -print 2>/dev/null | grep -vi droid-proxy | grep -vi cursor-proxy
 done
 ```
 
-For each matching donor repo that is not `droid-proxy` or `cursor-proxy`:
+For each matching legacy proxy repo that is not `droid-proxy` or `cursor-proxy`:
 
 ```bash
 archive_dir="$HOME/.local/share/droid-proxy-archives/$(date +%Y%m%d-%H%M%S)"
@@ -148,19 +149,19 @@ rm -rf "$donor"
 ```
 
 Also remove stale shell aliases, launch agents, npm globals, or symlinks that
-start those donor proxies:
+start legacy proxies:
 
 ```bash
-type -a cliproxy cliproxyapi CLIProxyAPIPlus vibeproxy VibeProxy 2>/dev/null || true
-launchctl list | rg -i 'cliproxy|vibeproxy' || true
-npm ls -g --depth=0 2>/dev/null | rg -i 'cliproxy|vibeproxy' || true
-pipx list 2>/dev/null | rg -i 'cliproxy|vibeproxy' || true
+type -a legacy-proxy 2>/dev/null || true
+launchctl list | rg -i 'proxy' || true
+npm ls -g --depth=0 2>/dev/null | rg -i 'proxy' || true
+pipx list 2>/dev/null | rg -i 'proxy' || true
 ```
 
 ### 0.4 Confirm clean slate
 
 ```bash
-pgrep -af 'CLIProxyAPIPlus|CLIProxyAPI|cliproxy|VibeProxy|vibeproxy' && exit 1 || true
+pgrep -af 'legacy-proxy' && exit 1 || true
 
 lsof -nP -iTCP:8787 -sTCP:LISTEN
 lsof -nP -iTCP:1455 -sTCP:LISTEN
@@ -169,7 +170,7 @@ lsof -nP -iTCP:56121 -sTCP:LISTEN
 
 Expected result:
 
-- No CLIProxyAPIPlus/VibeProxy process is running.
+- No legacy proxy process is running.
 - Port `8787` is free before starting `droid-proxy`.
 - Ports `1455` and `56121` are free before OAuth login.
 - Factory custom models no longer point to old proxy base URLs.
@@ -586,7 +587,7 @@ Pass criteria:
 - Streaming does not stall.
 - Tool calls and tool results complete without malformed-message errors.
 - `~/.factory/settings.json` contains no active custom model pointing at old
-  CLIProxyAPIPlus or VibeProxy URLs.
+  legacy proxy URLs.
 
 ## Phase 6: Result matrix
 
@@ -638,8 +639,8 @@ For each `CONFIG` issue:
 
 ## Final acceptance criteria
 
-- Local CLIProxyAPIPlus and VibeProxy repos are archived/removed from the Mac.
-- No CLIProxyAPIPlus or VibeProxy process is running.
+- Local legacy proxy repos are archived/removed from the Mac.
+- No legacy proxy process is running.
 - `droid-proxy` owns the configured Factory Droid base URL.
 - `go test ./...` and `go vet ./...` pass after any fixes.
 - All target providers are either `PASS` or have a clear `CONFIG` /
