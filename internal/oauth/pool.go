@@ -205,10 +205,21 @@ func (p *AccountPool) Reload(tokens []*Token) {
 
 	now := p.nowFunc()
 
-	// Remove entries no longer present
+	// Remove entries no longer present.
+	//
+	// In-flight entries whose path disappeared from the token set are
+	// intentionally preserved with stale metadata. This is safe because:
+	//   - The active request still holds a valid lease (Begin was called)
+	//     and will call End to release it, decrementing InFlight.
+	//   - Keeping the entry ensures End does not panic on a missing path
+	//     and InFlight never goes negative.
+	//   - These stale entries are skipped by Eligible/Select (their
+	//     provider may no longer be Codex, or they may be filtered by
+	//     the exclusion set) so they cannot be selected for new requests.
+	//   - Once InFlight reaches zero via End, the next Reload will
+	//     garbage-collect the entry.
 	for path := range p.entries {
 		if _, ok := newTokens[path]; !ok {
-			// Preserve in-flight entries: only remove if in-flight is zero
 			if p.entries[path].InFlight > 0 {
 				// Keep the entry but update its state
 				continue
@@ -386,7 +397,14 @@ func (p *AccountPool) ClearCooldown(path string) {
 func (p *AccountPool) Eligible(exclude map[string]bool) []*AccountEntry {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.eligibleLocked(exclude)
+}
 
+// eligibleLocked builds the eligible entry list assuming p.mu is already held.
+// This is used by both Eligible (which acquires the lock) and Select (which
+// needs to call the selector under the same lock to avoid racing with
+// Begin/End mutations to InFlight).
+func (p *AccountPool) eligibleLocked(exclude map[string]bool) []*AccountEntry {
 	now := p.nowFunc()
 	var eligible []*AccountEntry
 	for _, entry := range p.entries {
@@ -414,8 +432,15 @@ func (p *AccountPool) Eligible(exclude map[string]bool) []*AccountEntry {
 // outside the matching subset.
 // exclude is the set of token paths already tried in the current failover loop.
 // Returns ErrNoEligibleAccounts if no account is eligible.
+//
+// The pool mutex is held through selector invocation so that
+// LeastConnectionsSelector reads InFlight consistently with concurrent
+// Begin/End mutations (VAL-POOL-010).
 func (p *AccountPool) Select(account string, exclude map[string]bool) (*AccountEntry, error) {
-	eligible := p.Eligible(exclude)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	eligible := p.eligibleLocked(exclude)
 	if len(eligible) == 0 {
 		return nil, ErrNoEligibleAccounts
 	}
@@ -473,27 +498,33 @@ func (p *AccountPool) isEligible(entry *AccountEntry, exclude map[string]bool, n
 }
 
 // Snapshot returns a deep-copy snapshot of all Codex pool entries.
-// The snapshot is deterministic: entries are sorted by selector label then path.
+// The snapshot is deterministic: entries are sorted by selector label then path,
+// consistent with Eligible() ordering.
 // The snapshot never exposes access tokens, refresh tokens, ID tokens, or raw JSON.
 func (p *AccountPool) Snapshot() *PoolSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	snap := &PoolSnapshot{}
+	// Collect and sort entries by selector then path (matching Eligible)
+	var entries []*AccountEntry
 	for _, entry := range p.entries {
 		if entry.Provider != ProviderCodex {
 			continue
 		}
-		snap.Accounts = append(snap.Accounts, snapshotFromEntry(entry))
+		entries = append(entries, entry)
 	}
 
-	// Deterministic sort
-	sort.Slice(snap.Accounts, func(i, j int) bool {
-		if snap.Accounts[i].Selector != snap.Accounts[j].Selector {
-			return snap.Accounts[i].Selector < snap.Accounts[j].Selector
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Selector != entries[j].Selector {
+			return entries[i].Selector < entries[j].Selector
 		}
-		return snap.Accounts[i].Provider < snap.Accounts[j].Provider
+		return entries[i].Path < entries[j].Path
 	})
+
+	snap := &PoolSnapshot{}
+	for _, entry := range entries {
+		snap.Accounts = append(snap.Accounts, snapshotFromEntry(entry))
+	}
 
 	return snap
 }

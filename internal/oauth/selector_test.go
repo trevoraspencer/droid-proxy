@@ -951,3 +951,58 @@ func TestPoolSelect_NoSecretLeakage(t *testing.T) {
 		}
 	}
 }
+
+// ---- VAL-POOL-010: Concurrent LeastConnections through AccountPool.Select ----
+
+// TestPoolSelect_ConcurrentLeastConnections exercises LeastConnectionsSelector
+// through AccountPool.Select with concurrent Begin/End cycles, ensuring the
+// race detector sees no data races (VAL-POOL-010). The previous implementation
+// released the pool mutex before calling selector.Select, allowing
+// LeastConnectionsSelector to read InFlight while concurrent Begin/End
+// mutations were in flight.
+func TestPoolSelect_ConcurrentLeastConnections(t *testing.T) {
+	tokens := []*Token{
+		makeToken("alice@example.com", "a-access", "a-refresh", false),
+		makeToken("bob@example.com", "b-access", "b-refresh", false),
+		makeToken("charlie@example.com", "c-access", "c-refresh", false),
+	}
+	tokens[0].path = "/tmp/alice.json"
+	tokens[1].path = "/tmp/bob.json"
+	tokens[2].path = "/tmp/charlie.json"
+
+	sel := &LeastConnectionsSelector{}
+	pool := NewAccountPool(tokens, fakeTime, sel)
+
+	var wg sync.WaitGroup
+	const workers = 50
+	const cyclesPerWorker = 10
+
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < cyclesPerWorker; i++ {
+				entry, err := pool.Select("", nil)
+				if err != nil {
+					t.Errorf("select failed: %v", err)
+					return
+				}
+				if err := pool.Begin(entry.Path); err != nil {
+					t.Errorf("begin failed for %q: %v", entry.Path, err)
+					return
+				}
+				// Simulate brief work
+				pool.End(entry.Path)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Verify all in-flight counters return to zero
+	snap := pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.InFlight != 0 {
+			t.Errorf("account %q has in_flight=%d after concurrent test", acct.Selector, acct.InFlight)
+		}
+	}
+}

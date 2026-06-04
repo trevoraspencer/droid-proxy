@@ -754,6 +754,11 @@ func TestPoolSnapshot_DuplicateLabelsDistinguishableByOrder(t *testing.T) {
 	if snap.Accounts[0].Selector != "same@example.com" || snap.Accounts[1].Selector != "same@example.com" {
 		t.Fatalf("expected same selectors, got %q and %q", snap.Accounts[0].Selector, snap.Accounts[1].Selector)
 	}
+	// Verify deterministic ordering: snapshots taken twice produce same order
+	snap2 := pool.Snapshot()
+	if snap.Accounts[0].Selector != snap2.Accounts[0].Selector || snap.Accounts[1].Selector != snap2.Accounts[1].Selector {
+		t.Fatal("snapshot ordering is not deterministic for duplicate selectors")
+	}
 }
 
 func TestPoolSnapshot_EmptyLabelFallback(t *testing.T) {
