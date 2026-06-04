@@ -67,20 +67,29 @@ type PoolSnapshot struct {
 // AccountPool maintains an in-memory view of loaded Codex token files with
 // runtime state for health, cooldown, rate-limiting, and in-flight accounting.
 type AccountPool struct {
-	mu      sync.Mutex
-	entries map[string]*AccountEntry // keyed by token file path
-	nowFunc func() time.Time
+	mu       sync.Mutex
+	entries  map[string]*AccountEntry // keyed by token file path
+	nowFunc  func() time.Time
+	selector Selector
 }
 
 // NewAccountPool creates a pool seeded from the given tokens.
 // Only Codex tokens are included; other providers are ignored.
-func NewAccountPool(tokens []*Token, nowFunc func() time.Time) *AccountPool {
+// If selector is nil, a default round-robin selector is used.
+func NewAccountPool(tokens []*Token, nowFunc func() time.Time, selector ...Selector) *AccountPool {
 	if nowFunc == nil {
 		nowFunc = time.Now
 	}
+	var sel Selector
+	if len(selector) > 0 && selector[0] != nil {
+		sel = selector[0]
+	} else {
+		sel = NewSelector(config.LoadBalancingStrategy(config.LoadBalancingRoundRobin))
+	}
 	p := &AccountPool{
-		entries: make(map[string]*AccountEntry),
-		nowFunc: nowFunc,
+		entries:  make(map[string]*AccountEntry),
+		nowFunc:  nowFunc,
+		selector: sel,
 	}
 	p.seed(tokens)
 	return p
@@ -396,6 +405,36 @@ func (p *AccountPool) Eligible(exclude map[string]bool) []*AccountEntry {
 	})
 
 	return eligible
+}
+
+// Select picks an eligible account using the configured strategy.
+// If account is non-empty, selection is constrained to accounts matching
+// the pinned selector (trimmed, case-insensitive match against email, subject,
+// account ID, filename stem, or filename). Pinned selection never falls back
+// outside the matching subset.
+// exclude is the set of token paths already tried in the current failover loop.
+// Returns ErrNoEligibleAccounts if no account is eligible.
+func (p *AccountPool) Select(account string, exclude map[string]bool) (*AccountEntry, error) {
+	eligible := p.Eligible(exclude)
+	if len(eligible) == 0 {
+		return nil, ErrNoEligibleAccounts
+	}
+
+	// Apply pinned account filter
+	if strings.TrimSpace(account) != "" {
+		var pinned []*AccountEntry
+		for _, e := range eligible {
+			if e.MatchesAccount(account) {
+				pinned = append(pinned, e)
+			}
+		}
+		if len(pinned) == 0 {
+			return nil, ErrNoEligibleAccounts
+		}
+		eligible = pinned
+	}
+
+	return p.selector.Select(eligible)
 }
 
 // isEligible checks if a single entry is eligible for selection.
