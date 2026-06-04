@@ -738,26 +738,62 @@ func TestPoolSnapshot_DeterministicOrdering(t *testing.T) {
 }
 
 func TestPoolSnapshot_DuplicateLabelsDistinguishableByOrder(t *testing.T) {
-	// Two tokens with same email but different paths
+	// Two tokens with the same email (selector label) but different paths and
+	// different quota windows so entries are distinguishable in the snapshot.
+	// This genuinely exercises the Path-based tie-break in Snapshot() sorting.
+	resetAt1 := int64(1893456000)
+	resetAt2 := int64(1893460000)
+
 	tok1 := makeToken("same@example.com", "access-1", "refresh-1", false)
 	tok1.path = "/tmp/alpha.json"
+	tok1.CodexQuota = &CodexQuota{
+		Primary: &CodexQuotaWindow{
+			UsedPercent: 10,
+			ResetAt:     &resetAt1,
+		},
+	}
+
 	tok2 := makeToken("same@example.com", "access-2", "refresh-2", false)
 	tok2.path = "/tmp/beta.json"
+	tok2.CodexQuota = &CodexQuota{
+		Primary: &CodexQuotaWindow{
+			UsedPercent: 20,
+			ResetAt:     &resetAt2,
+		},
+	}
 
 	pool := NewAccountPool([]*Token{tok1, tok2}, fakeTime)
-	snap := pool.Snapshot()
 
-	if len(snap.Accounts) != 2 {
-		t.Fatalf("expected 2 accounts, got %d", len(snap.Accounts))
-	}
-	// Both have same selector label but different paths
-	if snap.Accounts[0].Selector != "same@example.com" || snap.Accounts[1].Selector != "same@example.com" {
-		t.Fatalf("expected same selectors, got %q and %q", snap.Accounts[0].Selector, snap.Accounts[1].Selector)
-	}
-	// Verify deterministic ordering: snapshots taken twice produce same order
-	snap2 := pool.Snapshot()
-	if snap.Accounts[0].Selector != snap2.Accounts[0].Selector || snap.Accounts[1].Selector != snap2.Accounts[1].Selector {
-		t.Fatal("snapshot ordering is not deterministic for duplicate selectors")
+	// Repeated snapshots must produce the same deterministic order.
+	// The Path-based tie-break sorts "/tmp/alpha.json" before "/tmp/beta.json",
+	// so the alpha quota (UsedPercent=10) must always appear first.
+	for i := 0; i < 5; i++ {
+		snap := pool.Snapshot()
+
+		if len(snap.Accounts) != 2 {
+			t.Fatalf("snapshot %d: expected 2 accounts, got %d", i, len(snap.Accounts))
+		}
+		if snap.Accounts[0].Selector != "same@example.com" || snap.Accounts[1].Selector != "same@example.com" {
+			t.Fatalf("snapshot %d: expected same selectors, got %q and %q",
+				i, snap.Accounts[0].Selector, snap.Accounts[1].Selector)
+		}
+		if snap.Accounts[0].Quota == nil || snap.Accounts[0].Quota.Primary == nil {
+			t.Fatalf("snapshot %d: first account missing quota", i)
+		}
+		if snap.Accounts[1].Quota == nil || snap.Accounts[1].Quota.Primary == nil {
+			t.Fatalf("snapshot %d: second account missing quota", i)
+		}
+		// The first entry must be the alpha-path account (UsedPercent=10).
+		// If the Path-based tie-break regressed and ordering became random,
+		// this assertion would fail on at least one iteration.
+		if snap.Accounts[0].Quota.Primary.UsedPercent != 10 {
+			t.Fatalf("snapshot %d: first account quota UsedPercent = %.1f, want 10 (alpha path /tmp/alpha.json)",
+				i, snap.Accounts[0].Quota.Primary.UsedPercent)
+		}
+		if snap.Accounts[1].Quota.Primary.UsedPercent != 20 {
+			t.Fatalf("snapshot %d: second account quota UsedPercent = %.1f, want 20 (beta path /tmp/beta.json)",
+				i, snap.Accounts[1].Quota.Primary.UsedPercent)
+		}
 	}
 }
 
