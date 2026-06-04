@@ -634,12 +634,16 @@ func runAuth(args []string) {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: droid-proxy auth <codex|xai> [--device] --config config.yaml")
 		fmt.Fprintln(os.Stderr, "       droid-proxy auth status [codex|xai] --config config.yaml")
+		fmt.Fprintln(os.Stderr, "       droid-proxy auth pool [--url http://127.0.0.1:PORT] --config config.yaml")
 		fmt.Fprintln(os.Stderr, "       droid-proxy auth <enable|disable|logout> <provider> <account> --config config.yaml")
 		os.Exit(2)
 	}
 	switch strings.ToLower(strings.TrimSpace(args[0])) {
 	case "status":
 		runAuthStatus(args[1:])
+		return
+	case "pool":
+		runAuthPool(args[1:])
 		return
 	case "disable":
 		runAuthToggle(args[1:], true)

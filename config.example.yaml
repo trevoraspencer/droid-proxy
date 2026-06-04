@@ -54,7 +54,9 @@ oauth:
   # Does not apply to xAI OAuth (single-account only).
   # All fields have defaults; omit the block or individual fields to use defaults.
   # load_balancing:
-  #   strategy: round-robin            # round-robin, fill-first, least-connections, random
+  #   strategy: sticky                 # sticky (default), round-robin, fill-first, least-connections, random
+  #   quota_soft_cap_percent: 80       # prefer accounts below this used_percent (0 = disable)
+  #   affinity_path: ~/.droid-proxy/conversation_affinity.json
   #   max_failovers: 2                 # additional alternate-account attempts (0 = single attempt only)
   #   rate_limit_cooldown: 60s         # cooldown after 429 when no Retry-After / quota reset
   #   error_cooldown: 30s              # cooldown after 5xx or transport timeout

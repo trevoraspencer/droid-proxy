@@ -50,7 +50,29 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Server, error) {
 		}
 	}
 	sel := oauth.NewSelector(cfg.OAuth.LoadBalancing.Strategy)
-	pool := oauth.NewAccountPool(seedTokens, time.Now, sel)
+	var affinity *oauth.AffinityStore
+	if cfg.OAuth.LoadBalancing.Strategy == config.LoadBalancingSticky {
+		authDir, err := oauthMgr.AuthDir()
+		if err != nil {
+			logger.WithError(err).Warn("server: cannot resolve auth dir for affinity")
+		} else {
+			affinityPath, err := oauth.ResolveAffinityPath(cfg, authDir)
+			if err != nil {
+				logger.WithError(err).Warn("server: cannot resolve affinity path")
+			} else {
+				affinity, err = oauth.NewAffinityStore(oauth.AffinityOptions{
+					Path:       affinityPath,
+					TTL:        cfg.OAuth.LoadBalancing.AffinityTTL,
+					MaxEntries: cfg.OAuth.LoadBalancing.AffinityMaxEntries,
+				})
+				if err != nil {
+					logger.WithError(err).Warn("server: conversation affinity store unavailable")
+					affinity = nil
+				}
+			}
+		}
+	}
+	pool := oauth.NewAccountPool(seedTokens, time.Now, cfg.OAuth.LoadBalancing, affinity, sel)
 
 	deps := handlers.Deps{
 		Cfg:    cfg,

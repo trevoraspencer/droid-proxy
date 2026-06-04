@@ -435,6 +435,7 @@ func TestDocsConfigExampleDocumentsLoadBalancing(t *testing.T) {
 		"rate_limit_cooldown",
 		"error_cooldown",
 		"round-robin",
+		"sticky",
 		"fill-first",
 		"least-connections",
 		"random",
@@ -470,6 +471,7 @@ func TestDocsConfigMDocumentsLoadBalancing(t *testing.T) {
 		"rate_limit_cooldown",
 		"error_cooldown",
 		"round-robin",
+		"sticky",
 		"fill-first",
 		"least-connections",
 		"random",
@@ -549,6 +551,7 @@ func TestDocsCodexOAuthExampleDocumentsLoadBalancing(t *testing.T) {
 		"load_balancing",
 		"strategy",
 		"round-robin",
+		"sticky",
 		"max_failovers",
 		"rate_limit_cooldown",
 		"error_cooldown",
@@ -639,8 +642,8 @@ func TestDocsConfigExamplesParseable(t *testing.T) {
 		t.Fatalf("config.example.yaml must load: %v", err)
 	}
 	// Load-balancing defaults must be applied.
-	if cfg.OAuth.LoadBalancing.Strategy != LoadBalancingRoundRobin {
-		t.Fatalf("default strategy = %q, want round-robin", cfg.OAuth.LoadBalancing.Strategy)
+	if cfg.OAuth.LoadBalancing.Strategy != LoadBalancingSticky {
+		t.Fatalf("default strategy = %q, want sticky", cfg.OAuth.LoadBalancing.Strategy)
 	}
 	if cfg.OAuth.LoadBalancing.MaxFailovers != 2 {
 		t.Fatalf("default max_failovers = %d, want 2", cfg.OAuth.LoadBalancing.MaxFailovers)

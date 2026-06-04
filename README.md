@@ -21,7 +21,8 @@ plus Codex/ChatGPT and xAI OAuth — from a single Go binary.
   `auth logout`, and check per-model OAuth health via `oauth_auth` in
   `/v1/models`.
 - **Codex OAuth multi-account pooling.** Multiple Codex/ChatGPT OAuth accounts
-  are load-balanced across requests. Four selection strategies (`round-robin`,
+  are load-balanced across requests. Selection strategies include `sticky`
+  (default, per-conversation affinity), `round-robin`,
   `fill-first`, `least-connections`, `random`), bounded failover on 429/5xx/
   transport errors with cooldown, and 401/403 force-refresh replay before
   failover. Auth-dir watcher hot-reloads token files. xAI remains
@@ -253,7 +254,7 @@ Full schema: [`docs/CONFIG.md`](docs/CONFIG.md). Highlights:
 - `reasoning_cache` for DeepSeek-style reasoning replay.
 - `oauth.auth_dir` for Codex/xAI token storage.
 - `oauth.load_balancing` for Codex multi-account pooling: `strategy`
-  (`round-robin` (default), `fill-first`, `least-connections`, `random`),
+  (`sticky` (default), `round-robin`, `fill-first`, `least-connections`, `random`),
   `max_failovers`, `rate_limit_cooldown`, `error_cooldown`.
 - Per-model `capabilities` drive the `agent_ready` flag.
 

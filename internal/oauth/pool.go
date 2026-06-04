@@ -47,51 +47,75 @@ type AccountEntry struct {
 // AccountSnapshot is a safe, immutable deep-copy view of an account entry.
 // It never exposes access tokens, refresh tokens, ID tokens, or raw token JSON.
 type AccountSnapshot struct {
-	Selector         string      `json:"selector"`
-	Provider         string      `json:"provider"`
-	Disabled         bool        `json:"disabled"`
-	Healthy          bool        `json:"healthy"`
-	CooldownUntil    *time.Time  `json:"cooldown_until,omitempty"`
-	RateLimitedUntil *time.Time  `json:"rate_limit_until,omitempty"`
-	LastUsed         *time.Time  `json:"last_used,omitempty"`
-	InFlight         int         `json:"in_flight"`
-	Quota            *CodexQuota `json:"quota,omitempty"`
-	RateLimitResetAt *time.Time  `json:"rate_limit_reset_at,omitempty"`
+	Selector               string      `json:"selector"`
+	Provider               string      `json:"provider"`
+	Disabled               bool        `json:"disabled"`
+	Healthy                bool        `json:"healthy"`
+	CooldownUntil          *time.Time  `json:"cooldown_until,omitempty"`
+	RateLimitedUntil       *time.Time  `json:"rate_limit_until,omitempty"`
+	LastUsed               *time.Time  `json:"last_used,omitempty"`
+	InFlight               int         `json:"in_flight"`
+	Quota                  *CodexQuota `json:"quota,omitempty"`
+	RateLimitResetAt       *time.Time  `json:"rate_limit_reset_at,omitempty"`
+	MaxUsedPercent         *float64    `json:"max_used_percent,omitempty"`
+	BoundConversationCount int         `json:"bound_conversation_count,omitempty"`
+}
+
+// PoolAffinitySnapshot is safe affinity metadata for pool-health.
+type PoolAffinitySnapshot struct {
+	BoundConversations int    `json:"bound_conversations"`
+	File               string `json:"file,omitempty"`
 }
 
 // PoolSnapshot is a safe, deep-copy view of the entire pool state.
 type PoolSnapshot struct {
-	Accounts []AccountSnapshot `json:"accounts"`
+	Strategy       string                `json:"strategy,omitempty"`
+	CodexAccounts  int                   `json:"codex_account_count,omitempty"`
+	EligibleCount  int                   `json:"eligible_count,omitempty"`
+	Affinity       *PoolAffinitySnapshot `json:"affinity,omitempty"`
+	Accounts       []AccountSnapshot     `json:"accounts"`
 }
 
 // AccountPool maintains an in-memory view of loaded Codex token files with
 // runtime state for health, cooldown, rate-limiting, and in-flight accounting.
 type AccountPool struct {
-	mu       sync.Mutex
-	entries  map[string]*AccountEntry // keyed by token file path
-	nowFunc  func() time.Time
-	selector Selector
+	mu            sync.Mutex
+	entries       map[string]*AccountEntry // keyed by token file path
+	nowFunc       func() time.Time
+	selector      Selector
+	strategy      config.LoadBalancingStrategy
+	quotaSoftCap  float64
+	affinity      *AffinityStore
 }
 
 // NewAccountPool creates a pool seeded from the given tokens.
 // Only Codex tokens are included; other providers are ignored.
 // If selector is nil, a default round-robin selector is used.
-func NewAccountPool(tokens []*Token, nowFunc func() time.Time, selector ...Selector) *AccountPool {
+// lb configures sticky affinity and quota soft cap; affinity may be nil.
+func NewAccountPool(tokens []*Token, nowFunc func() time.Time, lb config.LoadBalancing, affinity *AffinityStore, selector ...Selector) *AccountPool {
 	if nowFunc == nil {
 		nowFunc = time.Now
+	}
+	strategy := lb.Strategy
+	if strategy == "" {
+		strategy = config.LoadBalancingRoundRobin
 	}
 	var sel Selector
 	if len(selector) > 0 && selector[0] != nil {
 		sel = selector[0]
 	} else {
-		sel = NewSelector(config.LoadBalancingStrategy(config.LoadBalancingRoundRobin))
+		sel = NewSelector(strategy)
 	}
 	p := &AccountPool{
-		entries:  make(map[string]*AccountEntry),
-		nowFunc:  nowFunc,
-		selector: sel,
+		entries:      make(map[string]*AccountEntry),
+		nowFunc:      nowFunc,
+		selector:     sel,
+		strategy:     strategy,
+		quotaSoftCap: lb.QuotaSoftCapPercent,
+		affinity:     affinity,
 	}
 	p.seed(tokens)
+	p.pruneAffinity()
 	return p
 }
 
@@ -238,6 +262,32 @@ func (p *AccountPool) Reload(tokens []*Token) {
 			p.entries[path] = entry
 		}
 	}
+	p.pruneAffinityLocked()
+}
+
+func (p *AccountPool) pruneAffinity() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pruneAffinityLocked()
+}
+
+func (p *AccountPool) pruneAffinityLocked() {
+	if p.affinity == nil {
+		return
+	}
+	valid := make(map[string]bool, len(p.entries))
+	for path := range p.entries {
+		valid[path] = true
+	}
+	_ = p.affinity.Prune(valid)
+}
+
+// BindConversation persists conversation→account affinity when sticky is enabled.
+func (p *AccountPool) BindConversation(conversationID, accountPath string) {
+	if p == nil || p.strategy != config.LoadBalancingSticky || p.affinity == nil {
+		return
+	}
+	_ = p.affinity.Bind(conversationID, accountPath)
 }
 
 // updateEntry updates identity and metadata fields of an existing entry
@@ -445,17 +495,18 @@ func (p *AccountPool) eligibleLocked(exclude map[string]bool) []*AccountEntry {
 // account ID, filename stem, or filename). Pinned selection never falls back
 // outside the matching subset.
 // exclude is the set of token paths already tried in the current failover loop.
+// conversationID enables sticky affinity when strategy is sticky.
 // Returns ErrNoEligibleAccounts if no account is eligible.
 //
 // The pool mutex is held through selector invocation so that
 // LeastConnectionsSelector reads InFlight consistently with concurrent
 // Begin/End mutations (VAL-POOL-010).
-func (p *AccountPool) Select(account string, exclude map[string]bool) (*AccountEntry, error) {
+func (p *AccountPool) Select(account string, exclude map[string]bool, conversationID string) (*AccountEntry, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	eligible := p.eligibleLocked(exclude)
 	if len(eligible) == 0 {
+		p.mu.Unlock()
 		return nil, ErrNoEligibleAccounts
 	}
 
@@ -468,12 +519,55 @@ func (p *AccountPool) Select(account string, exclude map[string]bool) (*AccountE
 			}
 		}
 		if len(pinned) == 0 {
+			p.mu.Unlock()
 			return nil, ErrNoEligibleAccounts
 		}
 		eligible = pinned
 	}
 
-	return p.selector.Select(eligible)
+	eligible = filterEligibleBySoftCap(eligible, p.quotaSoftCap)
+
+	var picked *AccountEntry
+	var err error
+
+	if p.strategy == config.LoadBalancingSticky && strings.TrimSpace(conversationID) != "" {
+		picked = p.selectStickyLocked(conversationID, eligible, exclude)
+	}
+
+	if picked == nil {
+		picked, err = p.selector.Select(eligible)
+	}
+
+	bindConv := ""
+	bindPath := ""
+	if err == nil && picked != nil && p.strategy == config.LoadBalancingSticky && strings.TrimSpace(conversationID) != "" {
+		bindConv = strings.TrimSpace(conversationID)
+		bindPath = picked.Path
+	}
+	p.mu.Unlock()
+
+	if bindConv != "" && bindPath != "" {
+		p.BindConversation(bindConv, bindPath)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return picked, nil
+}
+
+func (p *AccountPool) selectStickyLocked(conversationID string, eligible []*AccountEntry, exclude map[string]bool) *AccountEntry {
+	if p.affinity == nil {
+		return nil
+	}
+	bound := p.affinity.Lookup(conversationID)
+	if bound != "" && !exclude[bound] {
+		for _, e := range eligible {
+			if e.Path == bound {
+				return e
+			}
+		}
+	}
+	return pickByQuota(eligible)
 }
 
 // isEligible checks if a single entry is eligible for selection.
@@ -535,9 +629,17 @@ func (p *AccountPool) Snapshot() *PoolSnapshot {
 		return entries[i].Path < entries[j].Path
 	})
 
-	snap := &PoolSnapshot{}
+	snap := &PoolSnapshot{
+		Strategy:      string(p.strategy),
+		CodexAccounts: len(entries),
+	}
+	snap.EligibleCount = len(p.eligibleLocked(nil))
+	if p.affinity != nil {
+		bound, file := p.affinity.Stats()
+		snap.Affinity = &PoolAffinitySnapshot{BoundConversations: bound, File: file}
+	}
 	for _, entry := range entries {
-		snap.Accounts = append(snap.Accounts, snapshotFromEntry(entry))
+		snap.Accounts = append(snap.Accounts, snapshotFromEntry(entry, p.affinity))
 	}
 
 	return snap
@@ -566,7 +668,7 @@ func (e *AccountEntry) MatchesAccount(account string) bool {
 }
 
 // snapshotFromEntry creates a deep-copy AccountSnapshot from an AccountEntry.
-func snapshotFromEntry(entry *AccountEntry) AccountSnapshot {
+func snapshotFromEntry(entry *AccountEntry, affinity *AffinityStore) AccountSnapshot {
 	snap := AccountSnapshot{
 		Selector: entry.Selector,
 		Provider: string(entry.Provider),
@@ -588,10 +690,15 @@ func snapshotFromEntry(entry *AccountEntry) AccountSnapshot {
 	}
 	if entry.Quota != nil {
 		snap.Quota = deepCopyCodexQuota(entry.Quota)
+		maxUsed := MaxAgentUsedPercent(entry.Quota)
+		snap.MaxUsedPercent = &maxUsed
 	}
 	if entry.RateLimitResetAt != nil {
 		t := *entry.RateLimitResetAt
 		snap.RateLimitResetAt = &t
+	}
+	if affinity != nil {
+		snap.BoundConversationCount = affinity.BoundCountForPath(entry.Path)
 	}
 	return snap
 }

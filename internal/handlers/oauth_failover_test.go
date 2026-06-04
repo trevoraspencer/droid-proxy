@@ -111,7 +111,7 @@ func newCodexFailoverTestAPI(t *testing.T, opts failoverTestOptions) *testAPI {
 		t.Fatal(err)
 	}
 	sel := oauth.NewSelector(strategy)
-	pool := oauth.NewAccountPool(tokens, time.Now, sel)
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, sel)
 
 	router, err := upstream.NewRouter(cfg.Models)
 	if err != nil {
@@ -309,7 +309,7 @@ func TestResponsesCodexFailoverTransportErrorCooldown(t *testing.T) {
 		}
 	}
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 	router, _ := upstream.NewRouter(cfg.Models)
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
@@ -542,7 +542,7 @@ func TestResponsesCodexFailoverExcludesNonCodexTokens(t *testing.T) {
 	}
 
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 	snap := pool.Snapshot()
 
 	if len(snap.Accounts) != 1 {
@@ -896,7 +896,7 @@ func TestResponsesCodexFailoverXAIUsesSingleTokenPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 
 	router, _ := upstream.NewRouter(cfg.Models)
 	logger := logrus.New()
@@ -2293,7 +2293,7 @@ func TestResponsesCodexFailoverXAI500DoesNotFailover(t *testing.T) {
 		t.Fatal(err)
 	}
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 
 	router, _ := upstream.NewRouter(cfg.Models)
 	logger := logrus.New()
@@ -2388,7 +2388,7 @@ func TestResponsesCodexFailoverXAI429DoesNotFailover(t *testing.T) {
 		t.Fatal(err)
 	}
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 
 	router, _ := upstream.NewRouter(cfg.Models)
 	logger := logrus.New()
@@ -2481,7 +2481,7 @@ func TestResponsesCodexFailoverXAI401DoesNotUseCodexPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 
 	router, _ := upstream.NewRouter(cfg.Models)
 	logger := logrus.New()
@@ -2623,7 +2623,7 @@ func TestResponsesCodexStreamingPreCommitTransportErrorFailover(t *testing.T) {
 		}
 	}
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 	router, _ := upstream.NewRouter(cfg.Models)
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
@@ -2868,7 +2868,7 @@ func TestCodexInFlightReturnsToZeroOnTransportError(t *testing.T) {
 		t.Fatal(err)
 	}
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 	router, _ := upstream.NewRouter(cfg.Models)
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
@@ -3006,7 +3006,7 @@ func TestCodexInFlightReturnsToZeroOnRefreshFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 	router, _ := upstream.NewRouter(cfg.Models)
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
@@ -3567,7 +3567,7 @@ func TestCodexNonStreamingTransportErrorBeforeHeadersIsRetried(t *testing.T) {
 		}
 	}
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 	router, _ := upstream.NewRouter(cfg.Models)
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)

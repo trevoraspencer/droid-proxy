@@ -23,6 +23,7 @@ droid-proxy update [--repo PATH] [--remote origin] [--branch main] [--binary PAT
 
 droid-proxy auth codex|xai [--config PATH] [--no-browser] [--device]
 droid-proxy auth status [codex|xai] [--config PATH]
+droid-proxy auth pool [--config PATH] [--url http://HOST:PORT]
 droid-proxy auth enable|disable|logout <provider> <account> [--config PATH]
 ```
 
@@ -232,6 +233,7 @@ Inspect and manage stored OAuth accounts without re-running a login:
 | Command | Description |
 |---------|-------------|
 | `auth status [provider]` | Lists stored accounts with email, subject, account ID, expiry, last refresh, `disabled` flag, and token file path. Omit the provider to show both `codex` and `xai`. |
+| `auth pool` | Shows Codex pool health (strategy, quota usage, affinity bindings, cooldowns). Uses `GET /v1/oauth/pool-health` when the proxy is running; otherwise prints an offline snapshot from token files. |
 | `auth disable <provider> <account>` | Marks an account disabled. The proxy skips disabled accounts when selecting a token for requests. |
 | `auth enable <provider> <account>` | Clears the disabled flag. |
 | `auth logout <provider> <account>` | Deletes the account's token file from `oauth.auth_dir`. |

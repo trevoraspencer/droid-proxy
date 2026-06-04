@@ -166,7 +166,7 @@ func TestPoolHealthEndpoint_SecretSafeResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool := oauth.NewAccountPool(tokens, time.Now)
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil)
 
 	var logs bytes.Buffer
 	logger := logrus.New()
@@ -284,7 +284,7 @@ func TestSelectionExhaustion_ErrorIsSecretSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool := oauth.NewAccountPool(tokens, time.Now)
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -370,7 +370,7 @@ func TestUpstreamErrorRelay_FailoverExhaustion_SecretSafe(t *testing.T) {
 	}
 
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 
 	var logs bytes.Buffer
 	logger := logrus.New()
@@ -449,7 +449,7 @@ func Test5xxFailoverResponse_SecretSafe(t *testing.T) {
 	}
 
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 
 	var logs bytes.Buffer
 	logger := logrus.New()
@@ -505,9 +505,9 @@ func TestNoEligibleAccounts_ErrorSafeWithSentinelPool(t *testing.T) {
 	}
 	loaded.Disabled = true
 
-	pool := oauth.NewAccountPool([]*oauth.Token{loaded}, time.Now)
+	pool := oauth.NewAccountPool([]*oauth.Token{loaded}, time.Now, oauth.TestPoolLB(), nil)
 
-	_, err = pool.Select("", nil)
+	_, err = pool.Select("", nil, "")
 	if err == nil {
 		t.Fatal("expected error for disabled-only pool")
 	}
@@ -547,7 +547,7 @@ func TestTraceLogging_PoolHealthPathDoesNotLeakSentinels(t *testing.T) {
 
 	manager := oauth.NewManager(cfg)
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now)
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil)
 
 	var logs bytes.Buffer
 	logger := logrus.New()
@@ -616,7 +616,7 @@ func TestTraceLogging_FailoverPathDoesNotLeakSentinels(t *testing.T) {
 	}
 
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 
 	var logs bytes.Buffer
 	logger := logrus.New()
@@ -757,7 +757,7 @@ func TestRefreshFailure_ErrorSafeWithSentinelToken(t *testing.T) {
 	manager.SaveToken(tok)
 
 	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
-	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.TestPoolLB(), nil, oauth.NewSelector(config.LoadBalancingFillFirst))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

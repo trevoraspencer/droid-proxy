@@ -995,8 +995,8 @@ func TestLoad_OAuthLoadBalancingDefaults(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	lb := cfg.OAuth.LoadBalancing
-	if lb.Strategy != LoadBalancingRoundRobin {
-		t.Fatalf("default strategy = %q, want round-robin", lb.Strategy)
+	if lb.Strategy != LoadBalancingSticky {
+		t.Fatalf("default strategy = %q, want sticky", lb.Strategy)
 	}
 	if lb.MaxFailovers != 2 {
 		t.Fatalf("default max_failovers = %d, want 2", lb.MaxFailovers)
@@ -1024,8 +1024,8 @@ models:
 		t.Fatalf("unexpected error: %v", err)
 	}
 	lb := cfg.OAuth.LoadBalancing
-	if lb.Strategy != LoadBalancingRoundRobin {
-		t.Fatalf("default strategy = %q, want round-robin", lb.Strategy)
+	if lb.Strategy != LoadBalancingSticky {
+		t.Fatalf("default strategy = %q, want sticky", lb.Strategy)
 	}
 	if lb.MaxFailovers != 2 {
 		t.Fatalf("default max_failovers = %d, want 2", lb.MaxFailovers)
@@ -1108,7 +1108,7 @@ models:
     base_url: http://127.0.0.1:1/v1
     api_key_env: TEST_KEY
 `,
-			wantStrat: LoadBalancingRoundRobin,
+			wantStrat: LoadBalancingSticky,
 			wantMax:   3,
 			wantRLCD:  60 * time.Second,
 			wantECD:   30 * time.Second,
@@ -1126,7 +1126,7 @@ models:
     base_url: http://127.0.0.1:1/v1
     api_key_env: TEST_KEY
 `,
-			wantStrat: LoadBalancingRoundRobin,
+			wantStrat: LoadBalancingSticky,
 			wantMax:   2,
 			wantRLCD:  90 * time.Second,
 			wantECD:   30 * time.Second,
@@ -1144,7 +1144,7 @@ models:
     base_url: http://127.0.0.1:1/v1
     api_key_env: TEST_KEY
 `,
-			wantStrat: LoadBalancingRoundRobin,
+			wantStrat: LoadBalancingSticky,
 			wantMax:   2,
 			wantRLCD:  60 * time.Second,
 			wantECD:   15 * time.Second,
@@ -1209,8 +1209,8 @@ models:
 		t.Fatalf("unexpected error: %v", err)
 	}
 	lb := cfg.OAuth.LoadBalancing
-	if lb.Strategy != LoadBalancingRoundRobin {
-		t.Fatalf("default strategy = %q, want round-robin", lb.Strategy)
+	if lb.Strategy != LoadBalancingSticky {
+		t.Fatalf("default strategy = %q, want sticky", lb.Strategy)
 	}
 	if lb.MaxFailovers != 2 {
 		t.Fatalf("default max_failovers = %d, want 2", lb.MaxFailovers)
@@ -1221,6 +1221,7 @@ models:
 
 func TestLoad_OAuthLoadBalancingApprovedStrategies(t *testing.T) {
 	for _, strat := range []LoadBalancingStrategy{
+		LoadBalancingSticky,
 		LoadBalancingRoundRobin,
 		LoadBalancingFillFirst,
 		LoadBalancingLeastConnections,

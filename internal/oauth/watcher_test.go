@@ -18,7 +18,7 @@ import (
 func TestWatcher_HotReloadCreate(t *testing.T) {
 	dir := t.TempDir()
 	mgr := newTestManager(t, dir)
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
@@ -51,7 +51,7 @@ func TestWatcher_HotReloadModify(t *testing.T) {
 	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +83,7 @@ func TestWatcher_HotReloadRename(t *testing.T) {
 	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	oldPath := saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestWatcher_HotReloadDelete(t *testing.T) {
 	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	path := saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +163,7 @@ func TestWatcher_InvalidJSONFileSkipped(t *testing.T) {
 	tok := makeToken("valid@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestWatcher_NonJSONFilesIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +213,7 @@ func TestWatcher_LockAndTempFilesIgnored(t *testing.T) {
 	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +259,7 @@ func TestWatcher_InvalidJSONCreatedLater(t *testing.T) {
 	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -292,7 +292,7 @@ func TestWatcher_DebounceCoalescesRapidEvents(t *testing.T) {
 	dir := t.TempDir()
 	mgr := newTestManager(t, dir)
 
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 	debounce := 200 * time.Millisecond
 	w, err := NewWatcher(mgr, pool, debounce)
 	if err != nil {
@@ -323,7 +323,7 @@ func TestWatcher_ShutdownClean(t *testing.T) {
 	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -358,7 +358,7 @@ func TestWatcher_ServerLifecycleRaceClean(t *testing.T) {
 	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 
 	// Start and stop watcher rapidly, repeatedly, under race detector
 	for i := 0; i < 10; i++ {
@@ -391,7 +391,7 @@ func TestWatcher_StartupWithInvalidAndValidTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatalf("watcher startup should not fail with invalid files: %v", err)
@@ -412,7 +412,7 @@ func TestWatcher_MissingDirSafeAtStartup(t *testing.T) {
 	// dir does NOT exist
 
 	mgr := newTestManager(t, dir)
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
@@ -432,7 +432,7 @@ func TestWatcher_MissingDirRecoveryOnTokenCreation(t *testing.T) {
 	dir := filepath.Join(parentDir, "auth")
 
 	mgr := newTestManager(t, dir)
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
@@ -471,7 +471,7 @@ func TestWatcher_AuthDirRemovalAndRecreationReloadsPool(t *testing.T) {
 	oldTok := makeToken("old@example.com", "old-access-SENTINEL", "old-refresh-SENTINEL", false)
 	saveTokenFile(t, dir, oldTok)
 	mgr := newTestManager(t, dir)
-	pool := NewAccountPool([]*Token{oldTok}, fakeTime)
+	pool := NewAccountPool([]*Token{oldTok}, fakeTime, TestPoolLB(), nil)
 
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
@@ -513,7 +513,7 @@ func TestWatcher_AtomicSaveNoiseIgnored(t *testing.T) {
 	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -560,7 +560,7 @@ func TestWatcher_InFlightDeleteSafe(t *testing.T) {
 	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	path := saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -611,7 +611,7 @@ func TestWatcher_InFlightDisableSafe(t *testing.T) {
 	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	path := saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -669,7 +669,7 @@ func TestWatcher_InFlightDeleteRaceClean(t *testing.T) {
 	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	path := saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -829,7 +829,7 @@ func TestWatcher_HiddenFileFilteringParity(t *testing.T) {
 	}
 
 	// Now seed a pool and start the watcher; verify pool matches
-	pool := NewAccountPool(tokens, fakeTime)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -881,7 +881,7 @@ func TestWatcher_StartupSeedMatchesWatcherReload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pool := NewAccountPool(seedTokens, fakeTime)
+	pool := NewAccountPool(seedTokens, fakeTime, TestPoolLB(), nil)
 	seedSnap := pool.Snapshot()
 
 	if len(seedSnap.Accounts) != 2 {
@@ -931,7 +931,7 @@ func TestWatcher_ParentWatchRemovedAfterAuthDirCreation(t *testing.T) {
 
 	dir := filepath.Join(parentDir, "auth")
 	mgr := newTestManager(t, dir)
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
@@ -1013,7 +1013,7 @@ func TestWatcher_SkipsSeedWhenPoolAlreadyPopulated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pool := NewAccountPool(seedTokens, fakeTime)
+	pool := NewAccountPool(seedTokens, fakeTime, TestPoolLB(), nil)
 
 	// Record the initial snapshot
 	snapBefore := pool.Snapshot()
@@ -1060,7 +1060,7 @@ func TestWatcher_IsAuthDir_SymlinkSafe(t *testing.T) {
 	dir := t.TempDir()
 	mgr := newTestManager(t, dir)
 
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -1127,7 +1127,7 @@ func TestWatcher_WatchingParentMutexSync(t *testing.T) {
 	dir := filepath.Join(parentDir, "auth")
 
 	mgr := newTestManager(t, dir)
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {

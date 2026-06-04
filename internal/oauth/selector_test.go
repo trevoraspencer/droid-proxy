@@ -343,9 +343,9 @@ func TestPoolSelect_PinnedAccount_MatchesEmail(t *testing.T) {
 	tokens[2].path = "/tmp/charlie.json"
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
-	got, err := pool.Select("bob@example.com", nil)
+	got, err := pool.Select("bob@example.com", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,9 +361,9 @@ func TestPoolSelect_PinnedAccount_CaseInsensitive(t *testing.T) {
 	tokens[0].path = "/tmp/user.json"
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
-	got, err := pool.Select("user@example.com", nil)
+	got, err := pool.Select("user@example.com", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,9 +379,9 @@ func TestPoolSelect_PinnedAccount_TrimmedWhitespace(t *testing.T) {
 	tokens[0].path = "/tmp/user.json"
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
-	got, err := pool.Select("  user@example.com  ", nil)
+	got, err := pool.Select("  user@example.com  ", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,9 +401,9 @@ func TestPoolSelect_PinnedAccount_MatchesSubject(t *testing.T) {
 	tok.path = "/tmp/subject.json"
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool([]*Token{tok}, fakeTime, sel)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil, sel)
 
-	got, err := pool.Select("sub-123", nil)
+	got, err := pool.Select("sub-123", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,9 +423,9 @@ func TestPoolSelect_PinnedAccount_MatchesAccountID(t *testing.T) {
 	tok.path = "/tmp/acct.json"
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool([]*Token{tok}, fakeTime, sel)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil, sel)
 
-	got, err := pool.Select("acct_789", nil)
+	got, err := pool.Select("acct_789", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,9 +439,9 @@ func TestPoolSelect_PinnedAccount_MatchesFilenameStem(t *testing.T) {
 	tok.path = "/tmp/codex-oauth-myalias.json"
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool([]*Token{tok}, fakeTime, sel)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil, sel)
 
-	got, err := pool.Select("codex-oauth-myalias", nil)
+	got, err := pool.Select("codex-oauth-myalias", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,9 +455,9 @@ func TestPoolSelect_PinnedAccount_MatchesFullFilename(t *testing.T) {
 	tok.path = "/tmp/codex-oauth-myalias.json"
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool([]*Token{tok}, fakeTime, sel)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil, sel)
 
-	got, err := pool.Select("codex-oauth-myalias.json", nil)
+	got, err := pool.Select("codex-oauth-myalias.json", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,10 +476,10 @@ func TestPoolSelect_PinnedAccount_DisabledNeverFallsBack(t *testing.T) {
 	tokens[1].path = "/tmp/other.json"
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	// Pinned to disabled account → should not fall back to other
-	_, err := pool.Select("pinned@example.com", nil)
+	_, err := pool.Select("pinned@example.com", nil, "")
 	if !errors.Is(err, ErrNoEligibleAccounts) {
 		t.Fatalf("expected ErrNoEligibleAccounts for disabled pinned, got %v", err)
 	}
@@ -497,10 +497,10 @@ func TestPoolSelect_PinnedAccount_MultipleMatches(t *testing.T) {
 
 	// Use round-robin selector to verify strategy operates within pinned subset
 	sel := &RoundRobinSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	// First pinned selection should be first in sorted order
-	got, err := pool.Select("shared@example.com", nil)
+	got, err := pool.Select("shared@example.com", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -520,9 +520,9 @@ func TestPoolSelect_PinnedAccount_EmptyPinSelectsAll(t *testing.T) {
 	tokens[1].path = "/tmp/bob.json"
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
-	got, err := pool.Select("", nil)
+	got, err := pool.Select("", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,10 +540,10 @@ func TestPoolSelect_PinnedAccount_ExclusionSet(t *testing.T) {
 	tokens[1].path = "/tmp/bob.json"
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	// Exclude alice, pin to nothing → should get bob
-	got, err := pool.Select("", map[string]bool{"/tmp/alice.json": true})
+	got, err := pool.Select("", map[string]bool{"/tmp/alice.json": true}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -565,7 +565,7 @@ func TestPoolSelect_ConcurrentRaceClean(t *testing.T) {
 	tokens[2].path = "/tmp/charlie.json"
 
 	sel := &RoundRobinSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	var wg sync.WaitGroup
 	const n = 200
@@ -573,7 +573,7 @@ func TestPoolSelect_ConcurrentRaceClean(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			entry, err := pool.Select("", nil)
+			entry, err := pool.Select("", nil, "")
 			if err != nil {
 				t.Errorf("select failed: %v", err)
 				return
@@ -603,7 +603,7 @@ func TestPoolSelect_ConcurrentSelectAndReload(t *testing.T) {
 	tokens[1].path = "/tmp/bob.json"
 
 	sel := &RoundRobinSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	var wg sync.WaitGroup
 	// Concurrent selections
@@ -611,7 +611,7 @@ func TestPoolSelect_ConcurrentSelectAndReload(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = pool.Select("", nil)
+			_, _ = pool.Select("", nil, "")
 		}()
 	}
 	// Concurrent reloads
@@ -637,14 +637,14 @@ func TestPoolSelect_ConcurrentSelectAndMark(t *testing.T) {
 	tokens[1].path = "/tmp/bob.json"
 
 	sel := &RoundRobinSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
 		wg.Add(3)
 		go func() {
 			defer wg.Done()
-			_, _ = pool.Select("", nil)
+			_, _ = pool.Select("", nil, "")
 		}()
 		go func() {
 			defer wg.Done()
@@ -749,11 +749,11 @@ func TestPoolSelect_RoundRobinIntegration(t *testing.T) {
 	tokens[2].path = "/tmp/charlie.json"
 
 	sel := &RoundRobinSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	expected := []string{"alice@example.com", "bob@example.com", "charlie@example.com", "alice@example.com"}
 	for i, want := range expected {
-		got, err := pool.Select("", nil)
+		got, err := pool.Select("", nil, "")
 		if err != nil {
 			t.Fatalf("select %d: %v", i, err)
 		}
@@ -772,10 +772,10 @@ func TestPoolSelect_FillFirstIntegration(t *testing.T) {
 	tokens[1].path = "/tmp/bob.json"
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	for i := 0; i < 5; i++ {
-		got, err := pool.Select("", nil)
+		got, err := pool.Select("", nil, "")
 		if err != nil {
 			t.Fatalf("select %d: %v", i, err)
 		}
@@ -794,10 +794,10 @@ func TestPoolSelect_LeastConnectionsIntegration(t *testing.T) {
 	tokens[1].path = "/tmp/bob.json"
 
 	sel := &LeastConnectionsSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	// Both start at 0 in-flight → picks first (alice)
-	got, err := pool.Select("", nil)
+	got, err := pool.Select("", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -809,7 +809,7 @@ func TestPoolSelect_LeastConnectionsIntegration(t *testing.T) {
 	_ = pool.Begin("/tmp/alice.json")
 
 	// Now alice has 1, bob has 0 → picks bob
-	got, err = pool.Select("", nil)
+	got, err = pool.Select("", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -832,11 +832,11 @@ func TestPoolSelect_RandomIntegration(t *testing.T) {
 
 	rng := rand.New(rand.NewSource(99))
 	sel := &RandomSelector{rng: rng}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	seen := make(map[string]bool)
 	for i := 0; i < 100; i++ {
-		got, err := pool.Select("", nil)
+		got, err := pool.Select("", nil, "")
 		if err != nil {
 			t.Fatalf("select %d: %v", i, err)
 		}
@@ -855,9 +855,9 @@ func TestPoolSelect_NoEligibleReturnsTypedError(t *testing.T) {
 	tokens[0].Disabled = true
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
-	_, err := pool.Select("", nil)
+	_, err := pool.Select("", nil, "")
 	if !errors.Is(err, ErrNoEligibleAccounts) {
 		t.Fatalf("expected ErrNoEligibleAccounts, got %v", err)
 	}
@@ -913,10 +913,10 @@ func TestPoolSelect_FailedSelectionNoMutation(t *testing.T) {
 	tokens[0].Disabled = true
 
 	sel := &RoundRobinSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	snapBefore := pool.Snapshot()
-	_, err := pool.Select("", nil)
+	_, err := pool.Select("", nil, "")
 	if err == nil {
 		t.Fatal("expected error for no eligible accounts")
 	}
@@ -936,7 +936,7 @@ func TestPoolSelect_NoSecretLeakage(t *testing.T) {
 	tokens[0].path = "/tmp/user.json"
 
 	sel := &FillFirstSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	snap := pool.Snapshot()
 	snapJSON := fmt.Sprintf("%+v", snap)
@@ -971,7 +971,7 @@ func TestPoolSelect_ConcurrentLeastConnections(t *testing.T) {
 	tokens[2].path = "/tmp/charlie.json"
 
 	sel := &LeastConnectionsSelector{}
-	pool := NewAccountPool(tokens, fakeTime, sel)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil, sel)
 
 	var wg sync.WaitGroup
 	const workers = 50
@@ -982,7 +982,7 @@ func TestPoolSelect_ConcurrentLeastConnections(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < cyclesPerWorker; i++ {
-				entry, err := pool.Select("", nil)
+				entry, err := pool.Select("", nil, "")
 				if err != nil {
 					t.Errorf("select failed: %v", err)
 					return

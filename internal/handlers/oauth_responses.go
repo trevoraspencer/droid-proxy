@@ -180,7 +180,15 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		// Select an eligible account excluding already-tried paths.
-		entry, selErr := a.Pool.Select(m.OAuthAccount, tried)
+		entry, selErr := a.Pool.Select(m.OAuthAccount, tried, codexConversation)
+		if entry != nil && attempt > 0 {
+			a.Logger.WithFields(map[string]any{
+				"conversation_id": codexConversation,
+				"account":           entry.Selector,
+				"attempt":           attempt + 1,
+				"failover":          true,
+			}).Trace("codex account failover")
+		}
 		if selErr != nil {
 			// No eligible accounts left.
 			break
@@ -269,6 +277,7 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 
 		// Success path.
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			a.Pool.BindConversation(codexConversation, entry.Path)
 			if downstreamStream {
 				a.forwardOAuthResponsesStreamAndRelease(c, m, resp, token, entry.Path)
 				return
@@ -384,6 +393,12 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		if isRetryableCodexStatus(resp.StatusCode) {
 			if resp.StatusCode == http.StatusTooManyRequests {
 				cooldownUntil := codexRateLimitCooldown(resp.Header, quota, rateLimitCooldown)
+				if bodyQuota := oauth.ParseCodexUsageLimitFromBody(raw); bodyQuota != nil {
+					a.recordCodexUsage(token, bodyQuota, nil)
+					if reset := oauth.LatestQuotaReset(bodyQuota); reset != nil && reset.After(time.Now()) {
+						cooldownUntil = *reset
+					}
+				}
 				a.Pool.MarkRateLimited(entry.Path, cooldownUntil)
 			} else {
 				a.Pool.MarkCooldown(entry.Path, time.Now().Add(errorCooldown))

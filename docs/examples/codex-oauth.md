@@ -50,7 +50,8 @@ a configurable strategy. Configure under `oauth.load_balancing` in `config.yaml`
 ```yaml
 oauth:
   load_balancing:
-    strategy: round-robin    # round-robin, fill-first, least-connections, random
+    strategy: sticky           # sticky (default), round-robin, fill-first, least-connections, random
+    quota_soft_cap_percent: 80 # prefer accounts below this usage (0 = off)
     max_failovers: 2         # additional alternate-account attempts
     rate_limit_cooldown: 60s # cooldown after 429 without Retry-After
     error_cooldown: 30s      # cooldown after 5xx or transport timeout

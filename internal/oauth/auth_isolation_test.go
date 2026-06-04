@@ -75,7 +75,7 @@ func TestAccountManagement_DisableCodexReflectsInPool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pool := NewAccountPool([]*Token{loaded}, fakeTime)
+	pool := NewAccountPool([]*Token{loaded}, fakeTime, TestPoolLB(), nil)
 
 	// Initially eligible
 	if len(pool.Eligible(nil)) != 1 {
@@ -131,7 +131,7 @@ func TestAccountManagement_EnableCodexRestoresEligibility(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pool := NewAccountPool([]*Token{loaded}, fakeTime)
+	pool := NewAccountPool([]*Token{loaded}, fakeTime, TestPoolLB(), nil)
 
 	// Disable
 	_, err = mgr.SetTokenDisabled(ProviderCodex, "user@example.com", true)
@@ -181,7 +181,7 @@ func TestAccountManagement_LogoutCodexReflectsInPool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool := NewAccountPool(tokens, fakeTime)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil)
 	if len(pool.Snapshot().Accounts) != 2 {
 		t.Fatalf("expected 2 accounts initially, got %d", len(pool.Snapshot().Accounts))
 	}
@@ -237,7 +237,7 @@ func TestAccountManagement_XAIRemainsSingleAccount(t *testing.T) {
 
 	// Codex pool should only contain Codex tokens
 	codexTokens, _ := mgr.LoadTokens(ProviderCodex)
-	pool := NewAccountPool(codexTokens, fakeTime)
+	pool := NewAccountPool(codexTokens, fakeTime, TestPoolLB(), nil)
 	snap := pool.Snapshot()
 	if len(snap.Accounts) != 1 {
 		t.Fatalf("expected 1 Codex account in pool, got %d", len(snap.Accounts))
@@ -362,7 +362,7 @@ func TestPoolRuntimeStateNotPersistedToTokenJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pool := NewAccountPool([]*Token{loaded}, fakeTime)
+	pool := NewAccountPool([]*Token{loaded}, fakeTime, TestPoolLB(), nil)
 
 	// Apply various runtime state changes
 	pool.Begin(path)
@@ -572,7 +572,7 @@ func TestWatcherReloadDoesNotMutateTokenFileWithRuntimeState(t *testing.T) {
 	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
 	path := saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -641,7 +641,7 @@ func TestAccountManagement_MultipleCodexDisableLogoutSequence(t *testing.T) {
 	mgr.SaveToken(tok3)
 
 	tokens, _ := mgr.LoadTokens(ProviderCodex)
-	pool := NewAccountPool(tokens, fakeTime)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil)
 
 	if len(pool.Eligible(nil)) != 3 {
 		t.Fatalf("expected 3 eligible initially, got %d", len(pool.Eligible(nil)))
@@ -703,7 +703,7 @@ func TestRecordCodexUsageDoesNotLeakRuntimeState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pool := NewAccountPool([]*Token{loaded}, fakeTime)
+	pool := NewAccountPool([]*Token{loaded}, fakeTime, TestPoolLB(), nil)
 
 	// Apply runtime state
 	pool.Begin(path)

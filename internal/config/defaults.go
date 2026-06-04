@@ -80,7 +80,7 @@ func (c *Config) applyDefaults() {
 		c.OAuth.XAICallbackPort = 56121
 	}
 	if !c.wasPresent("oauth.load_balancing.strategy") && c.OAuth.LoadBalancing.Strategy == "" {
-		c.OAuth.LoadBalancing.Strategy = LoadBalancingRoundRobin
+		c.OAuth.LoadBalancing.Strategy = LoadBalancingSticky
 	}
 	if !c.wasPresent("oauth.load_balancing.max_failovers") && c.OAuth.LoadBalancing.MaxFailovers == 0 {
 		c.OAuth.LoadBalancing.MaxFailovers = 2
@@ -90,6 +90,15 @@ func (c *Config) applyDefaults() {
 	}
 	if !c.wasPresent("oauth.load_balancing.error_cooldown") && c.OAuth.LoadBalancing.ErrorCooldown == 0 {
 		c.OAuth.LoadBalancing.ErrorCooldown = 30 * time.Second
+	}
+	if !c.wasPresent("oauth.load_balancing.quota_soft_cap_percent") && c.OAuth.LoadBalancing.QuotaSoftCapPercent == 0 {
+		c.OAuth.LoadBalancing.QuotaSoftCapPercent = 80
+	}
+	if !c.wasPresent("oauth.load_balancing.affinity_max_entries") && c.OAuth.LoadBalancing.AffinityMaxEntries == 0 {
+		c.OAuth.LoadBalancing.AffinityMaxEntries = 10000
+	}
+	if !c.wasPresent("oauth.load_balancing.affinity_ttl") && c.OAuth.LoadBalancing.AffinityTTL == 0 {
+		c.OAuth.LoadBalancing.AffinityTTL = 720 * time.Hour
 	}
 }
 

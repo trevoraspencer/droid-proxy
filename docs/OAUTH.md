@@ -159,10 +159,21 @@ Log in multiple times with different accounts. Each saves a separate file.
 
 For **Codex OAuth**, the proxy uses an in-memory account pool with configurable
 load balancing (see `oauth.load_balancing` in [CONFIG.md](CONFIG.md#oauthload_balancing)).
-When multiple Codex accounts are available, the proxy selects among them
-according to the configured strategy and can fail over on retryable errors
-(429, 5xx, transport timeout) within the configured `max_failovers` budget.
-Pinned models (`oauth_account` set) restrict selection to the matching subset.
+The default **`sticky`** strategy binds each Droid conversation (from
+`session_id` / `prompt_cache_key`) to one Codex account until that account is
+rate-limited or unhealthy, then fails over and re-binds to the next eligible
+account. Bindings persist in `~/.droid-proxy/conversation_affinity.json`.
+When multiple Codex accounts are available, the proxy can fail over on retryable
+errors (429, 5xx, transport timeout) within the configured `max_failovers`
+budget. Pinned models (`oauth_account` set) restrict selection to the matching
+subset.
+
+Check pool status:
+
+```bash
+curl -s http://127.0.0.1:8787/v1/oauth/pool-health | jq .
+droid-proxy auth pool --config config.yaml
+```
 
 For **xAI OAuth**, the proxy uses the existing single-account path; xAI accounts
 are not pooled or load-balanced.

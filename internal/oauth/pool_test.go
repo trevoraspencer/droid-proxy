@@ -86,7 +86,7 @@ func TestPoolSnapshot_ExposesOnlySafeCodexEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pool := NewAccountPool([]*Token{codexTok, xaiTok}, fakeTime)
+	pool := NewAccountPool([]*Token{codexTok, xaiTok}, fakeTime, TestPoolLB(), nil)
 	snap := pool.Snapshot()
 
 	// Only one account in snapshot (Codex)
@@ -142,7 +142,7 @@ func TestPoolEligibility_DisabledAccountIneligible(t *testing.T) {
 	enabledTok := makeToken("enabled@example.com", "access-b", "refresh-b", false)
 	saveTokenFile(t, dir, enabledTok)
 
-	pool := NewAccountPool([]*Token{disabledTok, enabledTok}, fakeTime)
+	pool := NewAccountPool([]*Token{disabledTok, enabledTok}, fakeTime, TestPoolLB(), nil)
 	eligible := pool.Eligible(nil)
 
 	if len(eligible) != 1 {
@@ -165,7 +165,7 @@ func TestPoolEligibility_ExcludedAccountSkipped(t *testing.T) {
 	tok2 := makeToken("b@example.com", "access-b", "refresh-b", false)
 	tok2.path = "/tmp/b.json"
 
-	pool := NewAccountPool([]*Token{tok1, tok2}, fakeTime)
+	pool := NewAccountPool([]*Token{tok1, tok2}, fakeTime, TestPoolLB(), nil)
 	exclude := map[string]bool{tok1.path: true}
 	eligible := pool.Eligible(exclude)
 
@@ -182,7 +182,7 @@ func TestPoolEligibility_CooldownUntilExpiry(t *testing.T) {
 	tok.path = "/tmp/a.json"
 
 	now := fakeTime()
-	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now })
+	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now }, TestPoolLB(), nil)
 
 	// Mark cooldown in the future
 	pool.MarkCooldown(tok.path, now.Add(30*time.Second))
@@ -205,7 +205,7 @@ func TestPoolEligibility_RateLimitedUntilExpiry(t *testing.T) {
 	tok.path = "/tmp/a.json"
 
 	now := fakeTime()
-	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now })
+	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now }, TestPoolLB(), nil)
 
 	// Mark rate-limited in the future
 	pool.MarkRateLimited(tok.path, now.Add(60*time.Second))
@@ -227,7 +227,7 @@ func TestPoolEligibility_UnhealthyIneligible(t *testing.T) {
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	tok.path = "/tmp/a.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	pool.MarkUnhealthy(tok.path)
 
 	eligible := pool.Eligible(nil)
@@ -242,7 +242,7 @@ func TestPoolLease_BeginEndBalanced(t *testing.T) {
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	tok.path = "/tmp/a.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 
 	// Before lease
 	snap := pool.Snapshot()
@@ -274,7 +274,7 @@ func TestPoolLease_DoubleReleaseClampsToZero(t *testing.T) {
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	tok.path = "/tmp/a.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 
 	pool.Begin(tok.path)
 	pool.End(tok.path)
@@ -290,7 +290,7 @@ func TestPoolLease_EndNonexistentPathIsSafe(t *testing.T) {
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	tok.path = "/tmp/a.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	pool.End("/tmp/nonexistent.json") // should not panic
 
 	snap := pool.Snapshot()
@@ -303,7 +303,7 @@ func TestPoolLease_ConcurrentBeginEnd(t *testing.T) {
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	tok.path = "/tmp/a.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 
 	var wg sync.WaitGroup
 	const n = 100
@@ -331,7 +331,7 @@ func TestPoolLease_ConcurrentLeastConnectionsDoesNotStampede(t *testing.T) {
 		tokens[i].path = fmt.Sprintf("/tmp/user%d.json", i)
 	}
 
-	pool := NewAccountPool(tokens, fakeTime)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil)
 	eligible := pool.Eligible(nil)
 	if len(eligible) != 3 {
 		t.Fatalf("expected 3 eligible, got %d", len(eligible))
@@ -389,7 +389,7 @@ func TestPoolReload_PreservesRuntimeStateByPath(t *testing.T) {
 	path := saveTokenFile(t, dir, tok)
 
 	now := fakeTime()
-	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now })
+	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now }, TestPoolLB(), nil)
 
 	// Establish some runtime state
 	pool.MarkCooldown(path, now.Add(30*time.Second))
@@ -427,7 +427,7 @@ func TestPoolReload_AddsNewEntry(t *testing.T) {
 	tok1 := makeToken("user1@example.com", "access-1", "refresh-1", false)
 	saveTokenFile(t, dir, tok1)
 
-	pool := NewAccountPool([]*Token{tok1}, fakeTime)
+	pool := NewAccountPool([]*Token{tok1}, fakeTime, TestPoolLB(), nil)
 	if len(pool.Snapshot().Accounts) != 1 {
 		t.Fatalf("expected 1 account initially")
 	}
@@ -449,7 +449,7 @@ func TestPoolReload_RemovesDeletedEntry(t *testing.T) {
 	tok2 := makeToken("user2@example.com", "access-2", "refresh-2", false)
 	saveTokenFile(t, dir, tok2)
 
-	pool := NewAccountPool([]*Token{tok1, tok2}, fakeTime)
+	pool := NewAccountPool([]*Token{tok1, tok2}, fakeTime, TestPoolLB(), nil)
 	if len(pool.Snapshot().Accounts) != 2 {
 		t.Fatalf("expected 2 accounts initially")
 	}
@@ -469,7 +469,7 @@ func TestPoolReload_SamePathIdentityChange_UpdatesImmediately(t *testing.T) {
 	tok := makeToken("old@example.com", "access-old", "refresh-old", false)
 	path := saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	snap := pool.Snapshot()
 	if snap.Accounts[0].Selector != "old@example.com" {
 		t.Fatalf("initial selector = %q, want old@example.com", snap.Accounts[0].Selector)
@@ -491,7 +491,7 @@ func TestPoolReload_SamePathProviderChange_RemovesFromCodexSelection(t *testing.
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	path := saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	if len(pool.Eligible(nil)) != 1 {
 		t.Fatalf("expected 1 eligible initially")
 	}
@@ -519,7 +519,7 @@ func TestPoolEligibility_ExpiredRefreshableAccountEligible(t *testing.T) {
 	tok := makeToken("user@example.com", "access-expired", "refresh-available", true)
 	tok.path = "/tmp/expired.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	eligible := pool.Eligible(nil)
 
 	if len(eligible) != 1 {
@@ -537,7 +537,7 @@ func TestPoolEligibility_ExpiredNoRefreshIneligible(t *testing.T) {
 	tok := makeToken("user@example.com", "access-expired", "", true)
 	tok.path = "/tmp/expired-no-refresh.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	eligible := pool.Eligible(nil)
 
 	if len(eligible) != 0 {
@@ -561,7 +561,7 @@ func TestPoolPersistedRateLimit_ExhaustedQuotaMakesIneligible(t *testing.T) {
 	tok.RateLimitResetAt = fakeTime().Add(60 * time.Second).UTC().Format(time.RFC3339)
 	path := saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	eligible := pool.Eligible(nil)
 	if len(eligible) != 0 {
 		t.Fatalf("expected 0 eligible (exhausted quota with future reset), got %d", len(eligible))
@@ -588,7 +588,7 @@ func TestPoolPersistedRateLimit_NonExhaustedQuotaDoesNotSuppress(t *testing.T) {
 	tok.RateLimitResetAt = fakeTime().Add(60 * time.Second).UTC().Format(time.RFC3339)
 	tok.path = "/tmp/partial.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	eligible := pool.Eligible(nil)
 	if len(eligible) != 1 {
 		t.Fatalf("expected 1 eligible (non-exhausted quota), got %d", len(eligible))
@@ -608,7 +608,7 @@ func TestPoolPersistedRateLimit_PastResetIgnored(t *testing.T) {
 	tok.RateLimitResetAt = fakeTime().Add(-60 * time.Second).UTC().Format(time.RFC3339)
 	tok.path = "/tmp/past.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	eligible := pool.Eligible(nil)
 	if len(eligible) != 1 {
 		t.Fatalf("expected 1 eligible (past reset), got %d", len(eligible))
@@ -620,7 +620,7 @@ func TestPoolPersistedRateLimit_MalformedResetIgnored(t *testing.T) {
 	tok.RateLimitResetAt = "not-a-valid-time"
 	tok.path = "/tmp/malformed.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	eligible := pool.Eligible(nil)
 	if len(eligible) != 1 {
 		t.Fatalf("expected 1 eligible (malformed reset), got %d", len(eligible))
@@ -633,7 +633,7 @@ func TestPoolPersistedRateLimit_Runtime429CooldownPreservedAcrossReload(t *testi
 	path := saveTokenFile(t, dir, tok)
 
 	now := fakeTime()
-	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now })
+	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now }, TestPoolLB(), nil)
 
 	// Simulate runtime 429 cooldown
 	pool.MarkRateLimited(path, now.Add(60*time.Second))
@@ -656,7 +656,7 @@ func TestPoolUnhealthyRecovery_ViaTokenReload(t *testing.T) {
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	path := saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	pool.MarkUnhealthy(path)
 
 	if len(pool.Eligible(nil)) != 0 {
@@ -679,7 +679,7 @@ func TestPoolUnhealthyRecovery_ViaCooldownExpiry(t *testing.T) {
 	tok.path = "/tmp/recovery.json"
 
 	now := fakeTime()
-	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now })
+	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now }, TestPoolLB(), nil)
 
 	pool.MarkUnhealthy(tok.path)
 	if len(pool.Eligible(nil)) != 0 {
@@ -697,7 +697,7 @@ func TestPoolUnhealthyRecovery_ExposedInSnapshot(t *testing.T) {
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	tok.path = "/tmp/health.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 
 	// Initially healthy
 	snap := pool.Snapshot()
@@ -725,7 +725,7 @@ func TestPoolSnapshot_DeterministicOrdering(t *testing.T) {
 	tokens[1].path = "/tmp/a.json"
 	tokens[2].path = "/tmp/b.json"
 
-	pool := NewAccountPool(tokens, fakeTime)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil)
 	snap := pool.Snapshot()
 
 	// Should be sorted alphabetically by selector
@@ -762,7 +762,7 @@ func TestPoolSnapshot_DuplicateLabelsDistinguishableByOrder(t *testing.T) {
 		},
 	}
 
-	pool := NewAccountPool([]*Token{tok1, tok2}, fakeTime)
+	pool := NewAccountPool([]*Token{tok1, tok2}, fakeTime, TestPoolLB(), nil)
 
 	// Repeated snapshots must produce the same deterministic order.
 	// The Path-based tie-break sorts "/tmp/alpha.json" before "/tmp/beta.json",
@@ -806,7 +806,7 @@ func TestPoolSnapshot_EmptyLabelFallback(t *testing.T) {
 	}
 	tok.path = "/tmp/codex-oauth-token.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	snap := pool.Snapshot()
 
 	if len(snap.Accounts) != 1 {
@@ -829,7 +829,7 @@ func TestPoolSnapshot_Immutable(t *testing.T) {
 		},
 	}
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	snap1 := pool.Snapshot()
 
 	// Mutate the snapshot
@@ -862,7 +862,7 @@ func TestPoolSnapshot_MutatingQuotaWindowDoesNotAffectPool(t *testing.T) {
 		},
 	}
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 
 	snap := pool.Snapshot()
 	// Mutate the quota in the snapshot
@@ -885,7 +885,7 @@ func TestPoolFailedSelection_NoMutation(t *testing.T) {
 	tok.Disabled = true
 	tok.path = "/tmp/disabled.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	snapBefore := pool.Snapshot()
 
 	// Try to get eligible - should be empty
@@ -906,7 +906,7 @@ func TestPoolFailedSelection_AllCooledDown_NoMutation(t *testing.T) {
 	tok.path = "/tmp/cooled.json"
 
 	now := fakeTime()
-	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now })
+	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now }, TestPoolLB(), nil)
 
 	pool.MarkCooldown(tok.path, now.Add(time.Hour))
 	snapBefore := pool.Snapshot()
@@ -926,7 +926,7 @@ func TestPoolFailedSelection_AllExcluded_NoMutation(t *testing.T) {
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	tok.path = "/tmp/excluded.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	snapBefore := pool.Snapshot()
 
 	exclude := map[string]bool{tok.path: true}
@@ -947,7 +947,7 @@ func TestPoolFailedSelection_AllExcluded_NoMutation(t *testing.T) {
 // ---- Edge cases and helpers ----
 
 func TestPoolSnapshot_EmptyPool(t *testing.T) {
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 	snap := pool.Snapshot()
 	if snap == nil {
 		t.Fatal("expected non-nil snapshot")
@@ -958,7 +958,7 @@ func TestPoolSnapshot_EmptyPool(t *testing.T) {
 }
 
 func TestPoolEligibility_EmptyPool(t *testing.T) {
-	pool := NewAccountPool(nil, fakeTime)
+	pool := NewAccountPool(nil, fakeTime, TestPoolLB(), nil)
 	eligible := pool.Eligible(nil)
 	if len(eligible) != 0 {
 		t.Fatalf("expected 0 eligible, got %d", len(eligible))
@@ -1001,7 +1001,7 @@ func TestPoolReload_UpdatesDisabledState(t *testing.T) {
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	path := saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 	if len(pool.Eligible(nil)) != 1 {
 		t.Fatal("expected 1 eligible initially")
 	}
@@ -1031,7 +1031,7 @@ func TestPoolReload_UpdatesQuotaMetadata(t *testing.T) {
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	path := saveTokenFile(t, dir, tok)
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime)
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
 
 	// Reload with quota metadata
 	quotaTok := makeToken("user@example.com", "access-a", "refresh-a", false)
@@ -1096,7 +1096,7 @@ func TestEnabledCodexCount(t *testing.T) {
 		tokens = append(tokens, &tok)
 	}
 
-	pool := NewAccountPool(tokens, fakeTime)
+	pool := NewAccountPool(tokens, fakeTime, TestPoolLB(), nil)
 
 	count := pool.EnabledCodexCount()
 	if count != 2 {

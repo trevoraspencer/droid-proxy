@@ -28,9 +28,16 @@ func (a *API) PoolHealth(c *gin.Context) {
 		accounts = append(accounts, snap.Accounts[i])
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"object":   "oauth_pool_health",
-		"provider": "codex",
-		"accounts": accounts,
-	})
+	out := gin.H{
+		"object":              "oauth_pool_health",
+		"provider":            "codex",
+		"strategy":            snap.Strategy,
+		"codex_account_count": snap.CodexAccounts,
+		"eligible_count":      snap.EligibleCount,
+		"accounts":            accounts,
+	}
+	if snap.Affinity != nil {
+		out["affinity"] = snap.Affinity
+	}
+	c.JSON(http.StatusOK, out)
 }

@@ -173,7 +173,7 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Sprintf("oauth.xai_callback_host %q is not loopback", c.OAuth.XAICallbackHost))
 	}
 	if lb := c.OAuth.LoadBalancing; lb.Strategy != "" && !lb.Strategy.IsValid() {
-		errs = append(errs, fmt.Sprintf("oauth.load_balancing.strategy %q is invalid (must be one of: round-robin, fill-first, least-connections, random)", lb.Strategy))
+		errs = append(errs, fmt.Sprintf("oauth.load_balancing.strategy %q is invalid (must be one of: round-robin, fill-first, least-connections, random, sticky)", lb.Strategy))
 	}
 	if c.OAuth.LoadBalancing.MaxFailovers < 0 {
 		errs = append(errs, "oauth.load_balancing.max_failovers must not be negative")
@@ -183,6 +183,15 @@ func (c *Config) Validate() error {
 	}
 	if c.OAuth.LoadBalancing.ErrorCooldown < 0 {
 		errs = append(errs, "oauth.load_balancing.error_cooldown must not be negative")
+	}
+	if c.OAuth.LoadBalancing.QuotaSoftCapPercent < 0 || c.OAuth.LoadBalancing.QuotaSoftCapPercent > 100 {
+		errs = append(errs, "oauth.load_balancing.quota_soft_cap_percent must be between 0 and 100")
+	}
+	if c.OAuth.LoadBalancing.AffinityMaxEntries < 0 {
+		errs = append(errs, "oauth.load_balancing.affinity_max_entries must not be negative")
+	}
+	if c.OAuth.LoadBalancing.AffinityTTL < 0 {
+		errs = append(errs, "oauth.load_balancing.affinity_ttl must not be negative")
 	}
 	if len(c.Models) == 0 {
 		errs = append(errs, "at least one model must be configured")
