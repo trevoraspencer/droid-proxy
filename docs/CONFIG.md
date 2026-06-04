@@ -156,6 +156,20 @@ permissions and token values are never logged by the auth commands.
 | `xai_callback_host` | string | `127.0.0.1` | Loopback host for xAI OAuth login. |
 | `xai_callback_port` | int | `56121` | Loopback port for xAI OAuth login. |
 
+### `oauth.load_balancing`
+
+Codex OAuth multi-account pooling configuration. This block applies **only** to
+Codex OAuth (`codex-responses`) accounts. xAI OAuth remains single-account and
+is unaffected by these settings. All four fields have defaults; omit the block
+or any individual field to use defaults.
+
+| key | type | default | description |
+|---|---|---|---|
+| `strategy` | enum | `round-robin` | Account selection strategy: `round-robin`, `fill-first`, `least-connections`, or `random`. |
+| `max_failovers` | int | `2` | Maximum additional alternate-account attempts on retryable errors. `max_failovers=0` disables failover (single attempt only). |
+| `rate_limit_cooldown` | duration | `60s` | Cooldown after a `429` when no `Retry-After` header or quota reset is available. `0s` means no cooldown. |
+| `error_cooldown` | duration | `30s` | Cooldown after `5xx` or transport timeout. `0s` means no cooldown. |
+
 Authenticate before starting the proxy:
 
 ```bash

@@ -50,6 +50,14 @@ oauth:
   codex_callback_port: 1455
   xai_callback_host: 127.0.0.1
   xai_callback_port: 56121
+  # Load balancing for Codex OAuth multi-account pooling.
+  # Does not apply to xAI OAuth (single-account only).
+  # All fields have defaults; omit the block or individual fields to use defaults.
+  # load_balancing:
+  #   strategy: round-robin            # round-robin, fill-first, least-connections, random
+  #   max_failovers: 2                 # additional alternate-account attempts (0 = single attempt only)
+  #   rate_limit_cooldown: 60s         # cooldown after 429 when no Retry-After / quota reset
+  #   error_cooldown: 30s              # cooldown after 5xx or transport timeout
 
 models:
   # Example: DeepSeek via Factory's generic-chat-completion-api mode.

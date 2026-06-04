@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -421,4 +422,252 @@ func dedent(s string) string {
 		}
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+// VAL-CONFIG-006: Example config and docs describe the same load-balancing contract.
+
+func TestDocsConfigExampleDocumentsLoadBalancing(t *testing.T) {
+	body := readRepoRel(t, "config.example.yaml")
+	for _, want := range []string{
+		"load_balancing",
+		"strategy",
+		"max_failovers",
+		"rate_limit_cooldown",
+		"error_cooldown",
+		"round-robin",
+		"fill-first",
+		"least-connections",
+		"random",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("config.example.yaml must mention %q", want)
+		}
+	}
+	// Codex-only scope note must be present.
+	if !strings.Contains(body, "Codex") && !strings.Contains(body, "codex") {
+		t.Fatal("config.example.yaml load_balancing comment must mention Codex-only scope")
+	}
+	// xAI must not be claimed to be pooled within the load_balancing section.
+	// Explicit exclusion wording like "does not apply to xAI" is fine.
+	lbSection := body[strings.Index(body, "load_balancing"):]
+	for _, bad := range []string{
+		"xAI pool",
+		"xAI pooling",
+		"xAI load_balancing",
+	} {
+		if strings.Contains(lbSection, bad) {
+			t.Fatalf("config.example.yaml load_balancing section must not claim xAI pooling (found %q)", bad)
+		}
+	}
+}
+
+func TestDocsConfigMDocumentsLoadBalancing(t *testing.T) {
+	body := readRepoRel(t, "docs/CONFIG.md")
+	for _, want := range []string{
+		"oauth.load_balancing",
+		"strategy",
+		"max_failovers",
+		"rate_limit_cooldown",
+		"error_cooldown",
+		"round-robin",
+		"fill-first",
+		"least-connections",
+		"random",
+		"60s",
+		"30s",
+		"max_failovers=0",
+		"0s",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("docs/CONFIG.md must document %q", want)
+		}
+	}
+	// Must state Codex-only scope.
+	if !strings.Contains(body, "Codex") && !strings.Contains(body, "codex") {
+		t.Fatal("docs/CONFIG.md oauth.load_balancing section must mention Codex-only scope")
+	}
+	// Must state xAI is unaffected / single-account.
+	if !strings.Contains(body, "xAI") && !strings.Contains(body, "xai") {
+		t.Fatal("docs/CONFIG.md oauth.load_balancing section must mention xAI is unaffected")
+	}
+}
+
+func TestDocsOAuthMentionsLoadBalancingAndCodexPool(t *testing.T) {
+	body := readRepoRel(t, "docs/OAUTH.md")
+	// Must reference the load_balancing config.
+	if !strings.Contains(body, "load_balancing") {
+		t.Fatal("docs/OAUTH.md must reference oauth.load_balancing")
+	}
+	// Must mention Codex account pool.
+	if !strings.Contains(body, "pool") && !strings.Contains(body, "Pool") {
+		t.Fatal("docs/OAUTH.md must mention the Codex account pool")
+	}
+	// Must NOT claim xAI pooling.
+	for _, bad := range []string{
+		"xAI pool",
+		"xAI pooling",
+		"xAI load_balancing",
+		"xAI load-balancing",
+		"xAI pool selection",
+		"not used for load balancing yet",
+	} {
+		if strings.Contains(body, bad) {
+			t.Fatalf("docs/OAUTH.md must not contain stale/incorrect claim %q", bad)
+		}
+	}
+	// Must NOT contain stale "first valid account" unqualified wording.
+	// The only remaining "first valid" references should be xAI-specific.
+	for _, block := range fencedBlocks(body, "yaml") {
+		if strings.Contains(block, "first valid") {
+			t.Fatalf("docs/OAUTH.md YAML blocks must not contain stale 'first valid' wording:\n%s", block)
+		}
+	}
+}
+
+func TestDocsProvidersMentionsCodexPoolNotXaiPool(t *testing.T) {
+	body := readRepoRel(t, "docs/PROVIDERS.md")
+	// Must mention load_balancing or account pool for Codex.
+	if !strings.Contains(body, "load_balancing") && !strings.Contains(body, "account pool") {
+		t.Fatal("docs/PROVIDERS.md must reference load_balancing or account pool for Codex")
+	}
+	// Must NOT claim xAI pooling.
+	for _, bad := range []string{
+		"xAI pool",
+		"xAI pooling",
+		"xAI load_balancing",
+		"not used for load balancing yet",
+	} {
+		if strings.Contains(body, bad) {
+			t.Fatalf("docs/PROVIDERS.md must not contain stale/incorrect claim %q", bad)
+		}
+	}
+}
+
+func TestDocsCodexOAuthExampleDocumentsLoadBalancing(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/codex-oauth.md")
+	for _, want := range []string{
+		"load_balancing",
+		"strategy",
+		"round-robin",
+		"max_failovers",
+		"rate_limit_cooldown",
+		"error_cooldown",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("docs/examples/codex-oauth.md must mention %q", want)
+		}
+	}
+	// Must state Codex-only scope.
+	if !strings.Contains(body, "Codex only") && !strings.Contains(body, "Codex-only") {
+		t.Fatal("docs/examples/codex-oauth.md must state load balancing is Codex-only")
+	}
+}
+
+func TestDocsNoStaleQuotaNotUsedForLoadBalancing(t *testing.T) {
+	// All docs must not claim quota hints are "not used for load balancing"
+	// or contain "yet" qualifiers that suggest future pooling.
+	for _, rel := range []string{
+		"README.md",
+		"docs/CONFIG.md",
+		"docs/OAUTH.md",
+		"docs/PROVIDERS.md",
+		"docs/CLI.md",
+		"docs/SMOKE.md",
+		"docs/examples/codex-oauth.md",
+		"docs/examples/xai-oauth.md",
+		"config.example.yaml",
+	} {
+		body := readRepoRel(t, rel)
+		for _, stale := range []string{
+			"not used for load balancing",
+			"not used for load-balancing",
+			"load balancing yet",
+			"pooling yet",
+		} {
+			if strings.Contains(body, stale) {
+				t.Fatalf("%s contains stale wording %q", rel, stale)
+			}
+		}
+	}
+}
+
+func TestDocsNoStaleFirstValidOnlyUnpinnedCodex(t *testing.T) {
+	// Codex docs must not say unpinned OAuth "always uses the first valid account".
+	// xAI docs may still say "first valid" since xAI is single-account.
+	codexDocs := []string{
+		"docs/OAUTH.md",
+		"docs/PROVIDERS.md",
+		"docs/examples/codex-oauth.md",
+	}
+	for _, rel := range codexDocs {
+		body := readRepoRel(t, rel)
+		// Check for "first valid account" in a Codex context (not xAI).
+		// Allow it only in xAI-qualified sentences.
+		for _, line := range strings.Split(body, "\n") {
+			lower := strings.ToLower(line)
+			if strings.Contains(lower, "first valid") {
+				// Must be qualified with xAI.
+				if !strings.Contains(lower, "xai") {
+					t.Fatalf("%s: stale unqualified 'first valid' in Codex context: %q", rel, strings.TrimSpace(line))
+				}
+			}
+		}
+	}
+}
+
+func TestDocsXaiOAuthDoesNotClaimPooling(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/xai-oauth.md")
+	for _, bad := range []string{
+		"load_balancing",
+		"load-balancing",
+		"pool",
+		"pooling",
+		"failover",
+	} {
+		if strings.Contains(body, bad) {
+			t.Fatalf("docs/examples/xai-oauth.md must not reference %q (xAI is single-account)", bad)
+		}
+	}
+}
+
+func TestDocsConfigExamplesParseable(t *testing.T) {
+	// Verify config.example.yaml still parses correctly with load_balancing comments.
+	t.Setenv("DEEPSEEK_API_KEY", "dummy-deepseek-key")
+	cfg, err := Load(filepath.Join(repoRoot(t), "config.example.yaml"))
+	if err != nil {
+		t.Fatalf("config.example.yaml must load: %v", err)
+	}
+	// Load-balancing defaults must be applied.
+	if cfg.OAuth.LoadBalancing.Strategy != LoadBalancingRoundRobin {
+		t.Fatalf("default strategy = %q, want round-robin", cfg.OAuth.LoadBalancing.Strategy)
+	}
+	if cfg.OAuth.LoadBalancing.MaxFailovers != 2 {
+		t.Fatalf("default max_failovers = %d, want 2", cfg.OAuth.LoadBalancing.MaxFailovers)
+	}
+	if cfg.OAuth.LoadBalancing.RateLimitCooldown != 60*time.Second {
+		t.Fatalf("default rate_limit_cooldown = %v, want 60s", cfg.OAuth.LoadBalancing.RateLimitCooldown)
+	}
+	if cfg.OAuth.LoadBalancing.ErrorCooldown != 30*time.Second {
+		t.Fatalf("default error_cooldown = %v, want 30s", cfg.OAuth.LoadBalancing.ErrorCooldown)
+	}
+}
+
+func TestDocsFencedYAMLExamplesParseable(t *testing.T) {
+	// All fenced YAML blocks in docs mentioning load_balancing must parse.
+	for _, rel := range append([]string{
+		"docs/CONFIG.md",
+		"docs/OAUTH.md",
+		"docs/PROVIDERS.md",
+		"docs/examples/codex-oauth.md",
+	}, docExampleMarkdownFiles()...) {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			for _, block := range fencedBlocks(body, "yaml") {
+				var v any
+				if err := yaml.Unmarshal([]byte(block), &v); err != nil {
+					t.Fatalf("YAML fenced block must parse in %s: %v\n%s", rel, err, block)
+				}
+			}
+		})
+	}
 }

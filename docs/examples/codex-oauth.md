@@ -41,6 +41,24 @@ Optional: pin a specific logged-in account:
     oauth_account: user@example.com
 ```
 
+## Multi-account load balancing (Codex only)
+
+When multiple Codex accounts are logged in, the proxy selects among them using
+a configurable strategy. Configure under `oauth.load_balancing` in `config.yaml`
+(see [CONFIG.md](../CONFIG.md#oauthload_balancing)):
+
+```yaml
+oauth:
+  load_balancing:
+    strategy: round-robin    # round-robin, fill-first, least-connections, random
+    max_failovers: 2         # additional alternate-account attempts
+    rate_limit_cooldown: 60s # cooldown after 429 without Retry-After
+    error_cooldown: 30s      # cooldown after 5xx or transport timeout
+```
+
+All fields have defaults; omit the block or individual fields to use defaults.
+This only applies to Codex OAuth — xAI OAuth is always single-account.
+
 ## ~/.factory/settings.json
 
 ```json
@@ -93,5 +111,5 @@ Check the model is logged in: `curl -s http://127.0.0.1:8787/v1/models | jq
 
 - Replace `upstream_model` with the Codex model ID your account supports.
 - Tokens refresh automatically five minutes before expiry, with per-account locking to avoid concurrent refresh-token reuse.
-- Codex requests include stable installation/session metadata, and token files may record passive quota hints from upstream.
+- Codex requests include stable installation/session metadata, and token files may record quota telemetry from upstream that informs load-balancing eligibility.
 - Ready-to-paste Factory snippet: [codex-oauth.json](../factory-settings/codex-oauth.json).

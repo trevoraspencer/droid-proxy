@@ -116,8 +116,10 @@ For xAI OAuth, use `grok-build-0.1` for Grok Build coding behavior and
 
 OAuth token files live under `oauth.auth_dir` (default
 `~/.droid-proxy/auth`) with `0700` directory and `0600` file permissions. If a
-model sets `oauth_account`, the proxy selects that stored account; otherwise it
-uses the first valid account for the provider after refresh.
+model sets `oauth_account`, the proxy selects that stored account; otherwise for
+Codex models the account pool selects from eligible accounts using the configured
+`oauth.load_balancing` strategy (see [CONFIG.md](CONFIG.md#oauthload_balancing)),
+and for xAI models the first valid account is used after refresh.
 
 Manage stored accounts with `droid-proxy auth status` (list), `auth disable` /
 `auth enable` (a disabled account is skipped during request-time selection), and

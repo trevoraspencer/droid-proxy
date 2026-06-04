@@ -150,22 +150,33 @@ Each file contains access and refresh tokens plus metadata (email, expiry).
 A `disabled` flag (toggled by `auth enable`/`auth disable`) marks accounts the
 proxy should skip during request-time selection. Codex token files may also
 include passive health fields such as `codex_quota`, `rate_limit_reset_at`, and
-`last_seen_at`; these are hints from upstream response headers/events and are
-not used for load balancing yet.
+`last_seen_at`; these are telemetry from upstream response headers/events and
+may be used by the Codex account pool for load-balancing eligibility decisions.
 
 ## Multi-account selection
 
 Log in multiple times with different accounts. Each saves a separate file.
 
-To pin a model to one account, set `oauth_account` on the model entry:
+For **Codex OAuth**, the proxy uses an in-memory account pool with configurable
+load balancing (see `oauth.load_balancing` in [CONFIG.md](CONFIG.md#oauthload_balancing)).
+When multiple Codex accounts are available, the proxy selects among them
+according to the configured strategy and can fail over on retryable errors
+(429, 5xx, transport timeout) within the configured `max_failovers` budget.
+Pinned models (`oauth_account` set) restrict selection to the matching subset.
+
+For **xAI OAuth**, the proxy uses the existing single-account path; xAI accounts
+are not pooled or load-balanced.
+
+To pin a Codex model to one account, set `oauth_account` on the model entry:
 
 ```yaml
     oauth_account: user@example.com
 ```
 
 The proxy matches against email, subject, account ID, or filename. If
-`oauth_account` is unset, the first valid (non-disabled) account for that
-provider is used after refresh.
+`oauth_account` is unset for a Codex model, the account pool selects from all
+eligible (non-disabled, non-cooled-down) accounts using the configured strategy.
+If `oauth_account` is unset for an xAI model, the first valid account is used.
 
 ## Managing accounts
 
