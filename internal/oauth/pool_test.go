@@ -1019,3 +1019,57 @@ func TestPoolReload_UpdatesQuotaMetadata(t *testing.T) {
 }
 
 func floatPtr(v float64) *float64 { return &v }
+
+func TestEnabledCodexCount(t *testing.T) {
+	dir := t.TempDir()
+	saveTokenFile(t, dir, &Token{
+		Type:        string(ProviderCodex),
+		AccessToken: "access-a",
+		Email:       "a@test.com",
+		Expired:     fakeTime().Add(time.Hour).Format(time.RFC3339),
+	})
+	saveTokenFile(t, dir, &Token{
+		Type:        string(ProviderCodex),
+		AccessToken: "access-b",
+		Email:       "b@test.com",
+		Expired:     fakeTime().Add(time.Hour).Format(time.RFC3339),
+	})
+	disabledPath := saveTokenFile(t, dir, &Token{
+		Type:     string(ProviderCodex),
+		Disabled: true,
+		Email:    "disabled@test.com",
+		Expired:  fakeTime().Add(time.Hour).Format(time.RFC3339),
+	})
+
+	// Load tokens manually.
+	entries, _ := os.ReadDir(dir)
+	var tokens []*Token
+	for _, e := range entries {
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var tok Token
+		if json.Unmarshal(raw, &tok) != nil {
+			continue
+		}
+		tok.path = filepath.Join(dir, e.Name())
+		if tok.Provider() != ProviderCodex {
+			continue
+		}
+		tokens = append(tokens, &tok)
+	}
+
+	pool := NewAccountPool(tokens, fakeTime)
+
+	count := pool.EnabledCodexCount()
+	if count != 2 {
+		t.Fatalf("expected 2 enabled Codex accounts (excluding disabled), got %d", count)
+	}
+
+	// Verify disabled account path is known.
+	if pool.Snapshot() == nil {
+		t.Fatal("expected non-nil snapshot")
+	}
+	_ = disabledPath // ensure it's used
+}

@@ -21,6 +21,14 @@ var (
 	defaultHTTPClient = &http.Client{Timeout: 30 * time.Second}
 )
 
+// SetTestCodexTokenURL overrides the Codex token endpoint URL for testing.
+// Returns a restore function that resets the URL when called.
+func SetTestCodexTokenURL(url string) (restore func()) {
+	orig := codexTokenURL
+	codexTokenURL = url
+	return func() { codexTokenURL = orig }
+}
+
 func BuildAuthURL(provider config.OAuthProvider, redirectURI, state, nonce string, pkce *PKCE) (string, error) {
 	if pkce == nil {
 		return "", fmt.Errorf("pkce is required")
@@ -87,12 +95,27 @@ func (m *Manager) ExchangeCode(ctx context.Context, provider config.OAuthProvide
 	}
 }
 
+// RefreshIfNeeded refreshes the token if it is expired or close to expiry.
+// If the token does not need refresh, it is returned unchanged.
 func (m *Manager) RefreshIfNeeded(ctx context.Context, token *Token) (*Token, error) {
+	return m.refreshToken(ctx, token, false)
+}
+
+// ForceRefresh forces a token refresh regardless of expiry status.
+// This is used when an upstream returns 401/403 and the token may have been
+// revoked or invalidated server-side even though it hasn't expired locally.
+func (m *Manager) ForceRefresh(ctx context.Context, token *Token) (*Token, error) {
+	return m.refreshToken(ctx, token, true)
+}
+
+func (m *Manager) refreshToken(ctx context.Context, token *Token, force bool) (*Token, error) {
 	if token == nil {
 		return nil, fmt.Errorf("token is nil")
 	}
-	if strings.TrimSpace(token.AccessToken) != "" && !token.NeedsRefresh(time.Now()) {
-		return token, nil
+	if !force {
+		if strings.TrimSpace(token.AccessToken) != "" && !token.NeedsRefresh(time.Now()) {
+			return token, nil
+		}
 	}
 	if strings.TrimSpace(token.RefreshToken) == "" {
 		return nil, fmt.Errorf("%s OAuth token is expired and has no refresh token", token.Provider())
@@ -116,8 +139,10 @@ func (m *Manager) RefreshIfNeeded(ctx context.Context, token *Token) (*Token, er
 			return nil, fmt.Errorf("auth token provider changed during refresh: got %q want %q", latest.Provider(), token.Provider())
 		}
 		token = latest
-		if strings.TrimSpace(token.AccessToken) != "" && !token.NeedsRefresh(time.Now()) {
-			return token, nil
+		if !force {
+			if strings.TrimSpace(token.AccessToken) != "" && !token.NeedsRefresh(time.Now()) {
+				return token, nil
+			}
 		}
 		if strings.TrimSpace(token.RefreshToken) == "" {
 			return nil, fmt.Errorf("%s OAuth token is expired and has no refresh token", token.Provider())

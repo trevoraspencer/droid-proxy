@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1744,5 +1745,767 @@ func TestCodexQuotaRecordingExhaustedFinalErrorPreservesLastQuota(t *testing.T) 
 	}
 	if tok.CodexQuota.Primary.UsedPercent != 99 {
 		t.Fatalf("expected 99%% used, got %v", tok.CodexQuota.Primary.UsedPercent)
+	}
+}
+
+// --------------- VAL-FAILOVER-004: 401/403 refresh before dropping account ---------------
+
+func TestResponsesCodex401ForceRefreshReplaySucceeds(t *testing.T) {
+	// When the first account gets 401, force-refresh should be attempted
+	// and the replay request should succeed on the same account.
+	var mu sync.Mutex
+	var attempts []string // track access tokens used
+	var refreshTokens []string
+
+	// Set up a fake token endpoint for force refresh.
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		values, _ := url.ParseQuery(string(body))
+		rt := values.Get("refresh_token")
+		mu.Lock()
+		refreshTokens = append(refreshTokens, rt)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "refreshed-access-token-0",
+			"refresh_token": rt,
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenSrv.Close()
+	restore := oauth.SetTestCodexTokenURL(tokenSrv.URL)
+	defer restore()
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			mu.Lock()
+			attempts = append(attempts, auth)
+			mu.Unlock()
+
+			if auth == "access-token-0" {
+				// Initial request with original token returns 401.
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized","type":"authentication_error"}}`))
+				return
+			}
+			// Refreshed token request succeeds.
+			codexSuccessResponse(w)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after force-refresh replay, got %d body=%s", w.Code, w.Body.String())
+	}
+	// Should have: initial attempt (401) + replay with refreshed token (success)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(attempts) != 2 {
+		t.Fatalf("expected 2 upstream attempts, got %d: %v", len(attempts), attempts)
+	}
+	if attempts[0] != "access-token-0" {
+		t.Fatalf("first attempt should use original token, got %s", attempts[0])
+	}
+	if attempts[1] != "refreshed-access-token-0" {
+		t.Fatalf("replay should use refreshed token, got %s", attempts[1])
+	}
+	if len(refreshTokens) != 1 {
+		t.Fatalf("expected 1 refresh call, got %d", len(refreshTokens))
+	}
+}
+
+func TestResponsesCodex403ForceRefreshStillFailsThenFailover(t *testing.T) {
+	// When the first account gets 403, force-refresh is attempted,
+	// but the replay still gets 403. The account should be marked unhealthy
+	// and failover should continue to the next account.
+	var mu sync.Mutex
+	var attempts []string
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "refreshed-access-token-0",
+			"refresh_token": "refresh-token-0",
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenSrv.Close()
+	restore := oauth.SetTestCodexTokenURL(tokenSrv.URL)
+	defer restore()
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			mu.Lock()
+			attempts = append(attempts, auth)
+			mu.Unlock()
+
+			// Both original and refreshed tokens for account 0 return 403.
+			// Account 1 succeeds.
+			if auth == "access-token-0" || auth == "refreshed-access-token-0" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":{"message":"forbidden","type":"permission_error"}}`))
+				return
+			}
+			codexSuccessResponse(w)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after failover to second account, got %d body=%s", w.Code, w.Body.String())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	// 3 attempts: initial 403 (acct 0) + replay 403 (acct 0 refreshed) + success (acct 1)
+	if len(attempts) != 3 {
+		t.Fatalf("expected 3 upstream attempts, got %d: %v", len(attempts), attempts)
+	}
+
+	// Verify first account is marked unhealthy.
+	snap := api.api.Pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.Selector == "a@test.com" && acct.Healthy {
+			t.Fatal("expected first account to be marked unhealthy after failed replay")
+		}
+	}
+}
+
+func TestResponsesCodex401RefreshFailsThenFailover(t *testing.T) {
+	// When the first account gets 401 and the force-refresh itself fails,
+	// the account should be marked unhealthy and failover should continue.
+	var mu sync.Mutex
+	var attempts []string
+
+	// Token endpoint returns error (refresh fails).
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	defer tokenSrv.Close()
+	restore := oauth.SetTestCodexTokenURL(tokenSrv.URL)
+	defer restore()
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			mu.Lock()
+			attempts = append(attempts, auth)
+			mu.Unlock()
+
+			if auth == "access-token-0" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+				return
+			}
+			codexSuccessResponse(w)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after failover (refresh failed), got %d body=%s", w.Code, w.Body.String())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	// 2 attempts: initial 401 (acct 0) + success (acct 1, after refresh failed for acct 0)
+	if len(attempts) != 2 {
+		t.Fatalf("expected 2 upstream attempts, got %d: %v", len(attempts), attempts)
+	}
+
+	// Verify first account is marked unhealthy.
+	snap := api.api.Pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.Selector == "a@test.com" && acct.Healthy {
+			t.Fatal("expected first account to be marked unhealthy after failed refresh")
+		}
+	}
+}
+
+func TestResponsesCodex401ReplayDoesNotConsumeFailoverBudget(t *testing.T) {
+	// The same-account force-refresh replay should NOT consume the
+	// alternate-account failover budget. With max_failovers=2 (3 total attempts)
+	// and 3 accounts, the 401 replay on account A doesn't count against the budget,
+	// so both B and C should still be tried if needed.
+	var mu sync.Mutex
+	var attemptTokens []string
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "refreshed-access-token-0",
+			"refresh_token": "refresh-token-0",
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenSrv.Close()
+	restore := oauth.SetTestCodexTokenURL(tokenSrv.URL)
+	defer restore()
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 2, // budget allows 3 total alternate-account attempts
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+			{email: "c@test.com", accountID: "acct_c"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			mu.Lock()
+			attemptTokens = append(attemptTokens, auth)
+			mu.Unlock()
+
+			// Account A: 401 on initial, 401 on replay
+			if auth == "access-token-0" || auth == "refreshed-access-token-0" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+				return
+			}
+			// Account B: 429
+			if auth == "access-token-1" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+				return
+			}
+			// Account C: success
+			codexSuccessResponse(w)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after budget-preserving failover, got %d body=%s", w.Code, w.Body.String())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	// 4 attempts:
+	//   1. acct A initial (401) - counts as main attempt (iteration 0)
+	//   2. acct A replay (401) - same-account, doesn't consume budget
+	//   3. acct B (429) - first failover attempt (iteration 1)
+	//   4. acct C (success) - second failover attempt (iteration 2)
+	if len(attemptTokens) != 4 {
+		t.Fatalf("expected 4 upstream attempts, got %d: %v", len(attemptTokens), attemptTokens)
+	}
+}
+
+func TestResponsesCodex401SameAccountReplayAtMostOnce(t *testing.T) {
+	// Verify that the same-account replay is attempted at most once per account.
+	// After the replay, if it still fails, the account is marked unhealthy
+	// and excluded from further selection.
+	var mu sync.Mutex
+	var attemptTokens []string
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "refreshed-access-token-0",
+			"refresh_token": "refresh-token-0",
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenSrv.Close()
+	restore := oauth.SetTestCodexTokenURL(tokenSrv.URL)
+	defer restore()
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 2,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			mu.Lock()
+			attemptTokens = append(attemptTokens, auth)
+			mu.Unlock()
+
+			// All requests return 401.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	// Should get 401 (last error relayed)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	// Expected attempts:
+	//   1. acct A initial (401)
+	//   2. acct A replay (401) - same-account, at most once
+	//   3. acct B initial (401)
+	//   4. acct B replay (401) - same-account, at most once
+	// Total: 4 attempts (2 main + 2 replays, within max_failovers=2 budget for alternates)
+	if len(attemptTokens) != 4 {
+		t.Fatalf("expected 4 attempts (each account tried once with replay), got %d: %v", len(attemptTokens), attemptTokens)
+	}
+
+	// Verify no account was tried more than twice (once initial + once replay)
+	tokenCounts := map[string]int{}
+	for _, tok := range attemptTokens {
+		tokenCounts[tok]++
+	}
+	for tok, count := range tokenCounts {
+		if count > 2 {
+			t.Fatalf("token %s was used %d times, expected at most 2 (initial + replay)", tok, count)
+		}
+	}
+}
+
+// --------------- VAL-FAILOVER-011: Single-account Codex remains equivalent to current behavior ---------------
+
+func TestResponsesCodexSingleAccount401NoReplay(t *testing.T) {
+	// With exactly one enabled Codex account, 401 should be relayed directly
+	// without any force-refresh+replay attempt.
+	var attemptCount int32
+
+	restore := oauth.SetTestCodexTokenURL("http://unused-invalid-url")
+	defer restore()
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 2,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"message":"unauthorized","type":"authentication_error"}}`))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	// Should relay the 401 directly
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 relayed directly, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "unauthorized") {
+		t.Fatalf("expected upstream error body preserved, got %s", w.Body.String())
+	}
+	// Exactly one upstream attempt, no replay
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("single-account 401 should make exactly 1 attempt, got %d", attemptCount)
+	}
+}
+
+func TestResponsesCodexSingleAccount403NoReplay(t *testing.T) {
+	// With exactly one enabled Codex account, 403 should be relayed directly.
+	var attemptCount int32
+
+	restore := oauth.SetTestCodexTokenURL("http://unused-invalid-url")
+	defer restore()
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 2,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"message":"forbidden","type":"permission_error"}}`))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 relayed directly, got %d body=%s", w.Code, w.Body.String())
+	}
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("single-account 403 should make exactly 1 attempt, got %d", attemptCount)
+	}
+}
+
+func TestResponsesCodexSingleAccountSuccessSameAsBefore(t *testing.T) {
+	// Verify that a successful single-account request behaves exactly as before:
+	// one token selection/refresh, one upstream request, same downstream response.
+	var capturedAuth string
+	var attemptCount int32
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 2,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			capturedAuth = r.Header.Get("Authorization")
+			codexSuccessResponse(w)
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("single-account success should make exactly 1 attempt, got %d", attemptCount)
+	}
+	if capturedAuth != "Bearer access-token-0" {
+		t.Fatalf("expected single-account auth header, got %s", capturedAuth)
+	}
+}
+
+func TestResponsesCodexSingleAccount429NoFailover(t *testing.T) {
+	// Single-account 429 should relay directly, no failover.
+	var attemptCount int32
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 2,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d body=%s", w.Code, w.Body.String())
+	}
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("single-account 429 should make exactly 1 attempt, got %d", attemptCount)
+	}
+}
+
+// --------------- VAL-FAILOVER-012: xAI OAuth remains unchanged ---------------
+
+func TestResponsesCodexFailoverXAI500DoesNotFailover(t *testing.T) {
+	// xAI requests should NOT fail over even when the upstream returns 500.
+	var attemptCount int32
+
+	authDir := t.TempDir()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attemptCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"internal error"}}`))
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{
+		OAuth: config.OAuth{
+			AuthDir: authDir,
+			LoadBalancing: config.LoadBalancing{
+				Strategy:          config.LoadBalancingFillFirst,
+				MaxFailovers:      2,
+				RateLimitCooldown: 60 * time.Second,
+				ErrorCooldown:     30 * time.Second,
+			},
+		},
+		Upstream: config.Upstream{
+			HTTPTimeout:     5 * time.Second,
+			StreamKeepAlive: 200 * time.Millisecond,
+		},
+		Models: []*config.Model{{
+			Alias:            "droid-oauth",
+			DisplayName:      "OAuth Test",
+			FactoryProvider:  config.FactoryProviderOpenAI,
+			UpstreamProtocol: config.UpstreamXAIResponses,
+			OAuthProvider:    config.OAuthProviderXAI,
+			BaseURL:          srv.URL,
+			UpstreamModel:    "xai-upstream",
+		}},
+	}
+
+	manager := oauth.NewManager(cfg)
+	token := &oauth.Token{
+		Type:         string(config.OAuthProviderXAI),
+		AccessToken:  "xai-access-token",
+		RefreshToken: "xai-refresh-token",
+		Email:        "xai@test.com",
+		Expired:      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	}
+	if _, err := manager.SaveToken(token); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a Codex pool even though xAI shouldn't use it.
+	codexToken := &oauth.Token{
+		Type:        string(config.OAuthProviderCodex),
+		AccessToken: "codex-access-token",
+		Email:       "codex@test.com",
+		Expired:     time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	}
+	if _, err := manager.SaveToken(codexToken); err != nil {
+		t.Fatal(err)
+	}
+	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+
+	router, _ := upstream.NewRouter(cfg.Models)
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	api := &API{Cfg: cfg, Router: router, Client: upstream.NewClient(cfg), OAuth: manager, Pool: pool, Logger: logger}
+	engine := gin.New()
+	engine.POST("/v1/responses", api.Responses)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	engine.ServeHTTP(w, req)
+
+	// xAI should get 500 directly, no failover.
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for xAI (no failover), got %d body=%s", w.Code, w.Body.String())
+	}
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("xAI 500 should not fail over, got %d attempts", attemptCount)
+	}
+
+	// Verify Codex pool was not affected (no cooldowns, no unhealthy marks).
+	snap := pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.CooldownUntil != nil {
+			t.Fatalf("Codex pool should have no cooldowns from xAI request, got %v for %s", acct.CooldownUntil, acct.Selector)
+		}
+		if !acct.Healthy {
+			t.Fatalf("Codex pool should have no unhealthy marks from xAI request, got unhealthy for %s", acct.Selector)
+		}
+	}
+}
+
+func TestResponsesCodexFailoverXAI429DoesNotFailover(t *testing.T) {
+	// xAI requests should NOT fail over even when the upstream returns 429.
+	// This extends the existing TestResponsesCodexFailoverXAIUsesSingleTokenPath
+	// to also verify no Codex pool side effects.
+	var attemptCount int32
+
+	authDir := t.TempDir()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attemptCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{
+		OAuth: config.OAuth{
+			AuthDir: authDir,
+			LoadBalancing: config.LoadBalancing{
+				Strategy:          config.LoadBalancingFillFirst,
+				MaxFailovers:      2,
+				RateLimitCooldown: 60 * time.Second,
+				ErrorCooldown:     30 * time.Second,
+			},
+		},
+		Upstream: config.Upstream{
+			HTTPTimeout:     5 * time.Second,
+			StreamKeepAlive: 200 * time.Millisecond,
+		},
+		Models: []*config.Model{{
+			Alias:            "droid-oauth",
+			DisplayName:      "OAuth Test",
+			FactoryProvider:  config.FactoryProviderOpenAI,
+			UpstreamProtocol: config.UpstreamXAIResponses,
+			OAuthProvider:    config.OAuthProviderXAI,
+			BaseURL:          srv.URL,
+			UpstreamModel:    "xai-upstream",
+		}},
+	}
+
+	manager := oauth.NewManager(cfg)
+	token := &oauth.Token{
+		Type:         string(config.OAuthProviderXAI),
+		AccessToken:  "xai-access-token",
+		RefreshToken: "xai-refresh-token",
+		Email:        "xai@test.com",
+		Expired:      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	}
+	if _, err := manager.SaveToken(token); err != nil {
+		t.Fatal(err)
+	}
+
+	codexToken := &oauth.Token{
+		Type:        string(config.OAuthProviderCodex),
+		AccessToken: "codex-access-token",
+		Email:       "codex@test.com",
+		Expired:     time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	}
+	if _, err := manager.SaveToken(codexToken); err != nil {
+		t.Fatal(err)
+	}
+	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+
+	router, _ := upstream.NewRouter(cfg.Models)
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	api := &API{Cfg: cfg, Router: router, Client: upstream.NewClient(cfg), OAuth: manager, Pool: pool, Logger: logger}
+	engine := gin.New()
+	engine.POST("/v1/responses", api.Responses)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 for xAI (no failover), got %d body=%s", w.Code, w.Body.String())
+	}
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("xAI 429 should not fail over, got %d attempts", attemptCount)
+	}
+
+	// Verify Codex pool has no rate-limit marks from xAI request.
+	snap := pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.RateLimitedUntil != nil {
+			t.Fatalf("Codex pool should have no rate-limit marks from xAI request, got %v for %s", acct.RateLimitedUntil, acct.Selector)
+		}
+		if !acct.Healthy {
+			t.Fatalf("Codex pool should have no unhealthy marks from xAI request, got unhealthy for %s", acct.Selector)
+		}
+	}
+}
+
+func TestResponsesCodexFailoverXAI401DoesNotUseCodexPool(t *testing.T) {
+	// xAI 401 should use the single-token path, not the Codex pool
+	// force-refresh mechanism.
+	var attemptCount int32
+
+	authDir := t.TempDir()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attemptCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{
+		OAuth: config.OAuth{
+			AuthDir: authDir,
+			LoadBalancing: config.LoadBalancing{
+				Strategy:          config.LoadBalancingFillFirst,
+				MaxFailovers:      2,
+				RateLimitCooldown: 60 * time.Second,
+				ErrorCooldown:     30 * time.Second,
+			},
+		},
+		Upstream: config.Upstream{
+			HTTPTimeout:     5 * time.Second,
+			StreamKeepAlive: 200 * time.Millisecond,
+		},
+		Models: []*config.Model{{
+			Alias:            "droid-oauth",
+			DisplayName:      "OAuth Test",
+			FactoryProvider:  config.FactoryProviderOpenAI,
+			UpstreamProtocol: config.UpstreamXAIResponses,
+			OAuthProvider:    config.OAuthProviderXAI,
+			BaseURL:          srv.URL,
+			UpstreamModel:    "xai-upstream",
+		}},
+	}
+
+	manager := oauth.NewManager(cfg)
+	token := &oauth.Token{
+		Type:         string(config.OAuthProviderXAI),
+		AccessToken:  "xai-access-token",
+		RefreshToken: "xai-refresh-token",
+		Email:        "xai@test.com",
+		Expired:      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	}
+	if _, err := manager.SaveToken(token); err != nil {
+		t.Fatal(err)
+	}
+
+	codexToken := &oauth.Token{
+		Type:        string(config.OAuthProviderCodex),
+		AccessToken: "codex-access-token",
+		Email:       "codex@test.com",
+		Expired:     time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	}
+	if _, err := manager.SaveToken(codexToken); err != nil {
+		t.Fatal(err)
+	}
+	tokens, _ := manager.LoadTokens(config.OAuthProviderCodex)
+	pool := oauth.NewAccountPool(tokens, time.Now, oauth.NewSelector(config.LoadBalancingFillFirst))
+
+	router, _ := upstream.NewRouter(cfg.Models)
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	api := &API{Cfg: cfg, Router: router, Client: upstream.NewClient(cfg), OAuth: manager, Pool: pool, Logger: logger}
+	engine := gin.New()
+	engine.POST("/v1/responses", api.Responses)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for xAI (single-token path), got %d body=%s", w.Code, w.Body.String())
+	}
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("xAI 401 should not fail over or refresh+replay, got %d attempts", attemptCount)
+	}
+
+	// Verify Codex pool state is completely untouched.
+	snap := pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if !acct.Healthy {
+			t.Fatalf("Codex pool should not be affected by xAI 401, got unhealthy for %s", acct.Selector)
+		}
+		if acct.InFlight != 0 {
+			t.Fatalf("Codex pool should have no in-flight from xAI request, got %d for %s", acct.InFlight, acct.Selector)
+		}
 	}
 }

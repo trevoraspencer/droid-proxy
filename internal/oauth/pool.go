@@ -383,6 +383,20 @@ func (p *AccountPool) ClearCooldown(path string) {
 	}
 }
 
+// EnabledCodexCount returns the number of non-disabled Codex accounts in the pool.
+// This is used to determine whether the pool is in single-account mode.
+func (p *AccountPool) EnabledCodexCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	count := 0
+	for _, entry := range p.entries {
+		if entry.Provider == ProviderCodex && !entry.Disabled {
+			count++
+		}
+	}
+	return count
+}
+
 // Eligible returns entries eligible for selection, excluding those in the
 // provided exclusion set. Eligibility criteria:
 //   - Provider is Codex

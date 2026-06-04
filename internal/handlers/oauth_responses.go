@@ -154,6 +154,8 @@ func codexRateLimitCooldown(headers http.Header, quota *oauth.CodexQuota, fallba
 // eligible alternate accounts within the configured max_failovers budget.
 //
 // Retryable statuses (429, 5xx) mark the failed account and try the next.
+// 401/403 forces a same-account token refresh and replay (multi-account only,
+// at most once per selected account, not consuming the failover budget).
 // Transport errors mark cooldown and try the next.
 // Non-retryable 4xx is relayed directly without failover.
 // Budget exhaustion relays the last upstream error.
@@ -164,7 +166,13 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 	rateLimitCooldown := lb.RateLimitCooldown
 	errorCooldown := lb.ErrorCooldown
 
+	// Determine single vs multi-account mode. In single-account mode,
+	// 401/403 does NOT trigger same-account refresh+replay to preserve
+	// the existing one-request behavior exactly.
+	isMultiAccount := a.Pool.EnabledCodexCount() > 1
+
 	tried := map[string]bool{}
+	authReplayed := map[string]bool{} // tracks which accounts have had a 401/403 force-refresh replay
 	var lastUpstreamStatus int
 	var lastUpstreamBody []byte
 	var lastUpstreamContentType string
@@ -270,6 +278,72 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 			return
 		}
 
+		// --- 401/403: force refresh + same-account replay in multi-account mode ---
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			// Read body for potential relay.
+			raw, ok := a.rawUpstreamErrorBody(resp, func() {})
+			ct := resp.Header.Get("Content-Type")
+			_ = resp.Body.Close()
+			if ok {
+				lastUpstreamBody = raw
+				lastUpstreamContentType = ct
+			}
+
+			if isMultiAccount && !authReplayed[entry.Path] {
+				// Mark that we've attempted a replay for this account.
+				authReplayed[entry.Path] = true
+
+				// Force refresh the token regardless of expiry.
+				refreshed, refreshErr := a.OAuth.ForceRefresh(c.Request.Context(), token)
+				if refreshErr != nil {
+					// Refresh failed: mark unhealthy, release lease, try next account.
+					a.Pool.End(entry.Path)
+					a.Pool.MarkUnhealthy(entry.Path)
+					tried[entry.Path] = true
+					continue
+				}
+				token = refreshed
+
+				// Replay the request on the same account with refreshed token.
+				replayOK, replayStatus, replayBody, replayCT := a.codexAuthReplay(
+					c, m, token, payload, downstreamStream, installationID, codexConversation, entry,
+				)
+				if replayOK {
+					return // success after refresh+replay
+				}
+
+				// Replay failed: mark unhealthy, release lease, try next account.
+				// Note: lease is already released inside codexAuthReplay on failure.
+				a.Pool.MarkUnhealthy(entry.Path)
+				tried[entry.Path] = true
+				hadUpstreamAttempt = true
+				lastUpstreamStatus = replayStatus
+				if replayBody != nil {
+					lastUpstreamBody = replayBody
+					lastUpstreamContentType = replayCT
+				}
+				continue // to next account in the failover loop (does not consume budget)
+			}
+
+			// Single-account mode or already replayed for this account.
+			a.Pool.End(entry.Path)
+
+			if isMultiAccount {
+				// Already replayed: mark unhealthy and try next account.
+				a.Pool.MarkUnhealthy(entry.Path)
+				tried[entry.Path] = true
+				continue
+			}
+
+			// Single account: relay directly without retry (preserves current behavior).
+			if downstreamStream {
+				a.writeResponsesStreamError(c, lastUpstreamStatus, lastUpstreamBody)
+			} else {
+				WriteUpstreamStatusError(c, lastUpstreamStatus, lastUpstreamBody, lastUpstreamContentType)
+			}
+			return
+		}
+
 		// Error response: read body for potential relay.
 		raw, ok := a.rawUpstreamErrorBody(resp, func() {})
 		ct := resp.Header.Get("Content-Type")
@@ -316,6 +390,92 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 	// No upstream attempt was made (all accounts failed during
 	// selection/token-load/refresh). Return a deterministic safe error.
 	WriteJSONError(c, http.StatusServiceUnavailable, "authentication_error", "no eligible codex accounts available")
+}
+
+// codexAuthReplay executes a replay request on the same account after a forced
+// token refresh. The pool lease (Begin) for entry.Path must already be held.
+// Returns (true, 0, nil, "") on success (lease is released on the success path).
+// Returns (false, status, body, contentType) on failure (lease is also released).
+func (a *API) codexAuthReplay(
+	c *gin.Context,
+	m *config.Model,
+	token *oauth.Token,
+	payload []byte,
+	downstreamStream bool,
+	installationID, codexConversation string,
+	entry *oauth.AccountEntry,
+) (bool, int, []byte, string) {
+	// Build upstream URL from refreshed token.
+	upstreamURL, urlErr := oauthResponsesURL(m, token)
+	if urlErr != nil {
+		a.Pool.End(entry.Path)
+		return false, 0, nil, ""
+	}
+
+	// Build the replay request.
+	req, reqErr := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamURL, bytes.NewReader(payload))
+	if reqErr != nil {
+		a.Pool.End(entry.Path)
+		return false, 0, nil, ""
+	}
+	applyOAuthResponsesHeaders(req, c.Request.Header, m, token, payload, installationID, codexConversation)
+
+	// Execute the replay request.
+	var resp *http.Response
+	var doErr error
+	if downstreamStream {
+		resp, doErr = a.Client.Do(req)
+	} else {
+		resp, doErr = a.Client.HTTP.Do(req)
+	}
+
+	if doErr != nil {
+		a.Pool.End(entry.Path)
+		return false, 0, nil, ""
+	}
+
+	// Record quota from replay response headers.
+	quota, resetAt := oauth.ParseCodexRateLimitHeaders(resp.Header)
+	a.recordCodexUsage(token, quota, resetAt)
+
+	// Success path.
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if downstreamStream {
+			a.forwardOAuthResponsesStreamAndRelease(c, m, resp, token, entry.Path)
+			return true, 0, nil, ""
+		}
+
+		raw, ok := a.rawUpstreamSuccessBody(resp, func() {
+			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream response body too large")
+		})
+		_ = resp.Body.Close()
+		a.Pool.End(entry.Path)
+		if !ok {
+			return true, 0, nil, "" // response already written
+		}
+		if quota := codexQuotaFromSSEBody(raw); quota != nil {
+			a.recordCodexUsage(token, quota, nil)
+		}
+		translated, err := responseFromResponsesSSE(raw)
+		if err != nil {
+			WriteJSONError(c, http.StatusBadGateway, "upstream_error", err.Error())
+			return true, 0, nil, "" // error response already written
+		}
+		c.Data(http.StatusOK, "application/json", translated)
+		return true, 0, nil, ""
+	}
+
+	// Replay returned an error: read body and release lease.
+	raw, ok := a.rawUpstreamErrorBody(resp, func() {})
+	ct := resp.Header.Get("Content-Type")
+	_ = resp.Body.Close()
+	a.Pool.End(entry.Path)
+
+	var body []byte
+	if ok {
+		body = raw
+	}
+	return false, resp.StatusCode, body, ct
 }
 
 // forwardOAuthResponsesStreamAndRelease forwards a streaming Codex response

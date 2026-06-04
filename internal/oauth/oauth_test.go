@@ -241,6 +241,41 @@ func TestRefreshCodexSavesRefreshedToken(t *testing.T) {
 	}
 }
 
+func TestForceRefreshesEvenWhenNotExpired(t *testing.T) {
+	authDir := t.TempDir()
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "force-refreshed-access",
+			"refresh_token": "force-refreshed-refresh",
+			"expires_in":    3600,
+		})
+	}))
+	defer srv.Close()
+
+	restore := SetTestCodexTokenURL(srv.URL)
+	defer restore()
+
+	// Token that is NOT expired (expires 1 hour from now).
+	refreshed, err := manager.ForceRefresh(context.Background(), &Token{
+		Type:         string(ProviderCodex),
+		AccessToken:  "still-valid-access",
+		RefreshToken: "original-refresh",
+		Email:        "user@example.com",
+		Expired:      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.AccessToken != "force-refreshed-access" {
+		t.Fatalf("ForceRefresh should refresh even when not expired, got %s", refreshed.AccessToken)
+	}
+	if refreshed.RefreshToken != "force-refreshed-refresh" {
+		t.Fatalf("bad refreshed refresh token: %s", refreshed.RefreshToken)
+	}
+}
+
 func TestRefreshIfNeededDeduplicatesConcurrentRefresh(t *testing.T) {
 	authDir := t.TempDir()
 	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})
