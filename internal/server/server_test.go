@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -618,5 +620,108 @@ models:
 			t.Fatalf("Run returned error: %v", err)
 		}
 	case <-context.Background().Done():
+	}
+}
+
+func TestServer_WatcherLifecycleWithTempAuthDir(t *testing.T) {
+	authDir := t.TempDir()
+
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server new: %v", err)
+	}
+
+	// Pool should exist even with empty auth dir
+	if s.pool == nil {
+		t.Fatal("expected pool to be created")
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("no ephemeral listener: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.RunOnListener(ctx, ln) }()
+
+	// Server should be running with watcher
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify health endpoint works
+	resp, err := http.Get("http://" + ln.Addr().String() + "/health")
+	if err != nil {
+		t.Fatalf("health check failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("health status = %d, want 200", resp.StatusCode)
+	}
+
+	// Cancel context to trigger shutdown (which also stops the watcher)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("server shutdown timed out")
+	}
+}
+
+func TestServer_StartupWithInvalidTokenFiles(t *testing.T) {
+	authDir := t.TempDir()
+
+	// Write an invalid JSON file
+	if err := os.WriteFile(filepath.Join(authDir, "broken.json"), []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a valid Codex token file
+	validToken := `{"type":"codex","access_token":"valid-access-SENTINEL","refresh_token":"valid-refresh-SENTINEL","email":"user@example.com","expired":"2099-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(authDir, "codex-user.json"), []byte(validToken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := mustConfig(t, `
+listen:
+  host: 127.0.0.1
+  port: 0
+oauth:
+  auth_dir: `+authDir+`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+
+	s, err := New(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("server should start even with invalid token files: %v", err)
+	}
+
+	// Pool should have exactly 1 valid account
+	snap := s.pool.Snapshot()
+	if len(snap.Accounts) != 1 {
+		t.Fatalf("expected 1 account, got %d", len(snap.Accounts))
+	}
+	if snap.Accounts[0].Selector != "user@example.com" {
+		t.Fatalf("expected selector user@example.com, got %q", snap.Accounts[0].Selector)
 	}
 }

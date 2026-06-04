@@ -123,6 +123,13 @@ func (m *Manager) loadTokenPath(path string) (*Token, error) {
 	return &token, nil
 }
 
+// LoadTokenAtPath loads and parses a single token file at the given path.
+// It is exported so that server startup can load individual files while
+// tolerating invalid entries.
+func (m *Manager) LoadTokenAtPath(path string) (*Token, error) {
+	return m.loadTokenPath(path)
+}
+
 func (m *Manager) SaveToken(token *Token) (string, error) {
 	if token == nil {
 		return "", fmt.Errorf("token is nil")

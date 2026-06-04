@@ -24,6 +24,7 @@ type Deps struct {
 	Router *upstream.Router
 	Client *upstream.Client
 	OAuth  *oauth.Manager
+	Pool   *oauth.AccountPool
 }
 
 // ErrorBody is the OpenAI-shaped error envelope. Anthropic and Responses payloads

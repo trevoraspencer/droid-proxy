@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -21,10 +23,12 @@ import (
 
 // Server holds the gin engine, the http.Server, and the dependencies it serves.
 type Server struct {
-	cfg    *config.Config
-	logger *logrus.Logger
-	engine *gin.Engine
-	deps   handlers.Deps
+	cfg     *config.Config
+	logger  *logrus.Logger
+	engine  *gin.Engine
+	deps    handlers.Deps
+	pool    *oauth.AccountPool
+	watcher *oauth.Watcher
 }
 
 // New constructs the engine and registers routes. It does not start listening.
@@ -33,11 +37,23 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build router: %w", err)
 	}
+	oauthMgr := oauth.NewManager(cfg)
+
+	// Seed the Codex account pool from existing token files.
+	// Invalid/unreadable files are logged and skipped; startup continues.
+	seedTokens, seedErr := loadCodexTokensSafe(oauthMgr, logger)
+	if seedErr != nil {
+		logger.WithError(seedErr).Warn("server: initial Codex token load failed")
+	}
+	sel := oauth.NewSelector(cfg.OAuth.LoadBalancing.Strategy)
+	pool := oauth.NewAccountPool(seedTokens, time.Now, sel)
+
 	deps := handlers.Deps{
 		Cfg:    cfg,
 		Router: router,
 		Client: upstream.NewClient(cfg),
-		OAuth:  oauth.NewManager(cfg),
+		OAuth:  oauthMgr,
+		Pool:   pool,
 	}
 	api := handlers.NewAPI(deps, logger)
 
@@ -57,7 +73,7 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Server, error) {
 	authed := engine.Group("/", ClientAuth(cfg), RequestBodyLimit(cfg))
 	registerAPIRoutes(authed, api)
 
-	return &Server{cfg: cfg, logger: logger, engine: engine, deps: deps}, nil
+	return &Server{cfg: cfg, logger: logger, engine: engine, deps: deps, pool: pool}, nil
 }
 
 // registerAPIRoutes mounts the /v1/* surface plus its prefix-less aliases.
@@ -94,6 +110,13 @@ func (s *Server) Run(ctx context.Context) error {
 // RunOnListener serves on an already-bound listener. It is primarily useful for
 // tests that need the OS to choose a port without releasing it before startup.
 func (s *Server) RunOnListener(ctx context.Context, ln net.Listener) error {
+	// Start the auth-dir watcher for hot reload of Codex token files.
+	watcher, err := oauth.NewWatcher(s.deps.OAuth, s.pool, 200*time.Millisecond, s.logger)
+	if err != nil {
+		s.logger.WithError(err).Warn("server: auth-dir watcher failed to start; hot reload disabled")
+	}
+	s.watcher = watcher
+
 	srv := s.newHTTPServer()
 	errCh := make(chan error, 1)
 	go func() {
@@ -106,6 +129,10 @@ func (s *Server) RunOnListener(ctx context.Context, ln net.Listener) error {
 	}()
 	select {
 	case <-ctx.Done():
+		// Stop the watcher before shutting down the HTTP server.
+		if s.watcher != nil {
+			s.watcher.Close()
+		}
 		shutdownCtx, cancel := shutdownContext(s.cfg.Server.ShutdownTimeout)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -115,6 +142,10 @@ func (s *Server) RunOnListener(ctx context.Context, ln net.Listener) error {
 		<-errCh
 		return nil
 	case err := <-errCh:
+		// Server errored; stop the watcher.
+		if s.watcher != nil {
+			s.watcher.Close()
+		}
 		return err
 	}
 }
@@ -135,4 +166,36 @@ func shutdownContext(timeout time.Duration) (context.Context, context.CancelFunc
 		return context.WithCancel(context.Background())
 	}
 	return context.WithTimeout(context.Background(), timeout)
+}
+
+// loadCodexTokensSafe loads Codex token files from the configured auth dir,
+// tolerating missing directories and invalid/unreadable files.
+func loadCodexTokensSafe(mgr *oauth.Manager, logger *logrus.Logger) ([]*oauth.Token, error) {
+	dir, err := mgr.AuthDir()
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var tokens []*oauth.Token
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		tok, err := mgr.LoadTokenAtPath(path)
+		if err != nil {
+			logger.WithError(err).WithField("file", entry.Name()).Warn("server: skipping invalid token file during startup")
+			continue
+		}
+		if tok.Provider() == oauth.ProviderCodex {
+			tokens = append(tokens, tok)
+		}
+	}
+	return tokens, nil
 }
