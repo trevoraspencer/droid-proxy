@@ -3,7 +3,6 @@ package oauth
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +30,12 @@ type Watcher struct {
 	// mu protects the debounce timer
 	mu    sync.Mutex
 	timer *time.Timer
+
+	// watchingParent tracks whether we are currently watching the parent
+	// directory (because the auth dir did not exist at startup). Once the
+	// auth dir is created and added to the watcher, the parent watch is
+	// removed to avoid spurious reload events from sibling entries.
+	watchingParent string // empty string means not watching parent
 }
 
 // NewWatcher creates and starts a watcher for the auth directory configured
@@ -68,7 +73,9 @@ func NewWatcher(mgr *Manager, pool *AccountPool, debounce time.Duration, logger 
 		w.logger.SetOutput(os.Stderr)
 	}
 
-	// Initial seed: load tokens and reload pool
+	// Initial seed: load tokens and reload pool only if the pool is empty.
+	// When the server has already seeded the pool at startup, this avoids
+	// redundant file reads while keeping the behavior idempotent.
 	w.seedPool()
 
 	// Attempt to watch the auth dir (or parent if missing)
@@ -93,8 +100,14 @@ func (w *Watcher) Close() {
 }
 
 // seedPool loads tokens from the auth dir and reloads the pool.
+// If the pool already has Codex entries (e.g., seeded by server startup),
+// the seed is skipped to avoid redundant file reads. The watcher's
+// debounced reload will keep the pool current after this point.
 // Invalid files are logged and skipped.
 func (w *Watcher) seedPool() {
+	if w.pool.EnabledCodexCount() > 0 {
+		return
+	}
 	tokens, err := w.loadCodexTokensSafe()
 	if err != nil {
 		w.logger.WithError(err).Warn("watcher: initial token load failed")
@@ -110,35 +123,7 @@ func (w *Watcher) loadCodexTokensSafe() ([]*Token, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var tokens []*Token
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !isTokenFileName(name) {
-			continue
-		}
-		path := filepath.Join(dir, name)
-		tok, err := w.mgr.loadTokenPath(path)
-		if err != nil {
-			w.logger.WithError(err).WithField("file", name).Warn("watcher: skipping invalid token file")
-			continue
-		}
-		if tok.Provider() == ProviderCodex {
-			tokens = append(tokens, tok)
-		}
-	}
-	return tokens, nil
+	return LoadCodexTokensFromDir(w.mgr, dir, w.logger)
 }
 
 // watchAuthDir adds the auth dir (or its parent) to the fsnotify watcher.
@@ -159,6 +144,8 @@ func (w *Watcher) watchAuthDir() {
 		if fi, err := os.Stat(parent); err == nil && fi.IsDir() {
 			if err := w.fswatcher.Add(parent); err != nil {
 				w.logger.WithError(err).WithField("dir", parent).Warn("watcher: cannot watch parent dir")
+			} else {
+				w.watchingParent = parent
 			}
 		}
 	}
@@ -196,22 +183,25 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 		// A new file or directory was created
 		if w.isAuthDir(event.Name) {
 			// The auth dir itself was created; start watching it
-			w.fswatcher.Add(event.Name)
+			_ = w.fswatcher.Add(event.Name)
+			// Remove the parent-directory watch so sibling entries no
+			// longer generate spurious reload events.
+			w.removeParentWatch()
 			w.scheduleReload()
 			return
 		}
-		if isTokenFileName(name) {
+		if IsTokenFileName(name) {
 			w.scheduleReload()
 		}
 		// Non-token files are silently ignored
 
 	case event.Has(fsnotify.Write):
-		if isTokenFileName(name) {
+		if IsTokenFileName(name) {
 			w.scheduleReload()
 		}
 
 	case event.Has(fsnotify.Rename):
-		if isTokenFileName(name) {
+		if IsTokenFileName(name) {
 			w.scheduleReload()
 		}
 		// Also handle the case where a file is renamed TO a token name
@@ -223,12 +213,21 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 			w.scheduleReload()
 			return
 		}
-		if isTokenFileName(name) {
+		if IsTokenFileName(name) {
 			w.scheduleReload()
 		}
 
 	case event.Has(fsnotify.Chmod):
 		// Permission changes are not relevant for reload
+	}
+}
+
+// removeParentWatch removes the parent-directory watch if one is active,
+// preventing spurious reload events from sibling entries.
+func (w *Watcher) removeParentWatch() {
+	if w.watchingParent != "" {
+		_ = w.fswatcher.Remove(w.watchingParent)
+		w.watchingParent = ""
 	}
 }
 
@@ -266,33 +265,21 @@ func (w *Watcher) reload() {
 	}
 }
 
-// isAuthDir checks if the given path is the configured auth dir.
+// isAuthDir checks if the given path is the configured auth dir using
+// symlink-safe comparison via os.SameFile.
 func (w *Watcher) isAuthDir(path string) bool {
 	dir, err := w.mgr.AuthDir()
 	if err != nil {
 		return false
 	}
-	return path == dir
-}
-
-// isTokenFileName returns true if the filename looks like a token file
-// that should be processed. It excludes:
-//   - Non-.json files
-//   - Hidden files (starting with .)
-//   - Lock files (.locks/ directory children or .lock extension)
-//   - Atomic-save temp files (.<name>.tmp-* pattern)
-func isTokenFileName(name string) bool {
-	// Must end with .json
-	if filepath.Ext(name) != ".json" {
+	// Use os.SameFile for symlink-safe comparison
+	pathInfo, err := os.Stat(path)
+	if err != nil {
 		return false
 	}
-	// Skip hidden files (e.g. .codex-user.json.tmp-12345)
-	if strings.HasPrefix(name, ".") {
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
 		return false
 	}
-	// Skip lock files
-	if strings.HasSuffix(name, ".lock") {
-		return false
-	}
-	return true
+	return os.SameFile(pathInfo, dirInfo)
 }

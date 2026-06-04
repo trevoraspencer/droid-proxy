@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sirupsen/logrus"
+
 	"droid-proxy/internal/config"
 )
 
@@ -233,4 +235,64 @@ func sanitizeFileSegment(value string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
+}
+
+// IsTokenFileName returns true if the filename looks like a token file
+// that should be processed. It excludes:
+//   - Non-.json files
+//   - Hidden files (starting with .)
+//   - Lock files (.lock extension)
+//   - Atomic-save temp files (.<name>.tmp-* pattern, caught by hidden-file check)
+func IsTokenFileName(name string) bool {
+	// Must end with .json
+	if filepath.Ext(name) != ".json" {
+		return false
+	}
+	// Skip hidden files (e.g. .codex-user.json.tmp-12345)
+	if strings.HasPrefix(name, ".") {
+		return false
+	}
+	// Skip lock files
+	if strings.HasSuffix(name, ".lock") {
+		return false
+	}
+	return true
+}
+
+// LoadCodexTokensFromDir loads Codex tokens from the given directory using the
+// provided Manager. It applies consistent file filtering via IsTokenFileName:
+// only non-hidden, non-lock, non-temporary .json files are processed.
+// Invalid or unparseable files are logged to the provided logger and skipped.
+// Missing directories return nil without error.
+func LoadCodexTokensFromDir(mgr *Manager, dir string, logger *logrus.Logger) ([]*Token, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var tokens []*Token
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !IsTokenFileName(name) {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		tok, err := mgr.loadTokenPath(path)
+		if err != nil {
+			if logger != nil {
+				logger.WithError(err).WithField("file", name).Warn("skipping invalid token file")
+			}
+			continue
+		}
+		if tok.Provider() == ProviderCodex {
+			tokens = append(tokens, tok)
+		}
+	}
+	return tokens, nil
 }

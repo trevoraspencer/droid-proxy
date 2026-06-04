@@ -670,6 +670,380 @@ func TestWatcher_InFlightDeleteRaceClean(t *testing.T) {
 	}
 }
 
+// ---- Misc cleanup: shared file-filtering helper ----
+
+// TestIsTokenFileName_FiltersCorrectly verifies that the shared IsTokenFileName
+// helper correctly filters hidden, lock, temp, and non-JSON files.
+func TestIsTokenFileName_FiltersCorrectly(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"codex-user.json", true},
+		{"user@example.com.json", true},
+		{"token.json", true},
+		{".hidden.json", false},               // hidden file
+		{".codex-user.json.tmp-12345", false}, // atomic-save temp
+		{"user.json.lock", false},             // lock file
+		{"notes.txt", false},                  // non-JSON
+		{"data", false},                       // no extension
+		{"", false},                           // empty
+		{".json", false},                      // hidden, just extension
+		{"JSON", false},                       // wrong extension case
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsTokenFileName(tc.name); got != tc.want {
+				t.Errorf("IsTokenFileName(%q) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLoadCodexTokensFromDir_FiltersHiddenAndInvalid verifies that the shared
+// LoadCodexTokensFromDir helper applies identical filtering to what the
+// watcher uses: hidden files, lock files, and invalid JSON are excluded.
+func TestLoadCodexTokensFromDir_FiltersHiddenAndInvalid(t *testing.T) {
+	dir := t.TempDir()
+	mgr := newTestManager(t, dir)
+
+	// Valid token
+	validTok := makeToken("valid@example.com", "valid-access-SENTINEL", "valid-refresh-SENTINEL", false)
+	saveTokenFile(t, dir, validTok)
+
+	// Hidden .json file
+	if err := os.WriteFile(filepath.Join(dir, ".hidden.json"), []byte(`{"type":"codex","access_token":"hidden-SENTINEL"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Invalid JSON
+	if err := os.WriteFile(filepath.Join(dir, "broken.json"), []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Lock file
+	if err := os.WriteFile(filepath.Join(dir, "user.json.lock"), []byte("lock"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// xAI token (should be excluded)
+	xaiTok := `{"type":"xai","access_token":"xai-SENTINEL","refresh_token":"xai-rt","email":"xai@example.com","expired":"2099-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "xai-user.json"), []byte(xaiTok), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tokens, err := LoadCodexTokensFromDir(mgr, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(tokens) != 1 {
+		t.Fatalf("expected 1 valid Codex token, got %d", len(tokens))
+	}
+	if tokens[0].Email != "valid@example.com" {
+		t.Fatalf("expected valid@example.com, got %s", tokens[0].Email)
+	}
+
+	// Verify no secrets leaked
+	for _, tok := range tokens {
+		if strings.Contains(tok.AccessToken, "hidden-SENTINEL") || strings.Contains(tok.AccessToken, "xai-SENTINEL") {
+			t.Fatal("hidden or xAI token was incorrectly loaded")
+		}
+	}
+}
+
+// ---- Misc cleanup: hidden-file filtering parity ----
+
+// TestWatcher_HiddenFileFilteringParity verifies that server startup seed
+// and watcher reload produce identical pool contents when hidden .json
+// files are present. Before the shared helper extraction, server.go used
+// only filepath.Ext != ".json" while the watcher also excluded hidden files.
+func TestWatcher_HiddenFileFilteringParity(t *testing.T) {
+	dir := t.TempDir()
+	mgr := newTestManager(t, dir)
+
+	// Write a visible token file
+	visibleToken := makeToken("visible@example.com", "visible-access-SENTINEL", "visible-refresh-SENTINEL", false)
+	saveTokenFile(t, dir, visibleToken)
+
+	// Write a hidden .json file (should be excluded by both server and watcher)
+	hiddenContent := `{"type":"codex","access_token":"hidden-access-SENTINEL","refresh_token":"hidden-refresh-SENTINEL","email":"hidden@example.com","expired":"2099-01-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, ".hidden-token.json"), []byte(hiddenContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Use LoadCodexTokensFromDir (the shared helper used by both server and watcher)
+	tokens, err := LoadCodexTokensFromDir(mgr, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Only the visible token should be loaded
+	if len(tokens) != 1 {
+		t.Fatalf("expected 1 token (hidden file excluded), got %d", len(tokens))
+	}
+	if tokens[0].Email != "visible@example.com" {
+		t.Fatalf("expected visible@example.com, got %s", tokens[0].Email)
+	}
+
+	// Now seed a pool and start the watcher; verify pool matches
+	pool := NewAccountPool(tokens, fakeTime)
+	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	if !poolWithin(t, pool, 3*time.Second, func(s *PoolSnapshot) bool {
+		return len(s.Accounts) == 1 && s.Accounts[0].Selector == "visible@example.com"
+	}) {
+		t.Fatalf("watcher reload produced different results than shared helper; snapshot: %+v", pool.Snapshot())
+	}
+
+	// Snapshot should not contain hidden token secrets
+	snapJSON, _ := json.Marshal(pool.Snapshot())
+	if strings.Contains(string(snapJSON), "hidden-access-SENTINEL") {
+		t.Fatal("hidden file token leaked into pool snapshot")
+	}
+}
+
+// TestWatcher_StartupSeedMatchesWatcherReload verifies that pool contents
+// seeded by LoadCodexTokensFromDir are identical to what the watcher loads
+// on its first reload (no entries disappear on first hot-reload).
+func TestWatcher_StartupSeedMatchesWatcherReload(t *testing.T) {
+	dir := t.TempDir()
+	mgr := newTestManager(t, dir)
+
+	// Create multiple token files including edge cases
+	tok1 := makeToken("user1@example.com", "access1-SENTINEL", "refresh1-SENTINEL", false)
+	saveTokenFile(t, dir, tok1)
+	tok2 := makeToken("user2@example.com", "access2-SENTINEL", "refresh2-SENTINEL", false)
+	saveTokenFile(t, dir, tok2)
+
+	// Hidden .json file
+	if err := os.WriteFile(filepath.Join(dir, ".dot.json"), []byte(`{"type":"codex","access_token":"dot-SENTINEL"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Lock file
+	if err := os.WriteFile(filepath.Join(dir, "user1.lock"), []byte("lock"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Non-JSON file
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed using the shared helper (as server.go does)
+	seedTokens, err := LoadCodexTokensFromDir(mgr, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pool := NewAccountPool(seedTokens, fakeTime)
+	seedSnap := pool.Snapshot()
+
+	if len(seedSnap.Accounts) != 2 {
+		t.Fatalf("expected 2 seeded accounts, got %d", len(seedSnap.Accounts))
+	}
+
+	// Start the watcher (it should skip re-seeding because pool is already populated)
+	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	// Trigger a reload by touching a file
+	saveTokenFile(t, dir, tok1)
+
+	// Wait for reload and verify pool still has exactly 2 accounts
+	if !poolWithin(t, pool, 3*time.Second, func(s *PoolSnapshot) bool {
+		return len(s.Accounts) == 2
+	}) {
+		t.Fatalf("pool changed after watcher reload; snapshot: %+v", pool.Snapshot())
+	}
+
+	// Verify no entries disappeared due to filtering mismatch
+	reloadSnap := pool.Snapshot()
+	selectors := map[string]bool{}
+	for _, a := range reloadSnap.Accounts {
+		selectors[a.Selector] = true
+	}
+	if !selectors["user1@example.com"] || !selectors["user2@example.com"] {
+		t.Fatalf("expected both users after reload, got selectors: %v", selectors)
+	}
+}
+
+// ---- Misc cleanup: parent-watch removal ----
+
+// TestWatcher_ParentWatchRemovedAfterAuthDirCreation verifies that after the
+// auth dir is created and added to the watcher, the parent-directory watch
+// is removed so sibling entries no longer generate spurious reload events.
+func TestWatcher_ParentWatchRemovedAfterAuthDirCreation(t *testing.T) {
+	parentDir := t.TempDir()
+	// Create a sibling file in the parent dir that should NOT trigger reloads
+	siblingPath := filepath.Join(parentDir, "sibling.json")
+	if err := os.WriteFile(siblingPath, []byte(`{"type":"codex","access_token":"sibling-SENTINEL"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(parentDir, "auth")
+	mgr := newTestManager(t, dir)
+	pool := NewAccountPool(nil, fakeTime)
+
+	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	// Initially the pool should be empty (dir doesn't exist)
+	snap := pool.Snapshot()
+	if len(snap.Accounts) != 0 {
+		t.Fatalf("expected 0 accounts initially, got %d", len(snap.Accounts))
+	}
+
+	// Verify watcher is watching the parent
+	w.mu.Lock()
+	parent := w.watchingParent
+	w.mu.Unlock()
+	if parent == "" {
+		t.Fatal("expected watcher to be watching parent directory")
+	}
+
+	// Create the auth dir and a token file
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
+	saveTokenFile(t, dir, tok)
+
+	// Wait for watcher to detect creation and seed pool
+	if !poolWithin(t, pool, 5*time.Second, func(s *PoolSnapshot) bool {
+		return len(s.Accounts) == 1 && s.Accounts[0].Selector == "user@example.com"
+	}) {
+		t.Fatalf("watcher did not detect dir creation; snapshot: %+v", pool.Snapshot())
+	}
+
+	// Verify parent watch has been removed
+	w.mu.Lock()
+	parentAfter := w.watchingParent
+	w.mu.Unlock()
+	if parentAfter != "" {
+		t.Fatalf("expected parent watch to be removed after auth dir creation, still watching %q", parentAfter)
+	}
+
+	// Now modify the sibling file — it should NOT trigger a pool reload
+	snapBefore := pool.Snapshot()
+	if err := os.WriteFile(siblingPath, []byte(`{"type":"codex","access_token":"sibling-modified-SENTINEL"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+
+	// Pool should be unchanged — sibling modification should not cause reload
+	snapAfter := pool.Snapshot()
+	if len(snapAfter.Accounts) != len(snapBefore.Accounts) {
+		t.Fatalf("sibling file modification caused pool change: before=%d accounts, after=%d",
+			len(snapBefore.Accounts), len(snapAfter.Accounts))
+	}
+	snapJSON, _ := json.Marshal(snapAfter)
+	if strings.Contains(string(snapJSON), "sibling") {
+		t.Fatal("sibling file contents leaked into pool after parent watch was removed")
+	}
+}
+
+// ---- Misc cleanup: single-seed idempotency ----
+
+// TestWatcher_SkipsSeedWhenPoolAlreadyPopulated verifies that when the pool
+// is already seeded (e.g., by server startup), the watcher skips its
+// initial seed to avoid redundant file reads and double-seeding.
+func TestWatcher_SkipsSeedWhenPoolAlreadyPopulated(t *testing.T) {
+	dir := t.TempDir()
+	mgr := newTestManager(t, dir)
+
+	tok := makeToken("user@example.com", "access-SENTINEL", "refresh-SENTINEL", false)
+	saveTokenFile(t, dir, tok)
+
+	// Seed the pool manually (as server.New does)
+	seedTokens, err := LoadCodexTokensFromDir(mgr, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pool := NewAccountPool(seedTokens, fakeTime)
+
+	// Record the initial snapshot
+	snapBefore := pool.Snapshot()
+	if len(snapBefore.Accounts) != 1 {
+		t.Fatalf("expected 1 seeded account, got %d", len(snapBefore.Accounts))
+	}
+	lastUsedBefore := snapBefore.Accounts[0].LastUsed
+
+	// Start the watcher — it should skip re-seeding since pool has entries
+	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	// Give the watcher a moment to settle
+	time.Sleep(200 * time.Millisecond)
+
+	// Pool state should be unchanged (watcher skipped its seed)
+	snapAfter := pool.Snapshot()
+	if len(snapAfter.Accounts) != 1 {
+		t.Fatalf("expected 1 account after watcher start, got %d", len(snapAfter.Accounts))
+	}
+	if snapAfter.Accounts[0].Selector != "user@example.com" {
+		t.Fatalf("unexpected selector: %s", snapAfter.Accounts[0].Selector)
+	}
+
+	// The watcher's seedPool should have been skipped, so LastUsed should
+	// not have been updated (no Begin was called)
+	lastUsedAfter := snapAfter.Accounts[0].LastUsed
+	if lastUsedBefore == nil && lastUsedAfter != nil {
+		t.Fatal("pool LastUsed was set despite seed being skipped")
+	}
+	if lastUsedBefore != nil && lastUsedAfter != nil && !lastUsedBefore.Equal(*lastUsedAfter) {
+		t.Fatal("pool LastUsed was modified despite seed being skipped")
+	}
+}
+
+// ---- Misc cleanup: symlink-safe isAuthDir ----
+
+// TestWatcher_IsAuthDir_SymlinkSafe verifies that isAuthDir correctly
+// identifies the auth dir even when accessed through symlinks.
+func TestWatcher_IsAuthDir_SymlinkSafe(t *testing.T) {
+	dir := t.TempDir()
+	mgr := newTestManager(t, dir)
+
+	pool := NewAccountPool(nil, fakeTime)
+	w, err := NewWatcher(mgr, pool, 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	// Direct path should match
+	if !w.isAuthDir(dir) {
+		t.Fatalf("isAuthDir failed for direct path %q", dir)
+	}
+
+	// Create a symlink to the auth dir
+	linkDir := filepath.Join(t.TempDir(), "auth-link")
+	if err := os.Symlink(dir, linkDir); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	// Path through symlink should also match
+	if !w.isAuthDir(linkDir) {
+		t.Fatalf("isAuthDir failed for symlink path %q -> %q", linkDir, dir)
+	}
+
+	// Unrelated path should not match
+	if w.isAuthDir(t.TempDir()) {
+		t.Fatal("isAuthDir should not match unrelated directory")
+	}
+}
+
 // ---- Helpers ----
 
 // newTestManager creates an oauth.Manager configured with the given temp auth dir.

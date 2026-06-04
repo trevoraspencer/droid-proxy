@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -41,9 +39,15 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Server, error) {
 
 	// Seed the Codex account pool from existing token files.
 	// Invalid/unreadable files are logged and skipped; startup continues.
-	seedTokens, seedErr := loadCodexTokensSafe(oauthMgr, logger)
-	if seedErr != nil {
-		logger.WithError(seedErr).Warn("server: initial Codex token load failed")
+	var seedTokens []*oauth.Token
+	if authDir, err := oauthMgr.AuthDir(); err != nil {
+		logger.WithError(err).Warn("server: cannot resolve auth dir")
+	} else {
+		var seedErr error
+		seedTokens, seedErr = oauth.LoadCodexTokensFromDir(oauthMgr, authDir, logger)
+		if seedErr != nil {
+			logger.WithError(seedErr).Warn("server: initial Codex token load failed")
+		}
 	}
 	sel := oauth.NewSelector(cfg.OAuth.LoadBalancing.Strategy)
 	pool := oauth.NewAccountPool(seedTokens, time.Now, sel)
@@ -167,36 +171,4 @@ func shutdownContext(timeout time.Duration) (context.Context, context.CancelFunc
 		return context.WithCancel(context.Background())
 	}
 	return context.WithTimeout(context.Background(), timeout)
-}
-
-// loadCodexTokensSafe loads Codex token files from the configured auth dir,
-// tolerating missing directories and invalid/unreadable files.
-func loadCodexTokensSafe(mgr *oauth.Manager, logger *logrus.Logger) ([]*oauth.Token, error) {
-	dir, err := mgr.AuthDir()
-	if err != nil {
-		return nil, err
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var tokens []*oauth.Token
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		path := filepath.Join(dir, entry.Name())
-		tok, err := mgr.LoadTokenAtPath(path)
-		if err != nil {
-			logger.WithError(err).WithField("file", entry.Name()).Warn("server: skipping invalid token file during startup")
-			continue
-		}
-		if tok.Provider() == oauth.ProviderCodex {
-			tokens = append(tokens, tok)
-		}
-	}
-	return tokens, nil
 }
