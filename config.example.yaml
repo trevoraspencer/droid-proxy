@@ -126,6 +126,24 @@ models:
   #   upstream_protocol: codex-responses
   #   oauth_provider: codex
   #   upstream_model: gpt-5.2-codex
+  #
+  # Standard and fast mode as separate Factory models (reasoning levels use one alias):
+  # - alias: gpt-5.5-chatgpt
+  #   display_name: "GPT 5.5 (ChatGPT)"
+  #   factory_provider: openai
+  #   upstream_protocol: codex-responses
+  #   oauth_provider: codex
+  #   upstream_model: gpt-5.5
+  #   max_output_tokens: 128000
+  # - alias: gpt-5.5-chatgpt-fast
+  #   display_name: "GPT 5.5 Fast (ChatGPT)"
+  #   factory_provider: openai
+  #   upstream_protocol: codex-responses
+  #   oauth_provider: codex
+  #   upstream_model: gpt-5.5
+  #   max_output_tokens: 128000
+  #   extra_args:
+  #     service_tier: fast
 
   # Example: xAI OAuth via Factory's OpenAI mode.
   # Run first: droid-proxy auth xai --config config.yaml

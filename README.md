@@ -226,14 +226,14 @@ Factory model picker feels native:
 ```yaml
 models:
   - alias: gpt-5.5-chatgpt
-    display_name: "GPT 5.5 (ChatGPT Pro)"
+    display_name: "GPT 5.5 (ChatGPT)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
     upstream_model: gpt-5.5
 
   - alias: gpt-5.5-chatgpt-fast
-    display_name: "GPT 5.5 Fast Mode (ChatGPT Pro)"
+    display_name: "GPT 5.5 Fast (ChatGPT)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
