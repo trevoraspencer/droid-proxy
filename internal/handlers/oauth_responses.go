@@ -184,9 +184,9 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		if entry != nil && attempt > 0 {
 			a.Logger.WithFields(map[string]any{
 				"conversation_id": codexConversation,
-				"account":           entry.Selector,
-				"attempt":           attempt + 1,
-				"failover":          true,
+				"account":         entry.Selector,
+				"attempt":         attempt + 1,
+				"failover":        true,
 			}).Trace("codex account failover")
 		}
 		if selErr != nil {

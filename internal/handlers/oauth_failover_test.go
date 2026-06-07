@@ -25,10 +25,10 @@ import (
 
 // failoverTestAccount describes a Codex account for failover tests.
 type failoverTestAccount struct {
-	email        string
-	accountID    string
-	disabled     bool
-	usedPercent  float64 // optional Codex primary-window used_percent for quota routing
+	email       string
+	accountID   string
+	disabled    bool
+	usedPercent float64 // optional Codex primary-window used_percent for quota routing
 }
 
 // failoverTestOptions configures a failover test API.

@@ -69,23 +69,23 @@ type PoolAffinitySnapshot struct {
 
 // PoolSnapshot is a safe, deep-copy view of the entire pool state.
 type PoolSnapshot struct {
-	Strategy       string                `json:"strategy,omitempty"`
-	CodexAccounts  int                   `json:"codex_account_count,omitempty"`
-	EligibleCount  int                   `json:"eligible_count,omitempty"`
-	Affinity       *PoolAffinitySnapshot `json:"affinity,omitempty"`
-	Accounts       []AccountSnapshot     `json:"accounts"`
+	Strategy      string                `json:"strategy,omitempty"`
+	CodexAccounts int                   `json:"codex_account_count,omitempty"`
+	EligibleCount int                   `json:"eligible_count,omitempty"`
+	Affinity      *PoolAffinitySnapshot `json:"affinity,omitempty"`
+	Accounts      []AccountSnapshot     `json:"accounts"`
 }
 
 // AccountPool maintains an in-memory view of loaded Codex token files with
 // runtime state for health, cooldown, rate-limiting, and in-flight accounting.
 type AccountPool struct {
-	mu            sync.Mutex
-	entries       map[string]*AccountEntry // keyed by token file path
-	nowFunc       func() time.Time
-	selector      Selector
-	strategy      config.LoadBalancingStrategy
-	quotaSoftCap  float64
-	affinity      *AffinityStore
+	mu           sync.Mutex
+	entries      map[string]*AccountEntry // keyed by token file path
+	nowFunc      func() time.Time
+	selector     Selector
+	strategy     config.LoadBalancingStrategy
+	quotaSoftCap float64
+	affinity     *AffinityStore
 }
 
 // NewAccountPool creates a pool seeded from the given tokens.
