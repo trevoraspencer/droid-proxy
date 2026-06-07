@@ -46,3 +46,10 @@ id_ed25519
 
 # Factory validation reports (legacy path under repo)
 /.factory/validation/
+
+# Agent and tooling scratch artifacts (never commit)
+.cursor/plans/
+notes/
+scratch/
+tmp/
+/.go-public/
