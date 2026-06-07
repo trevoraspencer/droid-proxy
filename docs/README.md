@@ -30,6 +30,8 @@ Guides for running `droid-proxy` with [Factory Droid](https://factory.ai).
 | [OAUTH.md](OAUTH.md) | Codex/ChatGPT and xAI OAuth walkthrough |
 | [SMOKE.md](SMOKE.md) | Verify your setup with curl |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | Direct dependency SPDX licenses |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | How to build, test, and send PRs |
+| [../CHANGELOG.md](../CHANGELOG.md) | Release history |
 
 ## Provider examples
 

@@ -80,6 +80,17 @@ else
   fail "scripts/legal-audit.sh not found"
 fi
 
+if [[ -f "${ROOT}/scripts/docs-audit.sh" ]]; then
+  info "Running Phase 4 docs-audit (required)"
+  if bash "${ROOT}/scripts/docs-audit.sh"; then
+    pass "Phase 4 docs-audit"
+  else
+    fail "Phase 4 docs-audit failed"
+  fi
+else
+  fail "scripts/docs-audit.sh not found"
+fi
+
 info "MANUAL: confirm API keys and OAuth credentials have been rotated (Phase 1.2)"
 info "MANUAL: confirm GitHub repo is still private until after you review public-main"
 
