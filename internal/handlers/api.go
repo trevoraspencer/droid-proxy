@@ -20,15 +20,14 @@ type API struct {
 	ReasoningCache *reasoning.Cache
 }
 
-// NewAPI builds an API from Deps and a logger.
-func NewAPI(d Deps, logger *logrus.Logger) *API {
-	oauthManager := d.OAuth
-	if oauthManager == nil {
-		oauthManager = oauth.NewManager(d.Cfg)
+// NewAPI builds an API from runtime dependencies and a logger.
+func NewAPI(cfg *config.Config, router *upstream.Router, client *upstream.Client, oauthMgr *oauth.Manager, pool *oauth.AccountPool, logger *logrus.Logger) *API {
+	if oauthMgr == nil {
+		oauthMgr = oauth.NewManager(cfg)
 	}
-	api := &API{Cfg: d.Cfg, Router: d.Router, Client: d.Client, OAuth: oauthManager, Pool: d.Pool, Logger: logger}
-	if d.Cfg.ReasoningCache.Enabled {
-		api.ReasoningCache = reasoning.NewCache(d.Cfg.ReasoningCache.MaxEntries, d.Cfg.ReasoningCache.TTL)
+	api := &API{Cfg: cfg, Router: router, Client: client, OAuth: oauthMgr, Pool: pool, Logger: logger}
+	if cfg.ReasoningCache.Enabled {
+		api.ReasoningCache = reasoning.NewCache(cfg.ReasoningCache.MaxEntries, cfg.ReasoningCache.TTL)
 	}
 	return api
 }

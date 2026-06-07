@@ -12,20 +12,10 @@ import (
 
 	"droid-proxy/internal/config"
 	"droid-proxy/internal/logging"
-	"droid-proxy/internal/oauth"
 	"droid-proxy/internal/upstream"
 )
 
 const TraceRequestBodyKey = "trace_request_body"
-
-// Deps groups the runtime services every handler needs.
-type Deps struct {
-	Cfg    *config.Config
-	Router *upstream.Router
-	Client *upstream.Client
-	OAuth  *oauth.Manager
-	Pool   *oauth.AccountPool
-}
 
 // ErrorBody is the OpenAI-shaped error envelope. Anthropic and Responses payloads
 // use their own envelopes (built in their respective translators); use this only
