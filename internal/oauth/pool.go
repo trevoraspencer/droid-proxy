@@ -69,23 +69,23 @@ type PoolAffinitySnapshot struct {
 
 // PoolSnapshot is a safe, deep-copy view of the entire pool state.
 type PoolSnapshot struct {
-	Strategy       string                `json:"strategy,omitempty"`
-	CodexAccounts  int                   `json:"codex_account_count,omitempty"`
-	EligibleCount  int                   `json:"eligible_count,omitempty"`
-	Affinity       *PoolAffinitySnapshot `json:"affinity,omitempty"`
-	Accounts       []AccountSnapshot     `json:"accounts"`
+	Strategy      string                `json:"strategy,omitempty"`
+	CodexAccounts int                   `json:"codex_account_count,omitempty"`
+	EligibleCount int                   `json:"eligible_count,omitempty"`
+	Affinity      *PoolAffinitySnapshot `json:"affinity,omitempty"`
+	Accounts      []AccountSnapshot     `json:"accounts"`
 }
 
 // AccountPool maintains an in-memory view of loaded Codex token files with
 // runtime state for health, cooldown, rate-limiting, and in-flight accounting.
 type AccountPool struct {
-	mu            sync.Mutex
-	entries       map[string]*AccountEntry // keyed by token file path
-	nowFunc       func() time.Time
-	selector      Selector
-	strategy      config.LoadBalancingStrategy
-	quotaSoftCap  float64
-	affinity      *AffinityStore
+	mu           sync.Mutex
+	entries      map[string]*AccountEntry // keyed by token file path
+	nowFunc      func() time.Time
+	selector     Selector
+	strategy     config.LoadBalancingStrategy
+	quotaSoftCap float64
+	affinity     *AffinityStore
 }
 
 // NewAccountPool creates a pool seeded from the given tokens.
@@ -546,12 +546,28 @@ func (p *AccountPool) Select(account string, exclude map[string]bool, conversati
 		picked, err = p.selector.Select(eligible)
 	}
 
+	// Return a detached copy. Callers read the returned entry without holding
+	// p.mu, while the watcher-driven reload mutates the live map entry's fields
+	// under the lock (see updateEntry); aliasing the live pointer is a data race.
+	out := picked.clone()
 	p.mu.Unlock()
 
 	if err != nil {
 		return nil, err
 	}
-	return picked, nil
+	return out, nil
+}
+
+// clone returns a detached shallow copy of the entry, safe to read without the
+// pool lock. Pointer fields (Quota, RateLimitResetAt) are treated as
+// immutable-after-set — reload replaces them wholesale rather than mutating the
+// pointee — so sharing them across the copy is safe.
+func (e *AccountEntry) clone() *AccountEntry {
+	if e == nil {
+		return nil
+	}
+	cp := *e
+	return &cp
 }
 
 func (p *AccountPool) selectStickyLocked(conversationID string, eligible []*AccountEntry, exclude map[string]bool) *AccountEntry {

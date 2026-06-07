@@ -175,14 +175,14 @@ func (s LoadBalancingStrategy) IsValid() bool {
 // LoadBalancing holds OAuth multi-account pool configuration.
 // It applies only to Codex OAuth accounts.
 type LoadBalancing struct {
-	Strategy             LoadBalancingStrategy `yaml:"strategy"`
-	MaxFailovers         int                   `yaml:"max_failovers"`
-	RateLimitCooldown    time.Duration         `yaml:"rate_limit_cooldown"`
-	ErrorCooldown        time.Duration         `yaml:"error_cooldown"`
-	QuotaSoftCapPercent  float64               `yaml:"quota_soft_cap_percent"`
-	AffinityPath         string                `yaml:"affinity_path"`
-	AffinityMaxEntries   int                   `yaml:"affinity_max_entries"`
-	AffinityTTL          time.Duration         `yaml:"affinity_ttl"`
+	Strategy            LoadBalancingStrategy `yaml:"strategy"`
+	MaxFailovers        int                   `yaml:"max_failovers"`
+	RateLimitCooldown   time.Duration         `yaml:"rate_limit_cooldown"`
+	ErrorCooldown       time.Duration         `yaml:"error_cooldown"`
+	QuotaSoftCapPercent float64               `yaml:"quota_soft_cap_percent"`
+	AffinityPath        string                `yaml:"affinity_path"`
+	AffinityMaxEntries  int                   `yaml:"affinity_max_entries"`
+	AffinityTTL         time.Duration         `yaml:"affinity_ttl"`
 }
 
 type Model struct {

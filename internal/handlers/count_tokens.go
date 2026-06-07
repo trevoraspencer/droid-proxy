@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -99,8 +98,10 @@ func anthropicContentText(v gjson.Result) string {
 				sb.WriteString(name)
 			}
 			if input := block.Get("input"); input.Exists() {
-				raw, _ := json.Marshal(input.Raw)
-				sb.Write(raw)
+				// input.Raw is already the JSON text of the arguments object;
+				// append it directly. Marshalling it again would re-encode the
+				// JSON as a quoted/escaped string and skew the token estimate.
+				sb.WriteString(input.Raw)
 			}
 		}
 	}

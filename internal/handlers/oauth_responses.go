@@ -184,9 +184,9 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		if entry != nil && attempt > 0 {
 			a.Logger.WithFields(map[string]any{
 				"conversation_id": codexConversation,
-				"account":           entry.Selector,
-				"attempt":           attempt + 1,
-				"failover":          true,
+				"account":         entry.Selector,
+				"attempt":         attempt + 1,
+				"failover":        true,
 			}).Trace("codex account failover")
 		}
 		if selErr != nil {
@@ -558,7 +558,7 @@ func (a *API) forwardOAuthResponsesStream(c *gin.Context, m *config.Model, resp 
 		IsTerminal:  oauthResponsesTerminal,
 		OnLine: func(line []byte) {
 			if quota := codexQuotaFromSSELine(line); quota != nil {
-				a.recordCodexUsage(token, quota, nil)
+				a.recordCodexUsageAsync(token, quota, nil)
 			}
 		},
 		WriteTruncationError: a.responsesTruncationWriter(http.StatusBadGateway, "upstream stream ended before terminal marker"),

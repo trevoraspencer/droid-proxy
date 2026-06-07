@@ -14,10 +14,10 @@ func TestAffinityStore_BindAndLookup(t *testing.T) {
 	path := filepath.Join(dir, "conversation_affinity.json")
 	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	store, err := NewAffinityStore(AffinityOptions{
-		Path:    path,
-		TTL:     time.Hour,
+		Path:       path,
+		TTL:        time.Hour,
 		MaxEntries: 100,
-		NowFunc: func() time.Time { return now },
+		NowFunc:    func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatal(err)
