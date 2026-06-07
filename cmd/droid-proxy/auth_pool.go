@@ -93,15 +93,15 @@ func formatPoolHealthJSON(raw []byte) (string, error) {
 			File               string `json:"file"`
 		} `json:"affinity"`
 		Accounts []struct {
-			Selector               string             `json:"selector"`
-			Disabled               bool               `json:"disabled"`
-			Healthy                bool               `json:"healthy"`
-			InFlight               int                `json:"in_flight"`
-			MaxUsedPercent         *float64           `json:"max_used_percent"`
-			BoundConversationCount int                `json:"bound_conversation_count"`
-			CooldownUntil          *time.Time         `json:"cooldown_until"`
-			RateLimitedUntil       *time.Time         `json:"rate_limit_until"`
-			Quota                  *oauth.CodexQuota  `json:"quota"`
+			Selector               string            `json:"selector"`
+			Disabled               bool              `json:"disabled"`
+			Healthy                bool              `json:"healthy"`
+			InFlight               int               `json:"in_flight"`
+			MaxUsedPercent         *float64          `json:"max_used_percent"`
+			BoundConversationCount int               `json:"bound_conversation_count"`
+			CooldownUntil          *time.Time        `json:"cooldown_until"`
+			RateLimitedUntil       *time.Time        `json:"rate_limit_until"`
+			Quota                  *oauth.CodexQuota `json:"quota"`
 		} `json:"accounts"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
