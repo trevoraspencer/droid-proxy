@@ -56,6 +56,7 @@ Factory settings snippets: [`factory-settings/`](factory-settings/).
 
 Maintainer validation harness (not required for normal use):
 
+- [PUBLIC_RELEASE.md](PUBLIC_RELEASE.md) — Phase 0 strategy and orphan-branch procedure for going public
 - [LIVE_E2E_PLAN.md](LIVE_E2E_PLAN.md) — live end-to-end test plan
 - [live-e2e/DONE.md](live-e2e/DONE.md) — manual steps after scaffold
 

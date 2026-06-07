@@ -130,3 +130,23 @@ func TestGitleaksConfigPresent(t *testing.T) {
 		t.Fatalf(".gitleaks.toml must exist for pre-public audits: %v", err)
 	}
 }
+
+// TestPublicReleasePhase0Artifacts ensures Phase 0 strategy docs and scripts exist.
+func TestPublicReleasePhase0Artifacts(t *testing.T) {
+	root := repoRoot(t)
+	required := []string{
+		"docs/PUBLIC_RELEASE.md",
+		"scripts/public-release-preflight.sh",
+		"scripts/create-public-history.sh",
+	}
+	for _, rel := range required {
+		path := filepath.Join(root, rel)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("missing Phase 0 artifact %s: %v", rel, err)
+		}
+		if info.IsDir() {
+			t.Fatalf("expected file, got directory: %s", rel)
+		}
+	}
+}
