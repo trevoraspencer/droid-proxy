@@ -46,7 +46,8 @@ The `/v1` prefix is optional on every non-health route.
 ## Install
 
 ```bash
-git clone <this-repo> droid-proxy && cd droid-proxy
+git clone https://github.com/trevoraspencer/droid-proxy.git
+cd droid-proxy
 go build -o droid-proxy ./cmd/droid-proxy
 ```
 
@@ -65,8 +66,7 @@ source ~/.zshrc
 droid-proxy status
 ```
 
-Replace `/path/to/droid-proxy` with the source checkout where you ran
-`go build`; for example, `/Users/trevor/code/droid-proxy`. After this, use
+Replace `/path/to/droid-proxy` with the directory where you ran `go build`. After this, use
 `droid-proxy start`, `droid-proxy status`, `droid-proxy restart`,
 `droid-proxy config`, and
 `droid-proxy update` from any working directory. The `~/.droid-proxy/` directory
@@ -323,7 +323,7 @@ GOMAXPROCS=2 go vet ./... && test -z "$(gofmt -l .)"
 
 Workflow validation uses local fake upstreams and does not require provider API keys.
 
-**Contributors:** live validation harness in [docs/LIVE_E2E_PLAN.md](docs/LIVE_E2E_PLAN.md).
+**Contributors:** optional live validation harness in [scripts/live-e2e/README.md](scripts/live-e2e/README.md).
 
 ## License
 

@@ -5,7 +5,7 @@ set -euo pipefail
 _live_e2e_lib_path="${(%):-%N}"
 typeset -g LIVE_E2E_SCRIPT_DIR="${LIVE_E2E_SCRIPT_DIR:-${_live_e2e_lib_path:A:h}}"
 typeset -g LIVE_E2E_REPO_ROOT="${LIVE_E2E_REPO_ROOT:-$(cd "$LIVE_E2E_SCRIPT_DIR/../.." && pwd)}"
-typeset -g LIVE_E2E_BASE_DIR="${LIVE_E2E_BASE_DIR:-$LIVE_E2E_REPO_ROOT/.factory/validation/live-e2e}"
+typeset -g LIVE_E2E_BASE_DIR="${LIVE_E2E_BASE_DIR:-$HOME/.droid-proxy/live-e2e}"
 typeset -g LIVE_E2E_RUN_ID="${LIVE_E2E_RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 typeset -g LIVE_E2E_RUN_DIR="${LIVE_E2E_RUN_DIR:-$LIVE_E2E_BASE_DIR/$LIVE_E2E_RUN_ID}"
 typeset -g LIVE_E2E_RESULTS_NDJSON="${LIVE_E2E_RESULTS_NDJSON:-$LIVE_E2E_RUN_DIR/results.ndjson}"

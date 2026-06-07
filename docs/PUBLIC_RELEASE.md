@@ -43,8 +43,7 @@ If you prefer not to rewrite the private repo at all:
 
 ## Prerequisites (run in order)
 
-1. Complete later cleanup phases (remove `.factory/`, internal plan docs, etc.)
-   **before** the final squash, or the single commit will still contain them.
+1. Phase 3 cleanup is complete (`.factory/` removed, internal plan docs removed).
 2. `make pre-public-audit` — Phase 1 security scan must pass.
 3. `make public-release-preflight` — Phase 0 readiness checks.
 4. **Rotate** all API keys and OAuth credentials that ever touched the private repo.

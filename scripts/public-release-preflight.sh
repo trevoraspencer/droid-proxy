@@ -54,18 +54,13 @@ else
 fi
 
 info "Checking for common pre-public blockers in the working tree"
-blockers=()
-[[ -d "${ROOT}/.factory/docs" ]] && blockers+=(".factory/docs/ (internal agent notes)")
-[[ -d "${ROOT}/.factory/research" ]] && blockers+=(".factory/research/ (internal research)")
-[[ -f "${ROOT}/docs/IMPLEMENTATION_PLAN.md" ]] && blockers+=("docs/IMPLEMENTATION_PLAN.md (contains local donor paths)")
-[[ -f "${ROOT}/docs/live-e2e/DONE.md" ]] && blockers+=("docs/live-e2e/DONE.md (internal validation log)")
-
-if ((${#blockers[@]} > 0)); then
-  for b in "${blockers[@]}"; do
-    warn "still present: ${b} — remove in a later cleanup phase before publishing"
-  done
+tracked_factory="$(git ls-files '.factory' || true)"
+if [[ -n "$tracked_factory" ]]; then
+  while IFS= read -r tracked; do
+    [[ -n "$tracked" ]] && warn "still present: .factory/ tracked in git: $tracked"
+  done <<< "$tracked_factory"
 else
-  pass "no common internal-artifact blockers detected"
+  pass "no .factory/ artifacts tracked in git"
 fi
 
 if git ls-files --error-unmatch docs/PUBLIC_RELEASE.md >/dev/null 2>&1; then

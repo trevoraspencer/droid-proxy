@@ -21,12 +21,12 @@ if ! test -z "$(gofmt -l .)"; then
   warn "repository has files that need gofmt"
 fi
 
-pgrep -fl 'CLIProxyAPIPlus|CLIProxyAPI|cliproxy|VibeProxy|vibeproxy|droid-proxy|cursor-proxy' \
+pgrep -fl 'droid-proxy|cursor-proxy' \
   2>"$LIVE_E2E_RUN_DIR/processes.before.err" \
   | tee "$LIVE_E2E_RUN_DIR/processes.before.txt" || true
 
 lsof -nP -iTCP -sTCP:LISTEN \
-  | rg 'CLIProxy|cliproxy|VibeProxy|vibeproxy|droid-proxy|cursor-proxy|:8787|:1455|:56121|:8000|:11434' \
+  | rg 'droid-proxy|cursor-proxy|:8787|:1455|:56121|:8000|:11434' \
   | tee "$LIVE_E2E_RUN_DIR/listeners.before.txt" || true
 
 for port in 8787 1455 56121; do
@@ -50,4 +50,4 @@ load_local_env
 require_env_names DEEPSEEK_API_KEY ZAI_CODING_API_KEY FIREWORKS_API_KEY FIREWORKS_MODEL || true
 require_one_of_env MIMO_API_KEY MIMO_TOKEN_PLAN_CN_API_KEY MIMO_TOKEN_PLAN_SGP_API_KEY MIMO_TOKEN_PLAN_AMS_API_KEY || true
 
-info "Preflight complete. Add secrets/OAuth using docs/live-e2e/DONE.md before the final live run."
+info "Preflight complete. Add secrets/OAuth using scripts/live-e2e/README.md before the final live run."

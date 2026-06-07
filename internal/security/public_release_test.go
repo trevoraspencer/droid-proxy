@@ -150,3 +150,27 @@ func TestPublicReleasePhase0Artifacts(t *testing.T) {
 		}
 	}
 }
+
+// TestTrackedFilesExcludeInternalArtifacts ensures Phase 3 cleanup artifacts
+// are not committed.
+func TestTrackedFilesExcludeInternalArtifacts(t *testing.T) {
+	root := repoRoot(t)
+	files := gitLsFiles(t, root)
+
+	forbiddenPrefixes := []string{".factory/"}
+	forbiddenPaths := map[string]bool{
+		"docs/IMPLEMENTATION_PLAN.md": true,
+		"docs/LIVE_E2E_PLAN.md":       true,
+		"docs/live-e2e/DONE.md":       true,
+	}
+	for _, rel := range files {
+		for _, prefix := range forbiddenPrefixes {
+			if strings.HasPrefix(rel, prefix) {
+				t.Errorf("tracked internal artifact: %s", rel)
+			}
+		}
+		if forbiddenPaths[rel] {
+			t.Errorf("tracked internal doc: %s", rel)
+		}
+	}
+}
