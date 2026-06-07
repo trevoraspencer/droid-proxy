@@ -69,6 +69,17 @@ else
   fail "docs/PUBLIC_RELEASE.md is not tracked by git"
 fi
 
+if [[ -f "${ROOT}/scripts/legal-audit.sh" ]]; then
+  info "Running Phase 2 legal-audit (required)"
+  if bash "${ROOT}/scripts/legal-audit.sh"; then
+    pass "Phase 2 legal-audit"
+  else
+    fail "Phase 2 legal-audit failed"
+  fi
+else
+  fail "scripts/legal-audit.sh not found"
+fi
+
 info "MANUAL: confirm API keys and OAuth credentials have been rotated (Phase 1.2)"
 info "MANUAL: confirm GitHub repo is still private until after you review public-main"
 

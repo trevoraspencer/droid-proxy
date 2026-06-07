@@ -325,6 +325,14 @@ Workflow validation uses local fake upstreams and does not require provider API 
 
 **Contributors:** optional live validation harness in [scripts/live-e2e/README.md](scripts/live-e2e/README.md).
 
+## Disclaimer
+
+droid-proxy is an independent open-source project. It is **not affiliated with,
+endorsed by, or officially supported by** [Factory AI](https://factory.ai) or any
+model provider named in the documentation. Factory Droid and provider names are
+trademarks of their respective owners.
+
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE). Third-party component licenses are listed in
+[`docs/THIRD_PARTY_LICENSES.md`](docs/THIRD_PARTY_LICENSES.md).

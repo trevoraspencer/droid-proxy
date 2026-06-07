@@ -1,0 +1,12 @@
+{
+  "github.com/charmbracelet/bubbles": "MIT",
+  "github.com/charmbracelet/bubbletea": "MIT",
+  "github.com/charmbracelet/lipgloss": "MIT",
+  "github.com/fsnotify/fsnotify": "BSD-3-Clause",
+  "github.com/gin-gonic/gin": "MIT",
+  "github.com/sirupsen/logrus": "MIT",
+  "github.com/tidwall/gjson": "MIT",
+  "github.com/tidwall/sjson": "MIT",
+  "github.com/tiktoken-go/tokenizer": "MIT",
+  "gopkg.in/yaml.v3": "MIT"
+}
