@@ -1,0 +1,63 @@
+# go-public policy configuration for droid-proxy.
+#
+# Used by the portable go-public audit tooling
+# (https://github.com/trevoraspencer/go-public). Run the audit against this
+# repository with:
+#
+#   GO_PUBLIC_ROOT=$(pwd) GO_PUBLIC_CONFIG=$(pwd)/.go-public.yaml \
+#     /path/to/go-public/scripts/go-public audit --dry-run
+#
+# This file records the project-specific secret allowlist so the full-history
+# secret scan fails closed on real credentials while documenting why each
+# synthetic test sentinel is safe. It complements .gitleaks.toml.
+
+strategy: orphan
+public_branch: public-main
+target_branch: main
+
+# High-confidence secret patterns scanned across full git history (ERE).
+secret_patterns:
+  - "ghp_[A-Za-z0-9_]{20,}"
+  - "github_pat_[A-Za-z0-9_]{20,}"
+  - "sk-[A-Za-z0-9_-]{20,}"
+  - "AKIA[0-9A-Z]{16}"
+  - "BEGIN (RSA |EC |OPENSSH |)?PRIVATE KEY"
+  - "eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"
+
+# Allowlist for synthetic secrets only (ERE). Every entry is a non-credential
+# test/redaction fixture; none is a real secret. Kept in sync with the
+# allowlist in .gitleaks.toml.
+secret_allowlist:
+  # Redaction unit-test fixtures (internal/logging/redact_test.go) and the
+  # SMOKE.md leak-detection example — strings that MUST appear so tests can
+  # assert they are scrubbed from logs and responses.
+  - "sk-abc123def456ghi789jkl"
+  - "sk-abcdefghijklmnopqrst"
+  - "sk-ant-abc123def456ghi789"
+  - "sk-secret-do-not-log-1234"
+  # Workflow/integration redaction sentinels (internal/server/*_test.go).
+  - "sk-WORKFLOWSECRET123456"
+  - "sentinel-openai-key"
+  - "sentinel-anthropic-key"
+  - "workflow-client-key"
+  # Cross-provider auth-isolation sentinels.
+  - "sk-CROSS009-[A-Za-z0-9-]+"
+
+gitignore_required:
+  - ".env"
+  - ".env.*"
+  - "!.env.local.example"
+  - "secrets.env"
+  - "*.pem"
+  - "*.key"
+  - "*.p12"
+  - "*.pfx"
+  - "*.log"
+  - "/.factory/"
+  - ".cursor/plans/"
+  - "notes/"
+  - "scratch/"
+  - "tmp/"
+
+example_env_files:
+  - .env.local.example
