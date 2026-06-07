@@ -24,17 +24,7 @@ func (a *API) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	m, ok := a.resolveRequestModel(body, modelResolveErrors{
-		Missing: func() {
-			BadRequest(c, "request is missing required field: model")
-		},
-		NotFound: func(err error) {
-			WriteJSONError(c, http.StatusNotFound, "model_not_found", err.Error())
-		},
-		Internal: func(err error) {
-			WriteJSONError(c, http.StatusInternalServerError, "internal_error", err.Error())
-		},
-	})
+	m, ok := a.resolveRequestModel(body, openAIModelErrors(c))
 	if !ok {
 		return
 	}

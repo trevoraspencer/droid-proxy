@@ -24,7 +24,7 @@ type Server struct {
 	cfg     *config.Config
 	logger  *logrus.Logger
 	engine  *gin.Engine
-	deps    handlers.Deps
+	oauth   *oauth.Manager
 	pool    *oauth.AccountPool
 	watcher *oauth.Watcher
 }
@@ -74,14 +74,8 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Server, error) {
 	}
 	pool := oauth.NewAccountPool(seedTokens, time.Now, cfg.OAuth.LoadBalancing, affinity, sel)
 
-	deps := handlers.Deps{
-		Cfg:    cfg,
-		Router: router,
-		Client: upstream.NewClient(cfg),
-		OAuth:  oauthMgr,
-		Pool:   pool,
-	}
-	api := handlers.NewAPI(deps, logger)
+	client := upstream.NewClient(cfg)
+	api := handlers.NewAPI(cfg, router, client, oauthMgr, pool, logger)
 
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
@@ -99,7 +93,7 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Server, error) {
 	authed := engine.Group("/", ClientAuth(cfg), RequestBodyLimit(cfg))
 	registerAPIRoutes(authed, api)
 
-	return &Server{cfg: cfg, logger: logger, engine: engine, deps: deps, pool: pool}, nil
+	return &Server{cfg: cfg, logger: logger, engine: engine, oauth: oauthMgr, pool: pool}, nil
 }
 
 // registerAPIRoutes mounts the /v1/* surface plus its prefix-less aliases.
@@ -138,7 +132,7 @@ func (s *Server) Run(ctx context.Context) error {
 // tests that need the OS to choose a port without releasing it before startup.
 func (s *Server) RunOnListener(ctx context.Context, ln net.Listener) error {
 	// Start the auth-dir watcher for hot reload of Codex token files.
-	watcher, err := oauth.NewWatcher(s.deps.OAuth, s.pool, 200*time.Millisecond, s.logger)
+	watcher, err := oauth.NewWatcher(s.oauth, s.pool, 200*time.Millisecond, s.logger)
 	if err != nil {
 		s.logger.WithError(err).Warn("server: auth-dir watcher failed to start; hot reload disabled")
 	}
