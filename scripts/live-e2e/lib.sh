@@ -12,10 +12,36 @@ typeset -g LIVE_E2E_RESULTS_NDJSON="${LIVE_E2E_RESULTS_NDJSON:-$LIVE_E2E_RUN_DIR
 typeset -g LIVE_E2E_CONFIG="${LIVE_E2E_CONFIG:-$LIVE_E2E_REPO_ROOT/config.local.yaml}"
 if [[ -z "${LIVE_E2E_ENV_FILE:-}" ]]; then
   print -u2 -r -- "[live-e2e] ERROR: LIVE_E2E_ENV_FILE is required."
-  print -u2 -r -- '[live-e2e] Example: export LIVE_E2E_ENV_FILE="$PWD/.factory/validation/live-e2e/secrets.env"'
+  print -u2 -r -- '[live-e2e] Example: export LIVE_E2E_ENV_FILE="$HOME/.droid-proxy/live-e2e/secrets.env"'
   exit 1
 fi
 typeset -g LIVE_E2E_ENV_FILE
+
+assert_live_e2e_env_file_safe() {
+  local env_dir env_real repo_real rel
+
+  env_dir="${LIVE_E2E_ENV_FILE:h}"
+  [[ -n "$env_dir" ]] || fail "LIVE_E2E_ENV_FILE has no directory component: $LIVE_E2E_ENV_FILE"
+  env_real="$(cd "$env_dir" && pwd -P)/$(basename "$LIVE_E2E_ENV_FILE")"
+  repo_real="$(cd "$LIVE_E2E_REPO_ROOT" && pwd -P)"
+
+  case "$env_real" in
+    "$repo_real"/*)
+      case "$env_real" in
+        *.example) ;;
+        *)
+          fail "LIVE_E2E_ENV_FILE must stay outside the repo (use e.g. \$HOME/.droid-proxy/live-e2e/secrets.env). Got: $LIVE_E2E_ENV_FILE"
+          ;;
+      esac
+      rel="${env_real#"$repo_real"/}"
+      if git -C "$LIVE_E2E_REPO_ROOT" ls-files --error-unmatch "$rel" >/dev/null 2>&1; then
+        fail "LIVE_E2E_ENV_FILE is tracked by git: $rel"
+      fi
+      ;;
+  esac
+}
+
+assert_live_e2e_env_file_safe
 typeset -g LIVE_E2E_PROXY_PID_FILE="${LIVE_E2E_PROXY_PID_FILE:-$LIVE_E2E_RUN_DIR/proxy.pid}"
 typeset -g LIVE_E2E_PROXY_LOG="${LIVE_E2E_PROXY_LOG:-$LIVE_E2E_RUN_DIR/proxy.log}"
 typeset -g LIVE_E2E_CURRENT_RUN_ENV="${LIVE_E2E_CURRENT_RUN_ENV:-$LIVE_E2E_RUN_DIR/current-run.env}"
