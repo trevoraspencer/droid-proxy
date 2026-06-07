@@ -29,6 +29,7 @@ Guides for running `droid-proxy` with [Factory Droid](https://factory.ai).
 | [PROVIDERS.md](PROVIDERS.md) | Provider matrix, tiers, OAuth summary |
 | [OAUTH.md](OAUTH.md) | Codex/ChatGPT and xAI OAuth walkthrough |
 | [SMOKE.md](SMOKE.md) | Verify your setup with curl |
+| [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | Direct dependency SPDX licenses |
 
 ## Provider examples
 
@@ -54,12 +55,9 @@ Factory settings snippets: [`factory-settings/`](factory-settings/).
 
 ## Contributors only
 
-Maintainer validation harness (not required for normal use):
+Maintainer docs (not required for normal use):
 
-- [LIVE_E2E_PLAN.md](LIVE_E2E_PLAN.md) — live end-to-end test plan
-- [live-e2e/DONE.md](live-e2e/DONE.md) — manual steps after scaffold
-
-## Internal / historical
-
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) is an archived build plan for
-agents — not authoritative user documentation.
+- [PUBLIC_RELEASE.md](PUBLIC_RELEASE.md) — public release strategy and orphan-branch procedure
+- [../SECURITY.md](../SECURITY.md) — security vulnerability reporting
+- [../CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) — community standards
+- [../scripts/live-e2e/README.md](../scripts/live-e2e/README.md) — optional live E2E validation against real credentials

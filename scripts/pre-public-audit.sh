@@ -116,14 +116,16 @@ else
 fi
 
 # --- 1.5 Live-e2e env file must stay out of repo ---
-if [[ -f "${ROOT}/.factory/validation/live-e2e/secrets.env" ]]; then
+if [[ -f "${HOME}/.droid-proxy/live-e2e/secrets.env" ]]; then
+  pass "live-e2e secrets.env found under ~/.droid-proxy/live-e2e/ (expected outside repo)"
+elif [[ -f "${ROOT}/.factory/validation/live-e2e/secrets.env" ]]; then
   if git check-ignore -q ".factory/validation/live-e2e/secrets.env" 2>/dev/null; then
-    pass "live-e2e secrets.env is gitignored"
+    pass "legacy live-e2e secrets.env is gitignored"
   else
-    fail ".factory/validation/live-e2e/secrets.env exists but is not gitignored"
+    fail "legacy .factory/validation/live-e2e/secrets.env exists but is not gitignored"
   fi
 else
-  pass "no committed live-e2e secrets.env present in working tree"
+  pass "no live-e2e secrets.env present in working tree"
 fi
 
 # --- Rotation reminder (1.2 — manual step) ---

@@ -130,3 +130,47 @@ func TestGitleaksConfigPresent(t *testing.T) {
 		t.Fatalf(".gitleaks.toml must exist for pre-public audits: %v", err)
 	}
 }
+
+// TestPublicReleasePhase0Artifacts ensures Phase 0 strategy docs and scripts exist.
+func TestPublicReleasePhase0Artifacts(t *testing.T) {
+	root := repoRoot(t)
+	required := []string{
+		"docs/PUBLIC_RELEASE.md",
+		"scripts/public-release-preflight.sh",
+		"scripts/create-public-history.sh",
+	}
+	for _, rel := range required {
+		path := filepath.Join(root, rel)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("missing Phase 0 artifact %s: %v", rel, err)
+		}
+		if info.IsDir() {
+			t.Fatalf("expected file, got directory: %s", rel)
+		}
+	}
+}
+
+// TestTrackedFilesExcludeInternalArtifacts ensures Phase 3 cleanup artifacts
+// are not committed.
+func TestTrackedFilesExcludeInternalArtifacts(t *testing.T) {
+	root := repoRoot(t)
+	files := gitLsFiles(t, root)
+
+	forbiddenPrefixes := []string{".factory/"}
+	forbiddenPaths := map[string]bool{
+		"docs/IMPLEMENTATION_PLAN.md": true,
+		"docs/LIVE_E2E_PLAN.md":       true,
+		"docs/live-e2e/DONE.md":       true,
+	}
+	for _, rel := range files {
+		for _, prefix := range forbiddenPrefixes {
+			if strings.HasPrefix(rel, prefix) {
+				t.Errorf("tracked internal artifact: %s", rel)
+			}
+		}
+		if forbiddenPaths[rel] {
+			t.Errorf("tracked internal doc: %s", rel)
+		}
+	}
+}

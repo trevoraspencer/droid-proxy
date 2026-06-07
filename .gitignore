@@ -41,5 +41,8 @@ id_ed25519
 *.tgz
 *.tar.gz
 
-# Factory validation reports
+# Factory local validation (never commit)
+/.factory/
+
+# Factory validation reports (legacy path under repo)
 /.factory/validation/

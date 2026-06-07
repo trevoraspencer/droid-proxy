@@ -678,7 +678,7 @@ func TestDocsFencedYAMLExamplesParseable(t *testing.T) {
 
 // --- VAL-CROSS-002: Donor reference cleanliness ---
 
-func TestDocsNoDonorReferencesOutsideImplementationPlan(t *testing.T) {
+func TestDocsNoDonorReferences(t *testing.T) {
 	// Programmatic equivalent of the mission donor-denylist gate.
 	// Denylist patterns are loaded from a separate file to avoid the test
 	// source itself matching the grep.
@@ -699,8 +699,7 @@ func TestDocsNoDonorReferencesOutsideImplementationPlan(t *testing.T) {
 		t.Fatal("denylist is empty")
 	}
 
-	allowedFile := filepath.FromSlash("docs/IMPLEMENTATION_PLAN.md")
-	exts := map[string]bool{".go": true, ".md": true, ".yaml": true, ".yml": true}
+	exts := map[string]bool{".go": true, ".md": true, ".yaml": true, ".yml": true, ".sh": true}
 
 	pattern := ""
 	for i, s := range denylist {
@@ -730,9 +729,6 @@ func TestDocsNoDonorReferencesOutsideImplementationPlan(t *testing.T) {
 		rel, rerr := filepath.Rel(root, path)
 		if rerr != nil {
 			return rerr
-		}
-		if rel == allowedFile {
-			return nil
 		}
 		// Skip this test file itself: the denylist patterns appear here
 		// as validation strings, not as actual donor references.
