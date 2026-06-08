@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"droid-proxy/internal/config"
 	"droid-proxy/internal/oauth"
 	"droid-proxy/internal/stream"
+	"droid-proxy/internal/translate"
 )
 
 type responsesSSERepairWriter struct {
@@ -87,6 +89,8 @@ func (f *responsesSSERepairFramer) repairFrame(frame []byte) []byte {
 		if !bytes.Equal(patched, data) {
 			return responsesSSEReplaceData(frame, patched)
 		}
+	case "error":
+		return responsesSSEErrorFrame(data)
 	}
 	return frame
 }
@@ -141,6 +145,16 @@ func responsesSSEReplaceData(frame, data []byte) []byte {
 	}
 	buf.WriteString("data: ")
 	buf.Write(data)
+	buf.WriteString("\n\n")
+	return buf.Bytes()
+}
+
+func responsesSSEErrorFrame(data []byte) []byte {
+	chunk := translate.BuildResponsesStreamErrorChunk(http.StatusBadGateway, string(data), 0)
+	var buf bytes.Buffer
+	buf.WriteString("event: error\n")
+	buf.WriteString("data: ")
+	buf.Write(chunk)
 	buf.WriteString("\n\n")
 	return buf.Bytes()
 }

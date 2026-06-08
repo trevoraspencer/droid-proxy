@@ -233,6 +233,73 @@ func TestResponses_OAuthCodexClientMetadataDoesNotOverwriteCallerValues(t *testi
 	}
 }
 
+func TestResponses_OAuthCodexNormalizesFastServiceTier(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configured string
+		want       string
+	}{
+		{name: "fast alias value", configured: "fast", want: "priority"},
+		{name: "verified priority value", configured: "priority", want: "priority"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured map[string]any
+			api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				if err := json.Unmarshal(body, &captured); err != nil {
+					t.Fatalf("captured request JSON: %v body=%s", err, body)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprintln(w, `event: response.completed`)
+				_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[]}}`)
+				_, _ = fmt.Fprintln(w)
+			}, nil)
+			api.api.Cfg.Models[0].ExtraArgs = map[string]any{"service_tier": tc.configured}
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+			api.engine.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+			}
+			if captured["service_tier"] != tc.want {
+				t.Fatalf("service_tier = %#v, want %q in captured payload %#v", captured["service_tier"], tc.want, captured)
+			}
+		})
+	}
+}
+
+func TestResponses_OAuthCodexStreamingNormalizesUpstreamErrorEvent(t *testing.T) {
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintln(w, `event: error`)
+		_, _ = fmt.Fprintln(w, `data: {"type":"error","code":"invalid_request_error","message":"{\"detail\":\"Unsupported service_tier: fast\"}"}`)
+		_, _ = fmt.Fprintln(w)
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	api.engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected streaming 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	events := parseHandlerSSE(t, w.Body.String())
+	if len(events) != 1 || events[0].name != "error" {
+		t.Fatalf("expected one normalized error event, got %#v body=%s", events, w.Body.String())
+	}
+	payload := events[0].payload
+	if payload["type"] != "error" || payload["code"] != "invalid_request_error" {
+		t.Fatalf("bad normalized error payload: %#v", payload)
+	}
+	if _, ok := payload["sequence_number"].(float64); !ok {
+		t.Fatalf("normalized error missing sequence_number: %#v", payload)
+	}
+	if !strings.Contains(fmt.Sprint(payload["message"]), "Unsupported service_tier: fast") {
+		t.Fatalf("normalized error lost upstream message: %#v", payload)
+	}
+}
+
 func TestResponses_OAuthCodexRecordsQuotaMetadata(t *testing.T) {
 	api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

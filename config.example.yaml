@@ -143,7 +143,7 @@ models:
   #   upstream_model: gpt-5.5
   #   max_output_tokens: 128000
   #   extra_args:
-  #     service_tier: fast
+  #     service_tier: priority
 
   # Example: xAI OAuth via Factory's OpenAI mode.
   # Run first: droid-proxy auth xai --config config.yaml

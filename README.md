@@ -238,8 +238,12 @@ models:
     upstream_protocol: codex-responses
     oauth_provider: codex
     upstream_model: gpt-5.5
-    # Add provider-specific extra_args here only after verifying the exact
-    # fast-mode field for this upstream.
+    # "Fast" is the display label; the verified Codex upstream value is
+    # service_tier: priority. The completed response may still echo
+    # service_tier: "default", so do not use the response echo as proof that
+    # the request value was ignored.
+    extra_args:
+      service_tier: priority
 ```
 
 After adding or syncing a model, restart the proxy (`r` in the TUI or

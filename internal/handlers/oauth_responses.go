@@ -184,9 +184,9 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		if entry != nil && attempt > 0 {
 			a.Logger.WithFields(map[string]any{
 				"conversation_id": codexConversation,
-				"account":           entry.Selector,
-				"attempt":           attempt + 1,
-				"failover":          true,
+				"account":         entry.Selector,
+				"attempt":         attempt + 1,
+				"failover":        true,
 			}).Trace("codex account failover")
 		}
 		if selErr != nil {
@@ -546,12 +546,8 @@ func (a *API) forwardOAuthResponsesStream(c *gin.Context, m *config.Model, resp 
 	if !ok {
 		return
 	}
-	dst := io.Writer(c.Writer)
-	var repair *responsesSSERepairWriter
-	if m.OAuthProvider == config.OAuthProviderXAI {
-		repair = newResponsesSSERepairWriter(c.Writer)
-		dst = repair
-	}
+	repair := newResponsesSSERepairWriter(c.Writer)
+	dst := io.Writer(repair)
 	if err := stream.Forward(c.Request.Context(), dst, flusher, resp.Body, stream.Options{
 		KeepAlive:   a.Cfg.Upstream.StreamKeepAlive,
 		IdleTimeout: a.Cfg.Upstream.HTTPTimeout,
@@ -565,9 +561,7 @@ func (a *API) forwardOAuthResponsesStream(c *gin.Context, m *config.Model, resp 
 	}); err != nil && !errors.Is(err, c.Request.Context().Err()) {
 		a.Logger.WithError(err).Warn("oauth responses stream terminated abnormally")
 	}
-	if repair != nil {
-		if err := repair.Flush(); err != nil && !errors.Is(err, c.Request.Context().Err()) {
-			a.Logger.WithError(err).Warn("could not flush repaired oauth responses stream")
-		}
+	if err := repair.Flush(); err != nil && !errors.Is(err, c.Request.Context().Err()) {
+		a.Logger.WithError(err).Warn("could not flush repaired oauth responses stream")
 	}
 }

@@ -37,6 +37,11 @@ func prepareOAuthResponsesPayload(body []byte, m *config.Model, stream bool, dow
 
 func prepareCodexResponsesPayload(body []byte) []byte {
 	out := body
+	if strings.EqualFold(strings.TrimSpace(gjson.GetBytes(out, "service_tier").String()), "fast") {
+		if next, err := sjson.SetBytes(out, "service_tier", "priority"); err == nil {
+			out = next
+		}
+	}
 	if strings.TrimSpace(gjson.GetBytes(out, "instructions").String()) == "" {
 		if next, err := sjson.SetBytes(out, "instructions", codexDefaultInstructions); err == nil {
 			out = next
