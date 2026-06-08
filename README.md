@@ -23,7 +23,7 @@ plus Codex/ChatGPT and xAI OAuth — from a single Go binary.
 - **Codex OAuth multi-account pooling.** Multiple Codex/ChatGPT OAuth accounts
   are load-balanced across requests. Selection strategies include `sticky`
   (default, per-conversation affinity), `round-robin`,
-  `fill-first`, `least-connections`, `random`), bounded failover on 429/5xx/
+  `fill-first`, `least-connections`, `random`, bounded failover on 429/5xx/
   transport errors with cooldown, and 401/403 force-refresh replay before
   failover. Auth-dir watcher hot-reloads token files. xAI remains
   single-account. Single-account mode (no failover, no refresh+replay) is

@@ -56,6 +56,7 @@ type responsesSSERepairFramer struct {
 	outputItemsFallback  [][]byte
 	requireVisibleOutput bool
 	sawVisibleOutput     bool
+	sawTerminal          bool
 }
 
 func (f *responsesSSERepairFramer) WriteChunk(dst io.Writer, chunk []byte) error {
@@ -75,6 +76,9 @@ func (f *responsesSSERepairFramer) WriteChunk(dst io.Writer, chunk []byte) error
 
 func (f *responsesSSERepairFramer) Flush(dst io.Writer) error {
 	if len(f.pending) == 0 {
+		if f.requireVisibleOutput && !f.sawVisibleOutput && !f.sawTerminal {
+			return writeAll(dst, responsesSSENoVisibleOutputFrame())
+		}
 		return nil
 	}
 	frame := append([]byte(nil), f.pending...)
@@ -87,10 +91,21 @@ func (f *responsesSSERepairFramer) Flush(dst io.Writer) error {
 
 func (f *responsesSSERepairFramer) repairFrame(frame []byte) []byte {
 	data := responsesSSEData(frame)
-	if len(data) == 0 || bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+	if len(data) == 0 {
+		return frame
+	}
+	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		if f.requireVisibleOutput && !f.sawVisibleOutput && !f.sawTerminal {
+			f.sawTerminal = true
+			return responsesSSENoVisibleOutputFrame()
+		}
 		return frame
 	}
 	switch gjson.GetBytes(data, "type").String() {
+	case "response.output_item.added":
+		if oauthOutputItemVisible(gjson.GetBytes(data, "item")) {
+			f.sawVisibleOutput = true
+		}
 	case "response.output_item.done":
 		collectOAuthOutputItem(data, f.outputItemsByIndex, &f.outputItemsFallback)
 		if oauthOutputItemVisible(gjson.GetBytes(data, "item")) {
@@ -101,6 +116,7 @@ func (f *responsesSSERepairFramer) repairFrame(frame []byte) []byte {
 			f.sawVisibleOutput = true
 		}
 	case "response.completed":
+		f.sawTerminal = true
 		patched := patchOAuthCompletedOutput(data, f.outputItemsByIndex, f.outputItemsFallback)
 		if oauthResponseVisible(gjson.GetBytes(patched, "response")) {
 			f.sawVisibleOutput = true
@@ -111,7 +127,10 @@ func (f *responsesSSERepairFramer) repairFrame(frame []byte) []byte {
 		if !bytes.Equal(patched, data) {
 			return responsesSSEReplaceData(frame, patched)
 		}
+	case "response.failed", "response.incomplete":
+		f.sawTerminal = true
 	case "error":
+		f.sawTerminal = true
 		return responsesSSEErrorFrame(data)
 	}
 	return frame

@@ -20,8 +20,8 @@ type affinityRecord struct {
 }
 
 type affinityFile struct {
-	Version int                        `json:"version"`
-	Entries map[string]affinityRecord  `json:"entries"`
+	Version int                       `json:"version"`
+	Entries map[string]affinityRecord `json:"entries"`
 }
 
 const affinityFileVersion = 1
@@ -38,10 +38,10 @@ type AffinityStore struct {
 
 // AffinityOptions configures conversation affinity persistence.
 type AffinityOptions struct {
-	Path    string
-	TTL     time.Duration
+	Path       string
+	TTL        time.Duration
 	MaxEntries int
-	NowFunc func() time.Time
+	NowFunc    func() time.Time
 }
 
 // NewAffinityStore loads or creates the affinity file at path.

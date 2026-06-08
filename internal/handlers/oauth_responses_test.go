@@ -663,15 +663,41 @@ func TestResponses_OAuthXAICLIChatProxyVisibilityGuardNonStreaming(t *testing.T)
 }
 
 func TestResponses_OAuthXAICLIChatProxyVisibilityGuardStreaming(t *testing.T) {
-	var buf strings.Builder
-	framer := responsesSSERepairFramer{outputItemsByIndex: map[int64][]byte{}, requireVisibleOutput: true}
-	if err := framer.WriteChunk(&buf, []byte(`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`+"\n\n")); err != nil {
-		t.Fatal(err)
-	}
-	out := buf.String()
-	if !strings.Contains(out, "event: error") || !strings.Contains(out, noVisibleOAuthOutputMessage) {
-		t.Fatalf("expected no-visible-output error frame, got %s", out)
-	}
+	t.Run("completed with empty output", func(t *testing.T) {
+		var buf strings.Builder
+		framer := responsesSSERepairFramer{outputItemsByIndex: map[int64][]byte{}, requireVisibleOutput: true}
+		if err := framer.WriteChunk(&buf, []byte(`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`+"\n\n")); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "event: error") || !strings.Contains(out, noVisibleOAuthOutputMessage) {
+			t.Fatalf("expected no-visible-output error frame, got %s", out)
+		}
+	})
+
+	t.Run("empty upstream stream", func(t *testing.T) {
+		var buf strings.Builder
+		framer := responsesSSERepairFramer{outputItemsByIndex: map[int64][]byte{}, requireVisibleOutput: true}
+		if err := framer.Flush(&buf); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "event: error") || !strings.Contains(out, noVisibleOAuthOutputMessage) {
+			t.Fatalf("expected no-visible-output error frame, got %s", out)
+		}
+	})
+
+	t.Run("done only", func(t *testing.T) {
+		var buf strings.Builder
+		framer := responsesSSERepairFramer{outputItemsByIndex: map[int64][]byte{}, requireVisibleOutput: true}
+		if err := framer.WriteChunk(&buf, []byte("data: [DONE]\n\n")); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "event: error") || !strings.Contains(out, noVisibleOAuthOutputMessage) {
+			t.Fatalf("expected no-visible-output error frame, got %s", out)
+		}
+	})
 }
 
 func TestResponses_OAuthXAIAPIDefaultAllowsEmptyOutput(t *testing.T) {
