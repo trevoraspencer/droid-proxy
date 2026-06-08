@@ -7,7 +7,7 @@
 | **Tier** | T1 OAuth - native xAI Responses passthrough |
 | **Factory mode** | `openai` |
 | **Upstream protocol** | `xai-responses` |
-| **When to use** | xAI subscription-backed models such as Grok Build and Grok 4.3 |
+| **When to use** | xAI subscription-backed models such as Grok Build, Composer 2.5 Fast, and Grok 4.3 |
 
 For pay-per-use API-key access, see [xai.md](xai.md).
 
@@ -41,6 +41,25 @@ models:
       factory_reasoning: drop
 ```
 
+Composer 2.5 Fast is available through Grok Build / Grok CLI OAuth. It uses the
+Grok CLI proxy endpoint rather than the public xAI API-key endpoint, and it does
+not support Factory's top-level reasoning effort.
+
+```yaml
+models:
+  - alias: grok-composer-2.5-fast
+    display_name: "Composer 2.5 Fast (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    base_url: https://cli-chat-proxy.grok.com/v1
+    upstream_model: grok-composer-2.5-fast
+    max_output_tokens: 128000
+    max_context_tokens: 200000
+    capabilities:
+      factory_reasoning: drop
+```
+
 Grok 4.3 is broader xAI OAuth model support, not strict Grok Build CLI parity.
 Factory reasoning levels are passed through to xAI for this model.
 
@@ -58,7 +77,7 @@ models:
       factory_reasoning: passthrough
 ```
 
-Optional: pin either model to a specific logged-in account:
+Optional: pin any xAI OAuth model to a specific logged-in account:
 
 ```yaml
     oauth_account: user@example.com
@@ -72,6 +91,14 @@ Optional: pin either model to a specific logged-in account:
     {
       "model": "grok-build-0.1",
       "displayName": "Grok Build 0.1 (xAI OAuth)",
+      "provider": "openai",
+      "baseUrl": "http://127.0.0.1:8787",
+      "apiKey": "x",
+      "maxOutputTokens": 128000
+    },
+    {
+      "model": "grok-composer-2.5-fast",
+      "displayName": "Composer 2.5 Fast (xAI OAuth)",
       "provider": "openai",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
@@ -113,6 +140,16 @@ curl -sS http://127.0.0.1:8787/v1/responses \
 curl -sS http://127.0.0.1:8787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
+    "model": "grok-composer-2.5-fast",
+    "input": "hello",
+    "reasoning": {"effort": "high"}
+  }' | jq '.output'
+```
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/responses \
+  -H 'Content-Type: application/json' \
+  -d '{
     "model": "grok-4.3",
     "input": "hello",
     "reasoning": {"effort": "low"}
@@ -134,6 +171,8 @@ Check the model is logged in: `curl -s http://127.0.0.1:8787/v1/models | jq
 ## Notes
 
 - `grok-build-0.1` is documented by xAI as the API model that powers Grok Build.
+- `grok-composer-2.5-fast` is the Grok Build / Grok CLI OAuth model key for
+  Composer 2.5 Fast and uses `https://cli-chat-proxy.grok.com/v1`.
 - `grok-4.3` is configured as xAI OAuth model support, not as a Grok Build CLI
   model.
 - `capabilities.factory_reasoning: drop` removes Factory's top-level
@@ -145,6 +184,7 @@ Check the model is logged in: `curl -s http://127.0.0.1:8787/v1/models | jq
   compatibility (tool normalization, encrypted reasoning, completed-output
   repair) - see [xAI request handling](../OAUTH.md#xai-request-handling).
 - Ready-to-paste Factory snippet: [xai-oauth.json](../factory-settings/xai-oauth.json).
-- xAI references: [Grok Build 0.1](https://docs.x.ai/developers/models/grok-build-0.1),
+- xAI references: [Composer 2.5](https://x.ai/news/composer-2-5),
+  [Grok Build 0.1](https://docs.x.ai/developers/models/grok-build-0.1),
   [Grok 4.3](https://docs.x.ai/developers/models/grok-4.3), and
   [reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning).

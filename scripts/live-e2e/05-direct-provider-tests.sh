@@ -190,6 +190,7 @@ run_chat_model "${FIREWORKS_MODEL}" "Fireworks"
 
 run_responses_model "gpt-5.2-codex" "ChatGPT/Codex OAuth"
 run_responses_model "grok-build-0.1" "xAI OAuth (Grok Build)"
+run_responses_model "grok-composer-2.5-fast" "xAI OAuth (Composer 2.5 Fast)"
 run_responses_model "grok-4.3" "xAI Grok 4.3 OAuth"
 
 info "Direct provider tests complete. Results: $LIVE_E2E_RESULTS_NDJSON"

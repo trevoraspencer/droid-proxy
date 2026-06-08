@@ -58,6 +58,7 @@ type oauthModelPreset struct {
 	Alias            string
 	DisplayName      string
 	UpstreamModel    string
+	BaseURL          string
 	MaxOutputTokens  int
 	MaxContextTokens int
 }
@@ -513,6 +514,7 @@ func (m *model) buildForm() {
 	}
 	add("upstream_model", "Upstream model", "provider model id", false)
 	if m.sel.kind == pkOAuth {
+		add("base_url", "OAuth base URL (blank = provider default)", "https://api.example.com/v1", true)
 		add("oauth_account", "OAuth account (blank = any)", "email or sub", true)
 	}
 	add("alias", "Alias (Droid model id)", "my-model", false)
@@ -526,6 +528,7 @@ func (m *model) buildForm() {
 
 func (m *model) applyOAuthPreset(p oauthModelPreset) {
 	m.setFormValue("upstream_model", p.UpstreamModel)
+	m.setFormValue("base_url", p.BaseURL)
 	m.setFormValue("alias", p.Alias)
 	m.setFormValue("display_name", p.DisplayName)
 	if p.MaxOutputTokens > 0 {
@@ -661,6 +664,7 @@ func (m model) buildModelFromForm() (*config.Model, error) {
 	case pkOAuth:
 		built.OAuthProvider = m.sel.oauth
 		built.OAuthAccount = m.formValue("oauth_account")
+		built.BaseURL = m.formValue("base_url")
 		built.FactoryProvider = config.FactoryProviderOpenAI
 		built.UpstreamProtocol = upstreamForOAuth(m.sel.oauth)
 		if mode := factoryReasoningForOAuthModel(m.sel.oauth, upstreamModel); mode != "" {
@@ -819,6 +823,15 @@ func xaiOAuthPresets() []oauthModelPreset {
 			UpstreamModel:    "grok-build-0.1",
 			MaxOutputTokens:  factory.DefaultMaxOutputTokens,
 			MaxContextTokens: 256000,
+		},
+		{
+			Label:            "Composer 2.5 Fast",
+			Alias:            "grok-composer-2.5-fast",
+			DisplayName:      "Composer 2.5 Fast (xAI OAuth)",
+			UpstreamModel:    "grok-composer-2.5-fast",
+			BaseURL:          "https://cli-chat-proxy.grok.com/v1",
+			MaxOutputTokens:  factory.DefaultMaxOutputTokens,
+			MaxContextTokens: 200000,
 		},
 		{
 			Label:            "Grok 4.3",

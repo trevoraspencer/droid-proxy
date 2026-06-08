@@ -156,6 +156,15 @@ curl -sS http://127.0.0.1:8787/v1/responses \
 curl -sS http://127.0.0.1:8787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
+    "model": "grok-composer-2.5-fast",
+    "input": "hello"
+  }' | jq '.output'
+```
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/responses \
+  -H 'Content-Type: application/json' \
+  -d '{
     "model": "grok-4.3",
     "input": "hello",
     "reasoning": {"effort": "low"}

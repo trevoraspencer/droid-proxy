@@ -15,6 +15,7 @@ typeset -a rows
 rows=(
   "ChatGPT/Codex OAuth|gpt-5.2-codex"
   "xAI OAuth (Grok Build)|grok-build-0.1"
+  "xAI OAuth (Composer 2.5 Fast)|grok-composer-2.5-fast"
   "xAI Grok 4.3 OAuth|grok-4.3"
   "Z.AI GLM coding|glm-5.1"
   "Xiaomi MiMo|mimo-v2.5-pro"

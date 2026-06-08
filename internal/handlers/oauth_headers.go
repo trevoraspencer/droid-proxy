@@ -17,7 +17,10 @@ import (
 	"droid-proxy/internal/oauth"
 )
 
-const codexUserAgent = "codex_cli_rs/0.118.0 (Mac OS 26.3.1; arm64) droid-proxy"
+const (
+	codexUserAgent       = "codex_cli_rs/0.118.0 (Mac OS 26.3.1; arm64) droid-proxy"
+	xaiGrokClientVersion = "0.2.22"
+)
 
 func oauthResponsesURL(m *config.Model, token *oauth.Token) (string, error) {
 	baseURL := strings.TrimSpace(m.BaseURL)
@@ -74,6 +77,12 @@ func applyOAuthResponsesHeaders(req *http.Request, downstream http.Header, m *co
 			}
 		}
 	case config.OAuthProviderXAI:
+		if xaiUsesCLIChatProxy(m, token) {
+			if modelOverride := xaiModelOverride(m, payload); modelOverride != "" {
+				req.Header.Set("x-grok-model-override", modelOverride)
+			}
+			req.Header.Set("x-grok-client-version", xaiGrokClientVersion)
+		}
 		if sessionID := oauthSessionID(downstream, payload); sessionID != "" {
 			req.Header.Set("x-grok-conv-id", sessionID)
 		}
@@ -161,4 +170,32 @@ func oauthSessionID(h http.Header, payload []byte) string {
 		}
 	}
 	return ""
+}
+
+func xaiModelOverride(m *config.Model, payload []byte) string {
+	candidates := []string{gjson.GetBytes(payload, "model").String()}
+	if m != nil {
+		candidates = append(candidates, m.UpstreamModel, m.Alias)
+	}
+	for _, v := range candidates {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func xaiUsesCLIChatProxy(m *config.Model, token *oauth.Token) bool {
+	baseURL := ""
+	if m != nil {
+		baseURL = strings.TrimSpace(m.BaseURL)
+	}
+	if baseURL == "" && token != nil {
+		baseURL = token.BaseURLForProvider(config.OAuthProviderXAI)
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), "cli-chat-proxy.grok.com")
 }

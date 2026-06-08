@@ -85,6 +85,18 @@ models:
     capabilities:
       factory_reasoning: drop
 
+  - alias: grok-composer-2.5-fast
+    display_name: "Composer 2.5 Fast (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    base_url: https://cli-chat-proxy.grok.com/v1
+    upstream_model: grok-composer-2.5-fast
+    max_output_tokens: 128000
+    max_context_tokens: 200000
+    capabilities:
+      factory_reasoning: drop
+
   - alias: grok-4.3
     display_name: "Grok 4.3 (xAI OAuth)"
     factory_provider: openai
@@ -96,9 +108,12 @@ models:
       factory_reasoning: passthrough
 ```
 
-`grok-build-0.1` is the Grok Build coding model. `grok-4.3` is broader xAI
-OAuth model support and is not described as Grok Build CLI parity. See xAI's
-docs for [Grok Build 0.1](https://docs.x.ai/developers/models/grok-build-0.1),
+`grok-build-0.1` is the Grok Build coding API model.
+`grok-composer-2.5-fast` is Composer 2.5 Fast via the Grok Build / Grok CLI
+OAuth endpoint. `grok-4.3` is broader xAI OAuth model support and is not
+described as Grok Build CLI parity. See xAI's docs for
+[Composer 2.5](https://x.ai/news/composer-2-5),
+[Grok Build 0.1](https://docs.x.ai/developers/models/grok-build-0.1),
 [Grok 4.3](https://docs.x.ai/developers/models/grok-4.3), and
 [reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning).
 
@@ -334,9 +349,11 @@ For streamed responses the proxy also repairs `response.completed` events whose
 Use Factory Droid's reasoning selector when the upstream supports it. Codex
 OAuth accepts the top-level `reasoning` object, so one custom model can cover
 multiple reasoning levels. xAI OAuth is model-specific: `grok-build-0.1`
-currently rejects that top-level effort parameter, so configure
-`capabilities.factory_reasoning: drop`; `grok-4.3` supports configurable
-reasoning, so configure `capabilities.factory_reasoning: passthrough`.
+currently rejects that top-level effort parameter, and
+`grok-composer-2.5-fast` does not support reasoning effort on the Grok CLI OAuth
+endpoint, so configure both with `capabilities.factory_reasoning: drop`;
+`grok-4.3` supports configurable reasoning, so configure
+`capabilities.factory_reasoning: passthrough`.
 Encrypted reasoning round-trip fields are still preserved where needed.
 
 Use a separate alias for provider fast/speed modes once the provider-specific

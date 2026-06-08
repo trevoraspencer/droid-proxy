@@ -333,11 +333,12 @@ func TestResponses_OAuthCodexRecordsQuotaMetadata(t *testing.T) {
 }
 
 func TestResponses_OAuthXAIStreamingForwardsSSEAndConversationID(t *testing.T) {
-	var capturedAuth, capturedConvID string
+	var capturedAuth, capturedConvID, capturedModelOverride string
 	var captured map[string]any
 	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
 		capturedAuth = r.Header.Get("Authorization")
 		capturedConvID = r.Header.Get("x-grok-conv-id")
+		capturedModelOverride = r.Header.Get("x-grok-model-override")
 		body, _ := io.ReadAll(r.Body)
 		if err := json.Unmarshal(body, &captured); err != nil {
 			t.Fatalf("captured request JSON: %v body=%s", err, body)
@@ -365,6 +366,9 @@ func TestResponses_OAuthXAIStreamingForwardsSSEAndConversationID(t *testing.T) {
 	if capturedAuth != "Bearer oauth-access-token" || capturedConvID != "session-123" {
 		t.Fatalf("bad xai oauth headers auth=%q conv=%q", capturedAuth, capturedConvID)
 	}
+	if capturedModelOverride != "" {
+		t.Fatalf("api-default xai model override header = %q, want empty", capturedModelOverride)
+	}
 	if captured["model"] != "oauth-upstream-model" || captured["stream"] != true {
 		t.Fatalf("bad xai oauth payload: %#v", captured)
 	}
@@ -375,6 +379,62 @@ func TestResponses_OAuthXAIStreamingForwardsSSEAndConversationID(t *testing.T) {
 	assertEventCount(t, events, "response.completed", 1)
 	if !strings.Contains(w.Body.String(), `"hi"`) {
 		t.Fatalf("stream delta not forwarded: %s", w.Body.String())
+	}
+}
+
+func TestResponses_OAuthXAIComposerUsesConfiguredBaseURLAndModel(t *testing.T) {
+	var capturedPath string
+	var captured map[string]any
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("captured request JSON: %v body=%s", err, body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(w, `event: response.completed`)
+		_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[]}}`)
+		_, _ = fmt.Fprintln(w)
+	}, nil)
+	api.api.Cfg.Models[0].BaseURL = api.upstream.URL + "/v1"
+	api.api.Cfg.Models[0].UpstreamModel = "grok-composer-2.5-fast"
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":false,"reasoning":{"effort":"high"}}`))
+	api.engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if capturedPath != "/v1/responses" {
+		t.Fatalf("composer upstream path = %q, want /v1/responses", capturedPath)
+	}
+	if captured["model"] != "grok-composer-2.5-fast" {
+		t.Fatalf("composer upstream model not rewritten: %#v", captured)
+	}
+	if _, exists := captured["reasoning"]; exists {
+		t.Fatalf("composer reasoning should be dropped by default: %#v", captured)
+	}
+}
+
+func TestApplyOAuthResponsesHeaders_XAICLIChatProxyHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "https://cli-chat-proxy.grok.com/v1/responses", nil)
+	model := &config.Model{
+		Alias:         "grok-composer-2.5-fast",
+		BaseURL:       "https://cli-chat-proxy.grok.com/v1",
+		OAuthProvider: config.OAuthProviderXAI,
+		UpstreamModel: "grok-composer-2.5-fast",
+	}
+	token := &oauth.Token{Type: string(config.OAuthProviderXAI), AccessToken: "oauth-access-token"}
+	applyOAuthResponsesHeaders(req, http.Header{}, model, token, []byte(`{"model":"grok-composer-2.5-fast"}`), "", "")
+
+	if got := req.Header.Get("x-grok-model-override"); got != "grok-composer-2.5-fast" {
+		t.Fatalf("x-grok-model-override = %q, want grok-composer-2.5-fast", got)
+	}
+	if got := req.Header.Get("x-grok-client-version"); got != xaiGrokClientVersion {
+		t.Fatalf("x-grok-client-version = %q, want %q", got, xaiGrokClientVersion)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer oauth-access-token" {
+		t.Fatalf("authorization header = %q", got)
 	}
 }
 
@@ -551,6 +611,73 @@ func TestResponses_OAuthXAIStreamingSurfacesProviderErrorFrame(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), "upstream stream ended before terminal marker") {
 		t.Fatalf("provider error frame should be terminal, got truncation frame: %s", w.Body.String())
+	}
+}
+
+func TestResponses_OAuthXAICLIChatProxyVisibilityGuardNonStreaming(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{
+			name:    "empty output",
+			body:    `data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}` + "\n\n",
+			wantErr: true,
+		},
+		{
+			name:    "reasoning only",
+			body:    `data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"reasoning","content":[{"type":"reasoning_text","text":"internal"}]}]}}` + "\n\n",
+			wantErr: true,
+		},
+		{
+			name:    "visible text",
+			body:    `data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}]}}` + "\n\n",
+			wantErr: false,
+		},
+		{
+			name:    "top-level output text",
+			body:    `data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output_text":"hi","output":[]}}` + "\n\n",
+			wantErr: false,
+		},
+		{
+			name:    "tool call",
+			body:    `data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}]}}` + "\n\n",
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := responseFromResponsesSSE([]byte(tt.body), responsesSSERepairOptions{RequireVisibleOutput: true})
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), noVisibleOAuthOutputMessage) {
+					t.Fatalf("expected no-visible-output error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected success, got %v", err)
+			}
+		})
+	}
+}
+
+func TestResponses_OAuthXAICLIChatProxyVisibilityGuardStreaming(t *testing.T) {
+	var buf strings.Builder
+	framer := responsesSSERepairFramer{outputItemsByIndex: map[int64][]byte{}, requireVisibleOutput: true}
+	if err := framer.WriteChunk(&buf, []byte(`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`+"\n\n")); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "event: error") || !strings.Contains(out, noVisibleOAuthOutputMessage) {
+		t.Fatalf("expected no-visible-output error frame, got %s", out)
+	}
+}
+
+func TestResponses_OAuthXAIAPIDefaultAllowsEmptyOutput(t *testing.T) {
+	_, err := responseFromResponsesSSE([]byte(`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`+"\n\n"), responsesSSERepairOptions{})
+	if err != nil {
+		t.Fatalf("api-default path should not require visible output: %v", err)
 	}
 }
 

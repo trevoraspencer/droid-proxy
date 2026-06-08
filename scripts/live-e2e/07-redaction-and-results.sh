@@ -104,6 +104,7 @@ matrix_row() {
   print -r -- "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
   matrix_row "ChatGPT/Codex OAuth" "gpt-5.2-codex" ""
   matrix_row "xAI OAuth (Grok Build)" "grok-build-0.1" ""
+  matrix_row "xAI OAuth (Composer 2.5 Fast)" "grok-composer-2.5-fast" ""
   matrix_row "xAI Grok 4.3 OAuth" "grok-4.3" ""
   matrix_row "Z.AI GLM coding" "glm-5.1" "N/A"
   matrix_row "Xiaomi MiMo" "mimo-v2.5-pro" "N/A"

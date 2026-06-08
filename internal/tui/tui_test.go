@@ -199,7 +199,7 @@ func TestBuildModelFromFormOAuth(t *testing.T) {
 
 func TestXAIOAuthPresets(t *testing.T) {
 	items := xaiOAuthPickItems()
-	if len(items) != 3 || items[0] != manualEntryLabel || items[1] != "Grok Build 0.1" || items[2] != "Grok 4.3" {
+	if len(items) != 4 || items[0] != manualEntryLabel || items[1] != "Grok Build 0.1" || items[2] != "Composer 2.5 Fast" || items[3] != "Grok 4.3" {
 		t.Fatalf("xaiOAuthPickItems = %#v", items)
 	}
 
@@ -216,6 +216,9 @@ func TestXAIOAuthPresets(t *testing.T) {
 	if built.Alias != "grok-build-0.1" || built.UpstreamModel != "grok-build-0.1" || built.DisplayName != "Grok Build 0.1 (xAI OAuth)" {
 		t.Fatalf("bad Grok Build preset model: %#v", built)
 	}
+	if built.BaseURL != "" {
+		t.Fatalf("Grok Build base URL = %q, want provider default", built.BaseURL)
+	}
 	if built.MaxContextTokens != 256000 {
 		t.Fatalf("Grok Build context = %d", built.MaxContextTokens)
 	}
@@ -224,6 +227,32 @@ func TestXAIOAuthPresets(t *testing.T) {
 	}
 	if built.Capabilities.FactoryReasoning != config.FactoryReasoningDrop {
 		t.Fatalf("Grok Build factory_reasoning = %q", built.Capabilities.FactoryReasoning)
+	}
+
+	composer, ok := xaiOAuthPresetByLabel("Composer 2.5 Fast")
+	if !ok {
+		t.Fatal("missing Composer preset")
+	}
+	m = newFormModel(t, providerChoice{kind: pkOAuth, oauth: config.OAuthProviderXAI, label: "xAI OAuth"}, nil)
+	m.applyOAuthPreset(composer)
+	built, err = m.buildModelFromForm()
+	if err != nil {
+		t.Fatalf("build Composer preset: %v", err)
+	}
+	if built.Alias != "grok-composer-2.5-fast" || built.UpstreamModel != "grok-composer-2.5-fast" || built.DisplayName != "Composer 2.5 Fast (xAI OAuth)" {
+		t.Fatalf("bad Composer preset model: %#v", built)
+	}
+	if built.BaseURL != "https://cli-chat-proxy.grok.com/v1" {
+		t.Fatalf("Composer base URL = %q", built.BaseURL)
+	}
+	if built.MaxContextTokens != 200000 {
+		t.Fatalf("Composer context = %d", built.MaxContextTokens)
+	}
+	if built.MaxOutputTokens != factory.DefaultMaxOutputTokens {
+		t.Fatalf("Composer max output = %d", built.MaxOutputTokens)
+	}
+	if built.Capabilities.FactoryReasoning != config.FactoryReasoningDrop {
+		t.Fatalf("Composer factory_reasoning = %q", built.Capabilities.FactoryReasoning)
 	}
 
 	grok43, ok := xaiOAuthPresetByLabel("Grok 4.3")
@@ -238,6 +267,9 @@ func TestXAIOAuthPresets(t *testing.T) {
 	}
 	if built.Alias != "grok-4.3" || built.UpstreamModel != "grok-4.3" || built.DisplayName != "Grok 4.3 (xAI OAuth)" {
 		t.Fatalf("bad Grok 4.3 preset model: %#v", built)
+	}
+	if built.BaseURL != "" {
+		t.Fatalf("Grok 4.3 base URL = %q, want provider default", built.BaseURL)
 	}
 	if built.MaxContextTokens != 1000000 {
 		t.Fatalf("Grok 4.3 context = %d", built.MaxContextTokens)

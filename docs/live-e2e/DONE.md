@@ -72,6 +72,7 @@ Optional model overrides, if your account exposes different current model IDs:
 ```bash
 export CODEX_UPSTREAM_MODEL="gpt-5.2-codex"
 export XAI_GROK_BUILD_MODEL="grok-build-0.1"
+export XAI_COMPOSER_MODEL="grok-composer-2.5-fast"
 export XAI_GROK_MODEL="grok-4.3"
 export ZAI_GLM_MODEL="glm-5.1"
 export DEEPSEEK_MODEL="deepseek-v4-flash"

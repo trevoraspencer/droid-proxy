@@ -102,7 +102,7 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 	}
 
 	if downstreamStream {
-		a.forwardOAuthResponsesStream(c, m, resp, token)
+		a.forwardOAuthResponsesStream(c, m, resp, token, oauthResponsesRepairOptions(m, token))
 		return
 	}
 
@@ -117,7 +117,7 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 			a.recordCodexUsage(token, quota, nil)
 		}
 	}
-	translated, err := responseFromResponsesSSE(raw)
+	translated, err := responseFromResponsesSSE(raw, oauthResponsesRepairOptions(m, token))
 	if err != nil {
 		WriteJSONError(c, http.StatusBadGateway, "upstream_error", err.Error())
 		return
@@ -294,7 +294,7 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 			if quota := codexQuotaFromSSEBody(raw); quota != nil {
 				a.recordCodexUsage(token, quota, nil)
 			}
-			translated, err := responseFromResponsesSSE(raw)
+			translated, err := responseFromResponsesSSE(raw, responsesSSERepairOptions{})
 			if err != nil {
 				WriteJSONError(c, http.StatusBadGateway, "upstream_error", err.Error())
 				return
@@ -509,7 +509,7 @@ func (a *API) codexAuthReplay(
 		if quota := codexQuotaFromSSEBody(raw); quota != nil {
 			a.recordCodexUsage(token, quota, nil)
 		}
-		translated, err := responseFromResponsesSSE(raw)
+		translated, err := responseFromResponsesSSE(raw, responsesSSERepairOptions{})
 		if err != nil {
 			WriteJSONError(c, http.StatusBadGateway, "upstream_error", err.Error())
 			return true, 0, nil, "" // error response already written
@@ -538,15 +538,15 @@ func (a *API) forwardOAuthResponsesStreamAndRelease(c *gin.Context, m *config.Mo
 		_ = resp.Body.Close()
 		a.Pool.End(poolPath)
 	}()
-	a.forwardOAuthResponsesStream(c, m, resp, token)
+	a.forwardOAuthResponsesStream(c, m, resp, token, responsesSSERepairOptions{})
 }
 
-func (a *API) forwardOAuthResponsesStream(c *gin.Context, m *config.Model, resp *http.Response, token *oauth.Token) {
+func (a *API) forwardOAuthResponsesStream(c *gin.Context, m *config.Model, resp *http.Response, token *oauth.Token, repairOpts responsesSSERepairOptions) {
 	flusher, ok := a.beginSSE(c)
 	if !ok {
 		return
 	}
-	repair := newResponsesSSERepairWriter(c.Writer)
+	repair := newResponsesSSERepairWriter(c.Writer, repairOpts)
 	dst := io.Writer(repair)
 	if err := stream.Forward(c.Request.Context(), dst, flusher, resp.Body, stream.Options{
 		KeepAlive:   a.Cfg.Upstream.StreamKeepAlive,
@@ -563,5 +563,11 @@ func (a *API) forwardOAuthResponsesStream(c *gin.Context, m *config.Model, resp 
 	}
 	if err := repair.Flush(); err != nil && !errors.Is(err, c.Request.Context().Err()) {
 		a.Logger.WithError(err).Warn("could not flush repaired oauth responses stream")
+	}
+}
+
+func oauthResponsesRepairOptions(m *config.Model, token *oauth.Token) responsesSSERepairOptions {
+	return responsesSSERepairOptions{
+		RequireVisibleOutput: m != nil && m.OAuthProvider == config.OAuthProviderXAI && xaiUsesCLIChatProxy(m, token),
 	}
 }

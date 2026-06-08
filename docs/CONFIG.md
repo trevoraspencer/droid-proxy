@@ -293,6 +293,18 @@ models:
     capabilities:
       factory_reasoning: drop
 
+  - alias: grok-composer-2.5-fast
+    display_name: "Composer 2.5 Fast (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    base_url: https://cli-chat-proxy.grok.com/v1
+    upstream_model: grok-composer-2.5-fast
+    max_output_tokens: 128000
+    max_context_tokens: 200000
+    capabilities:
+      factory_reasoning: drop
+
   - alias: grok-4.3
     display_name: "Grok 4.3 (xAI OAuth)"
     factory_provider: openai

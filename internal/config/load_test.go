@@ -219,6 +219,12 @@ models:
     upstream_protocol: xai-responses
     oauth_provider: xai
     upstream_model: grok-build-0.1
+  - alias: grok-composer-2.5-fast
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    base_url: https://cli-chat-proxy.grok.com/v1
+    upstream_model: grok-composer-2.5-fast
   - alias: grok-4.3
     factory_provider: openai
     upstream_protocol: xai-responses
@@ -232,9 +238,12 @@ models:
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, m := range cfg.Models {
-		if m.BaseURL != "" || m.APIKeyEnv != "" || !m.AgentReady() {
+		if m.APIKeyEnv != "" || !m.AgentReady() {
 			t.Fatalf("oauth model hydrated unexpected fields or not agent ready: %+v", m)
 		}
+	}
+	if got := cfg.Models[2].BaseURL; got != "https://cli-chat-proxy.grok.com/v1" {
+		t.Fatalf("composer base URL = %q", got)
 	}
 	if got := cfg.Models[0].ResolvedCapabilities().FactoryReasoning; got != FactoryReasoningPassthrough {
 		t.Fatalf("codex factory_reasoning default = %q, want passthrough", got)
@@ -242,7 +251,10 @@ models:
 	if got := cfg.Models[1].ResolvedCapabilities().FactoryReasoning; got != FactoryReasoningDrop {
 		t.Fatalf("xai factory_reasoning default = %q, want drop", got)
 	}
-	if got := cfg.Models[2].ResolvedCapabilities().FactoryReasoning; got != FactoryReasoningPassthrough {
+	if got := cfg.Models[2].ResolvedCapabilities().FactoryReasoning; got != FactoryReasoningDrop {
+		t.Fatalf("composer factory_reasoning default = %q, want drop", got)
+	}
+	if got := cfg.Models[3].ResolvedCapabilities().FactoryReasoning; got != FactoryReasoningPassthrough {
 		t.Fatalf("explicit xai factory_reasoning = %q, want passthrough", got)
 	}
 }

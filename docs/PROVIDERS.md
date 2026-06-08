@@ -109,9 +109,10 @@ Run `droid-proxy auth codex --config config.yaml` or
 
 See [OAUTH.md](OAUTH.md) for the full OAuth walkthrough.
 
-For xAI OAuth, use `grok-build-0.1` for Grok Build coding behavior and
-`grok-4.3` for the broader xAI reasoning model. Configure
-`capabilities.factory_reasoning: drop` for Grok Build and
+For xAI OAuth, use `grok-build-0.1` for Grok Build coding behavior,
+`grok-composer-2.5-fast` for Composer 2.5 Fast via the Grok CLI OAuth endpoint,
+and `grok-4.3` for the broader xAI reasoning model. Configure
+`capabilities.factory_reasoning: drop` for Grok Build and Composer, and
 `capabilities.factory_reasoning: passthrough` for Grok 4.3.
 
 OAuth token files live under `oauth.auth_dir` (default

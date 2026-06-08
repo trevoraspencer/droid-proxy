@@ -11,7 +11,7 @@ Target date: 2026-05-29
 
 - Prove live end-to-end behavior for:
   - ChatGPT/Codex OAuth through `codex-responses`
-  - xAI OAuth through `xai-responses` (`grok-build-0.1` and `grok-4.3`)
+  - xAI OAuth through `xai-responses` (`grok-build-0.1`, `grok-composer-2.5-fast`, and `grok-4.3`)
   - Z.AI GLM coding plan through OpenAI-compatible chat
   - Fireworks through OpenAI-compatible chat
   - DeepSeek through OpenAI-compatible chat with reasoning replay
@@ -38,6 +38,7 @@ the exact model IDs in the provider dashboard or docs and adjust `config.local.y
 - OpenAI Codex/ChatGPT sign-in: https://help.openai.com/en/articles/11381614-api-codex-cli-and-sign-in-with-chatgpt
 - OpenAI Codex CLI overview: https://help.openai.com/en/articles/11096431
 - xAI Grok Build model docs: https://docs.x.ai/developers/models/grok-build-0.1
+- xAI Composer 2.5 announcement: https://x.ai/news/composer-2-5
 - xAI Grok 4.3 model docs: https://docs.x.ai/developers/models/grok-4.3
 - xAI reasoning docs: https://docs.x.ai/developers/model-capabilities/text/reasoning
 - Z.AI GLM-4.6 docs: https://docs.z.ai/guides/llm/glm-4.6
@@ -234,6 +235,18 @@ models:
     capabilities:
       factory_reasoning: drop
 
+  - alias: grok-composer-2.5-fast
+    display_name: "Composer 2.5 Fast (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    base_url: https://cli-chat-proxy.grok.com/v1
+    upstream_model: "${XAI_COMPOSER_MODEL:-grok-composer-2.5-fast}"
+    max_output_tokens: 128000
+    max_context_tokens: 200000
+    capabilities:
+      factory_reasoning: drop
+
   - alias: grok-4.3
     display_name: "Grok 4.3 (xAI OAuth)"
     factory_provider: openai
@@ -306,6 +319,7 @@ export FIREWORKS_MODEL=accounts/fireworks/models/deepseek-v4-pro
 # Optional overrides after checking current account/model availability.
 export CODEX_UPSTREAM_MODEL=gpt-5.2-codex
 export XAI_GROK_BUILD_MODEL=grok-build-0.1
+export XAI_COMPOSER_MODEL=grok-composer-2.5-fast
 export XAI_GROK_MODEL=grok-4.3
 export ZAI_GLM_MODEL=glm-5.1
 export MIMO_KNOWN_AUTH=mimo
@@ -471,7 +485,7 @@ Fireworks-specific checks:
 Run each OAuth alias through the Responses contract:
 
 ```bash
-for model in gpt-5.2-codex grok-build-0.1 grok-4.3; do
+for model in gpt-5.2-codex grok-build-0.1 grok-composer-2.5-fast grok-4.3; do
   curl -sS http://127.0.0.1:8787/v1/responses \
     -H 'Content-Type: application/json' \
     -d "{
@@ -559,6 +573,7 @@ Update `~/.factory/settings.json` so every tested model points at
 | --- | --- | --- |
 | `gpt-5.2-codex` | `openai` | `http://127.0.0.1:8787` |
 | `grok-build-0.1` | `openai` | `http://127.0.0.1:8787` |
+| `grok-composer-2.5-fast` | `openai` | `http://127.0.0.1:8787` |
 | `grok-4.3` | `openai` | `http://127.0.0.1:8787` |
 | `glm-5.1` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
 | `mimo-v2.5-pro` | `generic-chat-completion-api` | `http://127.0.0.1:8787` |
@@ -597,6 +612,7 @@ Fill this table during the live run.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ChatGPT/Codex OAuth | `gpt-5.2-codex` |  |  |  |  |  |  |  |  |  |
 | xAI OAuth (Grok Build) | `grok-build-0.1` |  |  |  |  |  |  |  |  |  |
+| xAI OAuth (Composer 2.5 Fast) | `grok-composer-2.5-fast` |  |  |  |  |  |  |  |  |  |
 | xAI Grok 4.3 OAuth | `grok-4.3` |  |  |  |  |  |  |  |  |  |
 | Z.AI GLM coding | `glm-5.1` |  |  |  |  | N/A |  |  |  |  |
 | Xiaomi MiMo | `mimo-v2.5-pro` |  |  |  |  | N/A |  |  |  |  |

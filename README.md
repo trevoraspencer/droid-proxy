@@ -211,7 +211,8 @@ upstream supports that request field. For `codex-responses`, `droid-proxy`
 passes the request's `reasoning` object through to the Codex/ChatGPT upstream.
 For `xai-responses`, reasoning passthrough is model-specific:
 `grok-build-0.1` uses `capabilities.factory_reasoning: drop` because Grok Build
-currently rejects Factory's top-level effort, while `grok-4.3` uses
+currently rejects Factory's top-level effort, `grok-composer-2.5-fast` also
+uses `drop` through the Grok CLI OAuth endpoint, while `grok-4.3` uses
 `capabilities.factory_reasoning: passthrough`. For DeepSeek-style OpenAI Chat
 providers, `capabilities.reasoning: deepseek` enables reasoning replay across
 tool turns; it is separate from Factory's UI reasoning selector. For DeepSeek
