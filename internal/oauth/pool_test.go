@@ -651,6 +651,38 @@ func TestPoolPersistedRateLimit_NonExhaustedQuotaDoesNotSuppress(t *testing.T) {
 	if len(eligible) != 1 {
 		t.Fatalf("expected 1 eligible (non-exhausted quota), got %d", len(eligible))
 	}
+	snap := pool.Snapshot()
+	if snap.Accounts[0].RateLimitedUntil != nil {
+		t.Fatalf("expected no rate_limit_until from passive telemetry, got %v", snap.Accounts[0].RateLimitedUntil)
+	}
+}
+
+func TestPoolPersistedRateLimit_FallbackUsesPersistedResetForExhaustedWindowWithoutResetAt(t *testing.T) {
+	now := fakeTime()
+	persistedReset := now.Add(time.Hour)
+	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
+	tok.path = "/tmp/exhausted-no-reset.json"
+	tok.CodexQuota = &CodexQuota{
+		Primary: &CodexQuotaWindow{
+			UsedPercent:  100,
+			LimitReached: true,
+		},
+	}
+	tok.RateLimitResetAt = persistedReset.UTC().Format(time.RFC3339)
+
+	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now }, TestPoolLB(), nil)
+	if eligible := pool.Eligible(nil); len(eligible) != 0 {
+		t.Fatalf("expected 0 eligible before persisted reset, got %d", len(eligible))
+	}
+	snap := pool.Snapshot()
+	if snap.Accounts[0].RateLimitedUntil == nil || !snap.Accounts[0].RateLimitedUntil.Equal(persistedReset) {
+		t.Fatalf("rate_limit_until = %v, want persisted reset %v", snap.Accounts[0].RateLimitedUntil, persistedReset)
+	}
+
+	now = persistedReset.Add(time.Second)
+	if eligible := pool.Eligible(nil); len(eligible) != 1 {
+		t.Fatalf("expected 1 eligible after persisted reset, got %d", len(eligible))
+	}
 }
 
 func TestPoolPersistedRateLimit_PastResetIgnored(t *testing.T) {
@@ -704,6 +736,66 @@ func TestPoolPersistedRateLimit_Runtime429CooldownPreservedAcrossReload(t *testi
 	eligible := pool.Eligible(nil)
 	if len(eligible) != 0 {
 		t.Fatalf("expected 0 eligible (runtime 429 preserved), got %d", len(eligible))
+	}
+}
+
+func TestPoolReload_RateLimitClampSemantics(t *testing.T) {
+	now := fakeTime()
+	oneHour := now.Add(time.Hour)
+	sevenDays := now.Add(7 * 24 * time.Hour)
+	oneHourUnix := oneHour.Unix()
+	sevenDaysUnix := sevenDays.Unix()
+
+	tests := []struct {
+		name          string
+		runtimeMark   time.Time
+		reloadQuota   *CodexQuota
+		wantRateLimit time.Time
+	}{
+		{
+			name:        "clamp down to fresh exhausted reset",
+			runtimeMark: sevenDays,
+			reloadQuota: &CodexQuota{
+				Primary: &CodexQuotaWindow{UsedPercent: 100, LimitReached: true, ResetAt: &oneHourUnix},
+			},
+			wantRateLimit: oneHour,
+		},
+		{
+			name:        "never extend runtime mark",
+			runtimeMark: oneHour,
+			reloadQuota: &CodexQuota{
+				Primary: &CodexQuotaWindow{UsedPercent: 100, LimitReached: true, ResetAt: &sevenDaysUnix},
+			},
+			wantRateLimit: oneHour,
+		},
+		{
+			name:        "keep mark when fresh quota has no exhausted evidence",
+			runtimeMark: oneHour,
+			reloadQuota: &CodexQuota{
+				Primary: &CodexQuotaWindow{UsedPercent: 30, LimitReached: false, ResetAt: &sevenDaysUnix},
+			},
+			wantRateLimit: oneHour,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tok := makeToken("user@example.com", "access-a", "refresh-a", false)
+			tok.path = "/tmp/" + strings.ReplaceAll(tt.name, " ", "-") + ".json"
+			pool := NewAccountPool([]*Token{tok}, func() time.Time { return now }, TestPoolLB(), nil)
+			pool.MarkRateLimited(tok.path, tt.runtimeMark)
+
+			reloadTok := makeToken("user@example.com", "access-a", "refresh-a", false)
+			reloadTok.path = tok.path
+			reloadTok.CodexQuota = tt.reloadQuota
+			pool.Reload([]*Token{reloadTok})
+
+			snap := pool.Snapshot()
+			got := snap.Accounts[0].RateLimitedUntil
+			if got == nil || !got.Equal(tt.wantRateLimit) {
+				t.Fatalf("rate_limit_until = %v, want %v", got, tt.wantRateLimit)
+			}
+		})
 	}
 }
 

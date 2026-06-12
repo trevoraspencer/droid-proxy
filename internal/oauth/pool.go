@@ -186,11 +186,37 @@ func (p *AccountPool) entryFromToken(tok *Token) *AccountEntry {
 // (not the latest reset across all windows). Passive telemetry from
 // successful responses does not suppress eligibility.
 func (p *AccountPool) applyPersistedRateLimit(entry *AccountEntry, now time.Time) {
-	reset := ExhaustedWindowResetAt(entry.Quota)
+	reset := persistedRateLimitUntil(entry)
 	if reset == nil || !reset.After(now) {
 		return
 	}
 	entry.RateLimitedUntil = *reset
+}
+
+func persistedRateLimitUntil(entry *AccountEntry) *time.Time {
+	if entry == nil {
+		return nil
+	}
+	if reset := ExhaustedWindowResetAt(entry.Quota); reset != nil {
+		return reset
+	}
+	if hasExhaustedWindow(entry.Quota) {
+		return entry.RateLimitResetAt
+	}
+	return nil
+}
+
+// hasExhaustedWindow returns true if any quota window has limit_reached=true.
+func hasExhaustedWindow(q *CodexQuota) bool {
+	if q == nil {
+		return false
+	}
+	for _, win := range []*CodexQuotaWindow{q.Primary, q.Secondary, q.CodeReview} {
+		if win != nil && win.LimitReached {
+			return true
+		}
+	}
+	return false
 }
 
 // parseRateLimitResetAt parses a persisted rate_limit_reset_at string.
@@ -341,10 +367,13 @@ func (p *AccountPool) updateEntry(entry *AccountEntry, tok *Token, now time.Time
 	// If provider changed away from Codex, entry stays but won't be eligible
 	// Selector and matching update immediately.
 
-	// Re-evaluate persisted rate-limit only if not already in runtime rate-limit
+	// Re-evaluate persisted rate-limit evidence. A future runtime mark is
+	// preserved unless fresh persisted evidence proves a shorter suppression.
 	if entry.RateLimitedUntil.IsZero() || !entry.RateLimitedUntil.After(now) {
 		entry.RateLimitedUntil = time.Time{} // clear stale
 		p.applyPersistedRateLimit(entry, now)
+	} else if reset := persistedRateLimitUntil(entry); reset != nil && reset.Before(entry.RateLimitedUntil) {
+		entry.RateLimitedUntil = *reset
 	}
 }
 
