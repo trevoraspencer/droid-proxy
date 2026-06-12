@@ -223,6 +223,38 @@ func TestPoolEligibility_RateLimitedUntilExpiry(t *testing.T) {
 	}
 }
 
+// TestPoolEligibility_ExhaustedPrimaryWindowResetIgnoresLaterSecondaryReset
+// verifies that an account whose primary (5hr) window is exhausted becomes
+// eligible again once the primary window's own reset_at passes, even though
+// the secondary (weekly) window's reset_at is much later.
+func TestPoolEligibility_ExhaustedPrimaryWindowResetIgnoresLaterSecondaryReset(t *testing.T) {
+	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
+	tok.path = "/tmp/quota-window.json"
+
+	now := fakeTime()
+	primaryReset := now.Add(60 * time.Second).Unix()
+	secondaryReset := now.Add(48 * time.Hour).Unix()
+	tok.CodexQuota = &CodexQuota{
+		Primary:   &CodexQuotaWindow{UsedPercent: 100, ResetAt: &primaryReset, LimitReached: true},
+		Secondary: &CodexQuotaWindow{UsedPercent: 30, ResetAt: &secondaryReset, LimitReached: false},
+	}
+
+	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now }, TestPoolLB(), nil)
+
+	if len(pool.Eligible(nil)) != 0 {
+		t.Fatal("expected 0 eligible while primary window is exhausted")
+	}
+
+	// Advance past the primary window's reset, but nowhere near the
+	// secondary window's reset.
+	now = now.Add(61 * time.Second)
+
+	eligible := pool.Eligible(nil)
+	if len(eligible) != 1 {
+		t.Fatalf("expected 1 eligible after primary window reset, got %d", len(eligible))
+	}
+}
+
 func TestPoolEligibility_UnhealthyIneligible(t *testing.T) {
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	tok.path = "/tmp/a.json"
@@ -233,6 +265,32 @@ func TestPoolEligibility_UnhealthyIneligible(t *testing.T) {
 	eligible := pool.Eligible(nil)
 	if len(eligible) != 0 {
 		t.Fatalf("expected 0 eligible (unhealthy), got %d", len(eligible))
+	}
+}
+
+func TestPoolEligibility_UnhealthyAutoRecoversAfterCooldown(t *testing.T) {
+	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
+	tok.path = "/tmp/auto-recover.json"
+
+	now := fakeTime()
+	lb := TestPoolLB()
+	lb.ErrorCooldown = 30 * time.Second
+	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now }, lb, nil)
+	pool.MarkUnhealthy(tok.path)
+
+	if len(pool.Eligible(nil)) != 0 {
+		t.Fatal("expected 0 eligible immediately after marking unhealthy")
+	}
+
+	// Advance past the error cooldown.
+	now = now.Add(31 * time.Second)
+
+	eligible := pool.Eligible(nil)
+	if len(eligible) != 1 {
+		t.Fatalf("expected 1 eligible after unhealthy cooldown elapsed, got %d", len(eligible))
+	}
+	if !eligible[0].Healthy {
+		t.Fatal("expected entry to flip back to healthy after cooldown elapsed")
 	}
 }
 

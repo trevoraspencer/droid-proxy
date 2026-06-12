@@ -15,6 +15,11 @@ import (
 // ErrNoEligibleAccounts is returned when no accounts are eligible for selection.
 var ErrNoEligibleAccounts = errors.New("no eligible codex accounts available")
 
+// defaultUnhealthyCooldown is used when lb.ErrorCooldown is unset, bounding
+// how long an account marked unhealthy stays excluded before it is
+// automatically eligible again.
+const defaultUnhealthyCooldown = 30 * time.Second
+
 // AccountEntry tracks the runtime state of a single Codex account in the pool.
 // It is keyed by token file path and never exposes token secrets.
 type AccountEntry struct {
@@ -26,6 +31,7 @@ type AccountEntry struct {
 
 	// Runtime state (preserved across reloads for same path)
 	Healthy          bool
+	UnhealthyUntil   time.Time
 	CooldownUntil    time.Time
 	RateLimitedUntil time.Time
 	LastUsed         time.Time
@@ -52,6 +58,7 @@ type AccountSnapshot struct {
 	Disabled               bool        `json:"disabled"`
 	Healthy                bool        `json:"healthy"`
 	CooldownUntil          *time.Time  `json:"cooldown_until,omitempty"`
+	UnhealthyUntil         *time.Time  `json:"unhealthy_until,omitempty"`
 	RateLimitedUntil       *time.Time  `json:"rate_limit_until,omitempty"`
 	LastUsed               *time.Time  `json:"last_used,omitempty"`
 	InFlight               int         `json:"in_flight"`
@@ -69,11 +76,11 @@ type PoolAffinitySnapshot struct {
 
 // PoolSnapshot is a safe, deep-copy view of the entire pool state.
 type PoolSnapshot struct {
-	Strategy       string                `json:"strategy,omitempty"`
-	CodexAccounts  int                   `json:"codex_account_count,omitempty"`
-	EligibleCount  int                   `json:"eligible_count,omitempty"`
-	Affinity       *PoolAffinitySnapshot `json:"affinity,omitempty"`
-	Accounts       []AccountSnapshot     `json:"accounts"`
+	Strategy      string                `json:"strategy,omitempty"`
+	CodexAccounts int                   `json:"codex_account_count,omitempty"`
+	EligibleCount int                   `json:"eligible_count,omitempty"`
+	Affinity      *PoolAffinitySnapshot `json:"affinity,omitempty"`
+	Accounts      []AccountSnapshot     `json:"accounts"`
 }
 
 // AccountPool maintains an in-memory view of loaded Codex token files with
@@ -86,6 +93,7 @@ type AccountPool struct {
 	strategy      config.LoadBalancingStrategy
 	quotaSoftCap  float64
 	affinity      *AffinityStore
+	errorCooldown time.Duration
 }
 
 // NewAccountPool creates a pool seeded from the given tokens.
@@ -106,13 +114,18 @@ func NewAccountPool(tokens []*Token, nowFunc func() time.Time, lb config.LoadBal
 	} else {
 		sel = NewSelector(strategy)
 	}
+	errorCooldown := lb.ErrorCooldown
+	if errorCooldown <= 0 {
+		errorCooldown = defaultUnhealthyCooldown
+	}
 	p := &AccountPool{
-		entries:      make(map[string]*AccountEntry),
-		nowFunc:      nowFunc,
-		selector:     sel,
-		strategy:     strategy,
-		quotaSoftCap: lb.QuotaSoftCapPercent,
-		affinity:     affinity,
+		entries:       make(map[string]*AccountEntry),
+		nowFunc:       nowFunc,
+		selector:      sel,
+		strategy:      strategy,
+		quotaSoftCap:  lb.QuotaSoftCapPercent,
+		affinity:      affinity,
+		errorCooldown: errorCooldown,
 	}
 	p.seed(tokens)
 	p.pruneAffinity()
@@ -168,30 +181,16 @@ func (p *AccountPool) entryFromToken(tok *Token) *AccountEntry {
 	return entry
 }
 
-// applyPersistedRateLimit sets RateLimitedUntil from persisted metadata only if
-// the quota window is exhausted (limit_reached=true). Passive telemetry from
+// applyPersistedRateLimit sets RateLimitedUntil from the quota windows that
+// have limit_reached=true, using each exhausted window's own reset time
+// (not the latest reset across all windows). Passive telemetry from
 // successful responses does not suppress eligibility.
 func (p *AccountPool) applyPersistedRateLimit(entry *AccountEntry, now time.Time) {
-	if entry.RateLimitResetAt == nil || !entry.RateLimitResetAt.After(now) {
+	reset := ExhaustedWindowResetAt(entry.Quota)
+	if reset == nil || !reset.After(now) {
 		return
 	}
-	// Only suppress eligibility if an exhausted/limit-reached window exists
-	if hasExhaustedWindow(entry.Quota) {
-		entry.RateLimitedUntil = *entry.RateLimitResetAt
-	}
-}
-
-// hasExhaustedWindow returns true if any quota window has limit_reached=true.
-func hasExhaustedWindow(q *CodexQuota) bool {
-	if q == nil {
-		return false
-	}
-	for _, w := range []*CodexQuotaWindow{q.Primary, q.Secondary, q.CodeReview} {
-		if w != nil && w.LimitReached {
-			return true
-		}
-	}
-	return false
+	entry.RateLimitedUntil = *reset
 }
 
 // parseRateLimitResetAt parses a persisted rate_limit_reset_at string.
@@ -401,13 +400,16 @@ func (p *AccountPool) MarkCooldown(path string, until time.Time) {
 	}
 }
 
-// MarkUnhealthy marks the account at path as unhealthy.
+// MarkUnhealthy marks the account at path as unhealthy. The account becomes
+// eligible again automatically once errorCooldown elapses, unless explicitly
+// recovered sooner via MarkHealthy.
 func (p *AccountPool) MarkUnhealthy(path string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if entry, ok := p.entries[path]; ok {
 		entry.Healthy = false
+		entry.UnhealthyUntil = p.nowFunc().Add(p.errorCooldown)
 	}
 }
 
@@ -591,9 +593,13 @@ func (p *AccountPool) isEligible(entry *AccountEntry, exclude map[string]bool, n
 	if entry.RateLimitedUntil.After(now) {
 		return false
 	}
-	// Must be healthy
+	// Must be healthy, or have recovered after the unhealthy cooldown elapsed
 	if !entry.Healthy {
-		return false
+		if entry.UnhealthyUntil.After(now) {
+			return false
+		}
+		entry.Healthy = true
+		entry.UnhealthyUntil = time.Time{}
 	}
 	// Must have some form of usable token
 	// Expired tokens with refresh tokens are still eligible
@@ -678,6 +684,10 @@ func snapshotFromEntry(entry *AccountEntry, affinity *AffinityStore) AccountSnap
 	if !entry.CooldownUntil.IsZero() {
 		t := entry.CooldownUntil.UTC()
 		snap.CooldownUntil = &t
+	}
+	if !entry.Healthy && !entry.UnhealthyUntil.IsZero() {
+		t := entry.UnhealthyUntil.UTC()
+		snap.UnhealthyUntil = &t
 	}
 	if !entry.RateLimitedUntil.IsZero() {
 		t := entry.RateLimitedUntil.UTC()

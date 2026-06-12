@@ -57,7 +57,7 @@ func (m *Manager) RecordCodexUsage(token *Token, quota *CodexQuota, resetAt *tim
 	latest.path = token.path
 	if quota != nil {
 		latest.CodexQuota = mergeCodexQuota(latest.CodexQuota, quota)
-		if reset := latestQuotaReset(latest.CodexQuota); reset != nil {
+		if reset := ExhaustedWindowResetAt(latest.CodexQuota); reset != nil {
 			resetAt = reset
 		}
 	}
@@ -234,6 +234,27 @@ func retryAfterReset(headers http.Header) *time.Time {
 		return &tm
 	}
 	return nil
+}
+
+// ExhaustedWindowResetAt returns the latest reset time among quota windows
+// that have LimitReached=true, or nil if none are exhausted. When multiple
+// windows are exhausted, the account remains rate-limited until all of them
+// reset, so the latest of those reset times is returned.
+func ExhaustedWindowResetAt(quota *CodexQuota) *time.Time {
+	if quota == nil {
+		return nil
+	}
+	var latest *time.Time
+	for _, win := range []*CodexQuotaWindow{quota.Primary, quota.Secondary, quota.CodeReview} {
+		if win == nil || !win.LimitReached || win.ResetAt == nil || *win.ResetAt <= 0 {
+			continue
+		}
+		tm := time.Unix(*win.ResetAt, 0).UTC()
+		if latest == nil || tm.After(*latest) {
+			latest = &tm
+		}
+	}
+	return latest
 }
 
 func latestQuotaReset(quota *CodexQuota) *time.Time {

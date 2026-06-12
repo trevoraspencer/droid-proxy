@@ -303,7 +303,7 @@ func TestResponses_OAuthCodexStreamingNormalizesUpstreamErrorEvent(t *testing.T)
 func TestResponses_OAuthCodexRecordsQuotaMetadata(t *testing.T) {
 	api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("x-codex-primary-used-percent", "99")
+		w.Header().Set("x-codex-primary-used-percent", "100")
 		w.Header().Set("x-codex-primary-window-minutes", "300")
 		w.Header().Set("x-codex-primary-reset-at", "1893456000")
 		_, _ = fmt.Fprintln(w, `event: codex.rate_limits`)
@@ -327,7 +327,10 @@ func TestResponses_OAuthCodexRecordsQuotaMetadata(t *testing.T) {
 	if token.CodexQuota == nil || token.CodexQuota.Primary == nil || token.CodexQuota.Secondary == nil {
 		t.Fatalf("quota metadata not persisted: %+v", token)
 	}
-	if token.RateLimitResetAt != "2030-01-02T00:00:00Z" || token.LastSeenAt == "" {
+	// RateLimitResetAt must reflect the exhausted primary window's own reset
+	// (2030-01-01), not the later non-exhausted secondary window's reset
+	// (2030-01-02).
+	if token.RateLimitResetAt != "2030-01-01T00:00:00Z" || token.LastSeenAt == "" {
 		t.Fatalf("bad quota timestamps: reset=%q seen=%q quota=%+v", token.RateLimitResetAt, token.LastSeenAt, token.CodexQuota)
 	}
 }

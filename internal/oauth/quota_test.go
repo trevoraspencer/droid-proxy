@@ -159,6 +159,46 @@ func TestLatestQuotaReset(t *testing.T) {
 	}
 }
 
+func TestExhaustedWindowResetAt(t *testing.T) {
+	if got := ExhaustedWindowResetAt(nil); got != nil {
+		t.Fatalf("expected nil for nil quota, got %v", got)
+	}
+
+	primaryReset := int64(1781112198)   // near-future primary (5hr) reset
+	secondaryReset := int64(1781282751) // far-future secondary (weekly) reset
+
+	// Only primary exhausted: must use primary's reset, not secondary's later one.
+	quota := &CodexQuota{
+		Primary:   &CodexQuotaWindow{UsedPercent: 100, ResetAt: &primaryReset, LimitReached: true},
+		Secondary: &CodexQuotaWindow{UsedPercent: 30, ResetAt: &secondaryReset, LimitReached: false},
+	}
+	got := ExhaustedWindowResetAt(quota)
+	want := time.Unix(primaryReset, 0).UTC()
+	if got == nil || !got.Equal(want) {
+		t.Fatalf("expected primary reset %v, got %v", want, got)
+	}
+
+	// Both exhausted: latest of the exhausted windows wins.
+	quota2 := &CodexQuota{
+		Primary:   &CodexQuotaWindow{UsedPercent: 100, ResetAt: &primaryReset, LimitReached: true},
+		Secondary: &CodexQuotaWindow{UsedPercent: 100, ResetAt: &secondaryReset, LimitReached: true},
+	}
+	got2 := ExhaustedWindowResetAt(quota2)
+	want2 := time.Unix(secondaryReset, 0).UTC()
+	if got2 == nil || !got2.Equal(want2) {
+		t.Fatalf("expected secondary reset %v, got %v", want2, got2)
+	}
+
+	// Nothing exhausted: nil.
+	quota3 := &CodexQuota{
+		Primary:   &CodexQuotaWindow{UsedPercent: 8, ResetAt: &primaryReset, LimitReached: false},
+		Secondary: &CodexQuotaWindow{UsedPercent: 2, ResetAt: &secondaryReset, LimitReached: false},
+	}
+	if got3 := ExhaustedWindowResetAt(quota3); got3 != nil {
+		t.Fatalf("expected nil when nothing exhausted, got %v", got3)
+	}
+}
+
 func TestParseCodexRateLimitsEvent(t *testing.T) {
 	quota := ParseCodexRateLimitsEvent([]byte(`{"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":100,"window_minutes":60,"reset_at":1893456000},"secondary":{"used_percent":12}}}`))
 	if quota == nil || quota.Primary == nil || quota.Secondary == nil {
