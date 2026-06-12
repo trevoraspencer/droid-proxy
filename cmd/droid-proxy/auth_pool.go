@@ -100,6 +100,7 @@ func formatPoolHealthJSON(raw []byte) (string, error) {
 			MaxUsedPercent         *float64          `json:"max_used_percent"`
 			BoundConversationCount int               `json:"bound_conversation_count"`
 			CooldownUntil          *time.Time        `json:"cooldown_until"`
+			UnhealthyUntil         *time.Time        `json:"unhealthy_until"`
 			RateLimitedUntil       *time.Time        `json:"rate_limit_until"`
 			Quota                  *oauth.CodexQuota `json:"quota"`
 		} `json:"accounts"`
@@ -126,6 +127,8 @@ func formatPoolHealthJSON(raw []byte) (string, error) {
 			limited = acct.RateLimitedUntil.Format(time.RFC3339)
 		} else if acct.CooldownUntil != nil {
 			limited = "cooldown:" + acct.CooldownUntil.Format(time.RFC3339)
+		} else if acct.UnhealthyUntil != nil {
+			limited = "unhealthy:" + acct.UnhealthyUntil.Format(time.RFC3339)
 		}
 		health := "ok"
 		if !acct.Healthy {

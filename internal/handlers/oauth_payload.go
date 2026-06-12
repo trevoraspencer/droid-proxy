@@ -40,6 +40,8 @@ func prepareCodexResponsesPayload(body []byte) []byte {
 	if strings.EqualFold(strings.TrimSpace(gjson.GetBytes(out, "service_tier").String()), "fast") {
 		if next, err := sjson.SetBytes(out, "service_tier", "priority"); err == nil {
 			out = next
+		} else if next, deleteErr := sjson.DeleteBytes(out, "service_tier"); deleteErr == nil {
+			out = next
 		}
 	}
 	if strings.TrimSpace(gjson.GetBytes(out, "instructions").String()) == "" {

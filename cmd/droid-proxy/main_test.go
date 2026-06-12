@@ -134,3 +134,29 @@ func TestFormatAuthStatusDoesNotExposeSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatPoolHealthJSONShowsUnhealthyUntil(t *testing.T) {
+	raw := []byte(`{
+		"strategy": "round_robin",
+		"codex_account_count": 1,
+		"eligible_count": 0,
+		"accounts": [
+			{
+				"selector": "user@example.com",
+				"healthy": false,
+				"unhealthy_until": "2026-06-12T17:30:00Z",
+				"in_flight": 0,
+				"bound_conversation_count": 0
+			}
+		]
+	}`)
+	out, err := formatPoolHealthJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"unhealthy", "unhealthy:2026-06-12T17:30:00Z"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("pool health output missing %q:\n%s", want, out)
+		}
+	}
+}

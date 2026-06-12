@@ -241,9 +241,13 @@ models:
 		if m.APIKeyEnv != "" || !m.AgentReady() {
 			t.Fatalf("oauth model hydrated unexpected fields or not agent ready: %+v", m)
 		}
-	}
-	if got := cfg.Models[2].BaseURL; got != "https://cli-chat-proxy.grok.com/v1" {
-		t.Fatalf("composer base URL = %q", got)
+		wantBaseURL := ""
+		if m.Alias == "grok-composer-2.5-fast" {
+			wantBaseURL = "https://cli-chat-proxy.grok.com/v1"
+		}
+		if m.BaseURL != wantBaseURL {
+			t.Fatalf("%s base URL = %q, want %q", m.Alias, m.BaseURL, wantBaseURL)
+		}
 	}
 	if got := cfg.Models[0].ResolvedCapabilities().FactoryReasoning; got != FactoryReasoningPassthrough {
 		t.Fatalf("codex factory_reasoning default = %q, want passthrough", got)
@@ -256,6 +260,46 @@ models:
 	}
 	if got := cfg.Models[3].ResolvedCapabilities().FactoryReasoning; got != FactoryReasoningPassthrough {
 		t.Fatalf("explicit xai factory_reasoning = %q, want passthrough", got)
+	}
+}
+
+func TestLoad_NormalizesServiceTierFastExtraArg(t *testing.T) {
+	in := `
+models:
+  - alias: fast-tier
+    factory_provider: openai
+    upstream_protocol: openai-responses
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+    extra_args:
+      service_tier: " Fast "
+  - alias: priority-tier
+    factory_provider: openai
+    upstream_protocol: openai-responses
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+    extra_args:
+      service_tier: priority
+  - alias: numeric-tier
+    factory_provider: openai
+    upstream_protocol: openai-responses
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+    extra_args:
+      service_tier: 7
+`
+	cfg, err := parse([]byte(in))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := cfg.Models[0].ExtraArgs["service_tier"]; got != "priority" {
+		t.Fatalf("fast service_tier = %#v, want priority", got)
+	}
+	if got := cfg.Models[1].ExtraArgs["service_tier"]; got != "priority" {
+		t.Fatalf("priority service_tier = %#v, want unchanged priority", got)
+	}
+	if got := cfg.Models[2].ExtraArgs["service_tier"]; got != 7 {
+		t.Fatalf("numeric service_tier = %#v, want unchanged 7", got)
 	}
 }
 
