@@ -46,6 +46,10 @@ func ParseCodexRateLimitsEvent(data []byte) *CodexQuota {
 	return quota
 }
 
+// RecordCodexUsage persists Codex quota telemetry for a token. When quota
+// evidence includes exhausted windows, RateLimitResetAt is set to the
+// exhausted-window reset; otherwise the caller-supplied resetAt is stored as
+// display telemetry and must not suppress eligibility on its own.
 func (m *Manager) RecordCodexUsage(token *Token, quota *CodexQuota, resetAt *time.Time) error {
 	if token == nil || token.Provider() != ProviderCodex || strings.TrimSpace(token.path) == "" {
 		return nil
@@ -200,16 +204,6 @@ func RetryAfterTime(headers http.Header, now time.Time) *time.Time {
 		return nil // past date
 	}
 	return nil // unparseable
-}
-
-// LatestQuotaReset returns the latest reset timestamp across all quota
-// windows, or nil if no valid reset exists. It does NOT filter for future-only
-// timestamps — the returned timestamp may be in the past. Callers that need
-// only future reset times must compare the result against time.Now() themselves
-// (as codexRateLimitCooldown does). This is the deterministic quota-reset
-// selection rule used for cooldown timestamp computation.
-func LatestQuotaReset(quota *CodexQuota) *time.Time {
-	return latestQuotaReset(quota)
 }
 
 // retryAfterReset parses the Retry-After header and returns a time.Time.

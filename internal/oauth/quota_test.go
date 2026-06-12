@@ -112,14 +112,14 @@ func TestRetryAfterTime(t *testing.T) {
 	}
 }
 
-func TestLatestQuotaReset(t *testing.T) {
+func TestLatestQuotaResetTelemetryHelper(t *testing.T) {
 	// No quota windows
-	if got := LatestQuotaReset(nil); got != nil {
+	if got := latestQuotaReset(nil); got != nil {
 		t.Fatalf("expected nil for nil quota, got %v", got)
 	}
 
 	// Empty quota
-	if got := LatestQuotaReset(&CodexQuota{}); got != nil {
+	if got := latestQuotaReset(&CodexQuota{}); got != nil {
 		t.Fatalf("expected nil for empty quota, got %v", got)
 	}
 
@@ -129,7 +129,7 @@ func TestLatestQuotaReset(t *testing.T) {
 	quota := &CodexQuota{
 		Primary: &CodexQuotaWindow{UsedPercent: 50, ResetAt: &resetUnix},
 	}
-	got := LatestQuotaReset(quota)
+	got := latestQuotaReset(quota)
 	if got == nil || !got.Equal(expected) {
 		t.Fatalf("expected %v, got %v", expected, got)
 	}
@@ -142,7 +142,7 @@ func TestLatestQuotaReset(t *testing.T) {
 		Secondary: &CodexQuotaWindow{UsedPercent: 80, ResetAt: &later},
 	}
 	expectedLater := time.Unix(later, 0).UTC()
-	got2 := LatestQuotaReset(quota2)
+	got2 := latestQuotaReset(quota2)
 	if got2 == nil || !got2.Equal(expectedLater) {
 		t.Fatalf("expected latest reset %v, got %v", expectedLater, got2)
 	}
@@ -154,7 +154,7 @@ func TestLatestQuotaReset(t *testing.T) {
 		Primary:   &CodexQuotaWindow{UsedPercent: 50, ResetAt: &zero},
 		Secondary: &CodexQuotaWindow{UsedPercent: 80, ResetAt: &neg},
 	}
-	if got3 := LatestQuotaReset(quota3); got3 != nil {
+	if got3 := latestQuotaReset(quota3); got3 != nil {
 		t.Fatalf("expected nil for zero/negative reset_at, got %v", got3)
 	}
 }

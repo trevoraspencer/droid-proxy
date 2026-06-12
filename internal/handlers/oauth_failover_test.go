@@ -1148,6 +1148,45 @@ func TestResponsesCodexFailoverStreaming429FailsOver(t *testing.T) {
 
 // --------------- VAL-FAILOVER-002: 429 cooldown uses Retry-After, quota reset, then fallback ---------------
 
+func TestCodexRateLimitCooldownUsesExhaustedWindowReset(t *testing.T) {
+	fallback := 45 * time.Second
+	primaryReset := time.Now().Add(time.Hour).Unix()
+	secondaryReset := time.Now().Add(7 * 24 * time.Hour).Unix()
+	quota := &oauth.CodexQuota{
+		Primary:   &oauth.CodexQuotaWindow{UsedPercent: 100, ResetAt: &primaryReset, LimitReached: true},
+		Secondary: &oauth.CodexQuotaWindow{UsedPercent: 30, ResetAt: &secondaryReset, LimitReached: false},
+	}
+
+	got := codexRateLimitCooldown(nil, quota, fallback)
+	want := time.Unix(primaryReset, 0).UTC()
+	if !got.Truncate(time.Second).Equal(want.Truncate(time.Second)) {
+		t.Fatalf("cooldown = %v, want exhausted primary reset %v", got, want)
+	}
+
+	headers := http.Header{}
+	headers.Set("Retry-After", "120")
+	before := time.Now()
+	got = codexRateLimitCooldown(headers, quota, fallback)
+	if got.Before(before.Add(115*time.Second)) || got.After(before.Add(125*time.Second)) {
+		t.Fatalf("cooldown = %v, want Retry-After around %v", got, before.Add(120*time.Second))
+	}
+
+	quota.Primary.LimitReached = false
+	before = time.Now()
+	got = codexRateLimitCooldown(nil, quota, fallback)
+	if got.Before(before.Add(40*time.Second)) || got.After(before.Add(50*time.Second)) {
+		t.Fatalf("cooldown = %v, want fallback around %v", got, before.Add(fallback))
+	}
+
+	quota.Primary.LimitReached = true
+	quota.Primary.ResetAt = nil
+	before = time.Now()
+	got = codexRateLimitCooldown(nil, quota, fallback)
+	if got.Before(before.Add(40*time.Second)) || got.After(before.Add(50*time.Second)) {
+		t.Fatalf("cooldown = %v, want fallback when exhausted window has no reset around %v", got, before.Add(fallback))
+	}
+}
+
 func TestCodexRateLimitCooldownUsesRetryAfterNumeric(t *testing.T) {
 	// When a 429 has Retry-After: 120 (numeric seconds), the pool's
 	// rate-limited timestamp should be approximately 120s from now.
@@ -1310,7 +1349,8 @@ func TestCodexRateLimitCooldownRetryAfterOverridesQuotaReset(t *testing.T) {
 }
 
 func TestCodexRateLimitCooldownFallsBackToConfiguredDefault(t *testing.T) {
-	// When no Retry-After and no quota reset, use configured rate_limit_cooldown.
+	// When no Retry-After and no exhausted quota reset, use configured rate_limit_cooldown.
+	resetAt := time.Now().Add(7 * 24 * time.Hour).Unix()
 	api := newCodexFailoverTestAPI(t, failoverTestOptions{
 		maxFailovers:      0,
 		rateLimitCooldown: 45 * time.Second,
@@ -1318,6 +1358,8 @@ func TestCodexRateLimitCooldownFallsBackToConfiguredDefault(t *testing.T) {
 			{email: "a@test.com", accountID: "acct_a"},
 		},
 		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("x-codex-primary-used-percent", "30")
+			w.Header().Set("x-codex-primary-reset-at", fmt.Sprintf("%d", resetAt))
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))

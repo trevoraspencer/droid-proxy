@@ -134,15 +134,15 @@ func isRetryableCodexStatus(status int) bool {
 
 // codexRateLimitCooldown computes the cooldown timestamp for a rate-limited
 // Codex account. Priority: future Retry-After header > deterministic future
-// quota reset > configured fallback duration.
+// exhausted quota-window reset > configured fallback duration.
 func codexRateLimitCooldown(headers http.Header, quota *oauth.CodexQuota, fallback time.Duration) time.Time {
 	now := time.Now()
 	// 1. Try future Retry-After header (numeric seconds or HTTP-date).
 	if ra := oauth.RetryAfterTime(headers, now); ra != nil {
 		return *ra
 	}
-	// 2. Try deterministic future quota reset from parsed quota windows.
-	if reset := oauth.LatestQuotaReset(quota); reset != nil && reset.After(now) {
+	// 2. Try deterministic future reset from exhausted quota windows.
+	if reset := oauth.ExhaustedWindowResetAt(quota); reset != nil && reset.After(now) {
 		return *reset
 	}
 	// 3. Fallback: configured rate_limit_cooldown.
@@ -395,7 +395,7 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 				cooldownUntil := codexRateLimitCooldown(resp.Header, quota, rateLimitCooldown)
 				if bodyQuota := oauth.ParseCodexUsageLimitFromBody(raw); bodyQuota != nil {
 					a.recordCodexUsage(token, bodyQuota, nil)
-					if reset := oauth.LatestQuotaReset(bodyQuota); reset != nil && reset.After(time.Now()) {
+					if reset := oauth.ExhaustedWindowResetAt(bodyQuota); reset != nil && reset.After(time.Now()) {
 						cooldownUntil = *reset
 					}
 				}
