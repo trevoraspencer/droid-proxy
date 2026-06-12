@@ -167,7 +167,7 @@ or any individual field to use defaults.
 |---|---|---|---|
 | `strategy` | enum | `sticky` | Account selection: `sticky` (per-conversation affinity, default), `round-robin`, `fill-first`, `least-connections`, or `random`. |
 | `max_failovers` | int | `2` | Maximum additional alternate-account attempts on retryable errors. `max_failovers=0` disables failover (single attempt only). |
-| `rate_limit_cooldown` | duration | `60s` | Cooldown after a `429` when no `Retry-After` header or quota reset is available. `0s` means no cooldown. |
+| `rate_limit_cooldown` | duration | `60s` | Cooldown after a `429` when no `Retry-After` header or exhausted-window quota reset is available. `0s` means no cooldown. |
 | `error_cooldown` | duration | `30s` | Cooldown after `5xx` or transport timeout. `0s` means no cooldown. |
 | `quota_soft_cap_percent` | float | `80` | Prefer accounts below this `used_percent` on primary/secondary windows. `0` disables proactive avoidance. |
 | `affinity_path` | string | `~/.droid-proxy/conversation_affinity.json` | Persisted conversation→account map for `sticky`. |

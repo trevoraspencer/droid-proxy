@@ -240,7 +240,8 @@ models:
     oauth_provider: codex
     upstream_model: gpt-5.5
     # "Fast" is the display label; the verified Codex upstream value is
-    # service_tier: priority. The completed response may still echo
+    # service_tier: priority. The loader also accepts service_tier: fast and
+    # normalizes it to priority. The completed response may still echo
     # service_tier: "default", so do not use the response echo as proof that
     # the request value was ignored.
     extra_args:
@@ -260,7 +261,8 @@ Full schema: [`docs/CONFIG.md`](docs/CONFIG.md). Highlights:
 - `oauth.auth_dir` for Codex/xAI token storage.
 - `oauth.load_balancing` for Codex multi-account pooling: `strategy`
   (`sticky` (default), `round-robin`, `fill-first`, `least-connections`, `random`),
-  `max_failovers`, `rate_limit_cooldown`, `error_cooldown`.
+  `max_failovers`, `rate_limit_cooldown`, `error_cooldown`. A 429 cooldown uses
+  `Retry-After`, then exhausted-window reset evidence, then this fallback.
 - Per-model `capabilities` drive the `agent_ready` flag.
 
 ## Troubleshooting

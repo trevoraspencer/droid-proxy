@@ -58,7 +58,7 @@ oauth:
   #   quota_soft_cap_percent: 80       # prefer accounts below this used_percent (0 = disable)
   #   affinity_path: ~/.droid-proxy/conversation_affinity.json
   #   max_failovers: 2                 # additional alternate-account attempts (0 = single attempt only)
-  #   rate_limit_cooldown: 60s         # cooldown after 429 when no Retry-After / quota reset
+  #   rate_limit_cooldown: 60s         # cooldown after 429 when no Retry-After / exhausted-window reset
   #   error_cooldown: 30s              # cooldown after 5xx or transport timeout
 
 models:
@@ -143,7 +143,7 @@ models:
   #   upstream_model: gpt-5.5
   #   max_output_tokens: 128000
   #   extra_args:
-  #     service_tier: priority
+  #     service_tier: priority # "fast" is also accepted and normalized to priority
 
   # Example: xAI OAuth via Factory's OpenAI mode.
   # Run first: droid-proxy auth xai --config config.yaml

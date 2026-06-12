@@ -53,7 +53,7 @@ oauth:
     strategy: sticky           # sticky (default), round-robin, fill-first, least-connections, random
     quota_soft_cap_percent: 80 # prefer accounts below this usage (0 = off)
     max_failovers: 2         # additional alternate-account attempts
-    rate_limit_cooldown: 60s # cooldown after 429 without Retry-After
+    rate_limit_cooldown: 60s # cooldown after 429 without Retry-After or exhausted-window reset
     error_cooldown: 30s      # cooldown after 5xx or transport timeout
 ```
 

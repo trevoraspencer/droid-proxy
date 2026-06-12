@@ -312,6 +312,8 @@ provided metadata keys.
 The proxy also applies small Codex compatibility fixes automatically:
 
 - Rewrites the Factory-facing model alias to `upstream_model`.
+- Accepts `extra_args.service_tier: fast` in config and normalizes it to the
+  verified Codex value `priority`.
 - Forces `store: false` and adds default Codex instructions only when the
   caller did not provide instructions.
 - Preserves Factory's `reasoning` object, so the reasoning level selected in
