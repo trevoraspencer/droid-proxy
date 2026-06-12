@@ -701,6 +701,53 @@ func TestResponses_OAuthXAICLIChatProxyVisibilityGuardStreaming(t *testing.T) {
 			t.Fatalf("expected no-visible-output error frame, got %s", out)
 		}
 	})
+
+	t.Run("truncated non-visible pending emits error after repaired frame", func(t *testing.T) {
+		var buf strings.Builder
+		framer := responsesSSERepairFramer{outputItemsByIndex: map[int64][]byte{}, requireVisibleOutput: true}
+		if err := framer.WriteChunk(&buf, []byte(`data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}`)); err != nil {
+			t.Fatal(err)
+		}
+		if err := framer.Flush(&buf); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		frameIdx := strings.Index(out, "response.created")
+		errIdx := strings.Index(out, noVisibleOAuthOutputMessage)
+		if frameIdx < 0 || errIdx < 0 || errIdx < frameIdx {
+			t.Fatalf("expected no-visible-output error after repaired pending frame, got %s", out)
+		}
+	})
+
+	t.Run("truncated visible pending emits no error", func(t *testing.T) {
+		var buf strings.Builder
+		framer := responsesSSERepairFramer{outputItemsByIndex: map[int64][]byte{}, requireVisibleOutput: true}
+		if err := framer.WriteChunk(&buf, []byte(`data: {"type":"response.output_text.delta","delta":"hi"}`)); err != nil {
+			t.Fatal(err)
+		}
+		if err := framer.Flush(&buf); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "response.output_text.delta") || strings.Contains(out, noVisibleOAuthOutputMessage) {
+			t.Fatalf("expected visible pending frame without no-visible-output error, got %s", out)
+		}
+	})
+
+	t.Run("guard off preserves pending flush without error", func(t *testing.T) {
+		var buf strings.Builder
+		framer := responsesSSERepairFramer{outputItemsByIndex: map[int64][]byte{}}
+		if err := framer.WriteChunk(&buf, []byte(`data: {"type":"response.created","response":{"id":"resp_1"}}`)); err != nil {
+			t.Fatal(err)
+		}
+		if err := framer.Flush(&buf); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "response.created") || strings.Contains(out, noVisibleOAuthOutputMessage) {
+			t.Fatalf("expected repaired pending frame without no-visible-output error, got %s", out)
+		}
+	})
 }
 
 func TestResponses_OAuthXAIAPIDefaultAllowsEmptyOutput(t *testing.T) {

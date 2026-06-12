@@ -86,7 +86,13 @@ func (f *responsesSSERepairFramer) Flush(dst io.Writer) error {
 	if !bytes.HasSuffix(frame, []byte("\n\n")) && !bytes.HasSuffix(frame, []byte("\r\n\r\n")) {
 		frame = append(frame, '\n', '\n')
 	}
-	return writeAll(dst, f.repairFrame(frame))
+	if err := writeAll(dst, f.repairFrame(frame)); err != nil {
+		return err
+	}
+	if f.requireVisibleOutput && !f.sawVisibleOutput && !f.sawTerminal {
+		return writeAll(dst, responsesSSENoVisibleOutputFrame())
+	}
+	return nil
 }
 
 func (f *responsesSSERepairFramer) repairFrame(frame []byte) []byte {
