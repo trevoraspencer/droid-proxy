@@ -449,6 +449,7 @@ func (p *AccountPool) MarkHealthy(path string) {
 
 	if entry, ok := p.entries[path]; ok {
 		entry.Healthy = true
+		entry.UnhealthyUntil = time.Time{}
 	}
 }
 
@@ -509,6 +510,10 @@ func (p *AccountPool) Eligible(exclude map[string]bool) []*AccountEntry {
 // Begin/End mutations to InFlight).
 func (p *AccountPool) eligibleLocked(exclude map[string]bool) []*AccountEntry {
 	now := p.nowFunc()
+	return p.eligibleLockedAt(exclude, now)
+}
+
+func (p *AccountPool) eligibleLockedAt(exclude map[string]bool, now time.Time) []*AccountEntry {
 	var eligible []*AccountEntry
 	for _, entry := range p.entries {
 		if !p.isEligible(entry, exclude, now) {
@@ -624,11 +629,7 @@ func (p *AccountPool) isEligible(entry *AccountEntry, exclude map[string]bool, n
 	}
 	// Must be healthy, or have recovered after the unhealthy cooldown elapsed
 	if !entry.Healthy {
-		if entry.UnhealthyUntil.After(now) {
-			return false
-		}
-		entry.Healthy = true
-		entry.UnhealthyUntil = time.Time{}
+		return !entry.UnhealthyUntil.After(now)
 	}
 	// Must have some form of usable token
 	// Expired tokens with refresh tokens are still eligible
@@ -667,13 +668,14 @@ func (p *AccountPool) Snapshot() *PoolSnapshot {
 		Strategy:      string(p.strategy),
 		CodexAccounts: len(entries),
 	}
-	snap.EligibleCount = len(p.eligibleLocked(nil))
+	now := p.nowFunc()
+	snap.EligibleCount = len(p.eligibleLockedAt(nil, now))
 	if p.affinity != nil {
 		bound, file := p.affinity.Stats()
 		snap.Affinity = &PoolAffinitySnapshot{BoundConversations: bound, File: file}
 	}
 	for _, entry := range entries {
-		snap.Accounts = append(snap.Accounts, snapshotFromEntry(entry, p.affinity))
+		snap.Accounts = append(snap.Accounts, snapshotFromEntry(entry, p.affinity, now))
 	}
 
 	return snap
@@ -702,19 +704,20 @@ func (e *AccountEntry) MatchesAccount(account string) bool {
 }
 
 // snapshotFromEntry creates a deep-copy AccountSnapshot from an AccountEntry.
-func snapshotFromEntry(entry *AccountEntry, affinity *AffinityStore) AccountSnapshot {
+func snapshotFromEntry(entry *AccountEntry, affinity *AffinityStore, now time.Time) AccountSnapshot {
+	healthy := entry.Healthy || !entry.UnhealthyUntil.After(now)
 	snap := AccountSnapshot{
 		Selector: entry.Selector,
 		Provider: string(entry.Provider),
 		Disabled: entry.Disabled,
-		Healthy:  entry.Healthy,
+		Healthy:  healthy,
 		InFlight: entry.InFlight,
 	}
 	if !entry.CooldownUntil.IsZero() {
 		t := entry.CooldownUntil.UTC()
 		snap.CooldownUntil = &t
 	}
-	if !entry.Healthy && !entry.UnhealthyUntil.IsZero() {
+	if !healthy && !entry.UnhealthyUntil.IsZero() {
 		t := entry.UnhealthyUntil.UTC()
 		snap.UnhealthyUntil = &t
 	}

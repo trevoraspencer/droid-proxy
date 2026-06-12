@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -289,8 +290,56 @@ func TestPoolEligibility_UnhealthyAutoRecoversAfterCooldown(t *testing.T) {
 	if len(eligible) != 1 {
 		t.Fatalf("expected 1 eligible after unhealthy cooldown elapsed, got %d", len(eligible))
 	}
-	if !eligible[0].Healthy {
-		t.Fatal("expected entry to flip back to healthy after cooldown elapsed")
+	if eligible[0].Healthy {
+		t.Fatal("expected entry.Healthy to remain false after cooldown elapsed")
+	}
+
+	snap := pool.Snapshot()
+	if !snap.Accounts[0].Healthy {
+		t.Fatal("expected snapshot to derive healthy=true after cooldown elapsed")
+	}
+	if snap.Accounts[0].UnhealthyUntil != nil {
+		t.Fatalf("expected no unhealthy_until after cooldown elapsed, got %v", snap.Accounts[0].UnhealthyUntil)
+	}
+}
+
+func TestPoolMarkHealthyClearsUnhealthyUntil(t *testing.T) {
+	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
+	tok.path = "/tmp/mark-healthy.json"
+
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
+	pool.MarkUnhealthy(tok.path)
+	pool.MarkHealthy(tok.path)
+
+	entry := pool.entries[tok.path]
+	if !entry.Healthy {
+		t.Fatal("expected entry to be healthy")
+	}
+	if !entry.UnhealthyUntil.IsZero() {
+		t.Fatalf("expected UnhealthyUntil to be zero, got %v", entry.UnhealthyUntil)
+	}
+}
+
+func TestPoolReadPathsDoNotMutateElapsedUnhealthyEntry(t *testing.T) {
+	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
+	tok.path = "/tmp/read-purity.json"
+
+	now := fakeTime()
+	lb := TestPoolLB()
+	lb.ErrorCooldown = 30 * time.Second
+	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now }, lb, nil)
+	pool.MarkUnhealthy(tok.path)
+	now = now.Add(31 * time.Second)
+
+	before := *pool.entries[tok.path]
+	_ = pool.Snapshot()
+	_ = pool.Snapshot()
+	_ = pool.Eligible(nil)
+	_ = pool.Eligible(nil)
+	after := *pool.entries[tok.path]
+
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("read paths mutated entry\nbefore: %+v\nafter:  %+v", before, after)
 	}
 }
 
@@ -841,13 +890,19 @@ func TestPoolUnhealthyRecovery_ViaCooldownExpiry(t *testing.T) {
 	if len(pool.Eligible(nil)) != 1 {
 		t.Fatalf("expected 1 eligible after healthy recovery, got %d", len(pool.Eligible(nil)))
 	}
+	if entry := pool.entries[tok.path]; !entry.UnhealthyUntil.IsZero() {
+		t.Fatalf("expected MarkHealthy to clear UnhealthyUntil, got %v", entry.UnhealthyUntil)
+	}
 }
 
 func TestPoolUnhealthyRecovery_ExposedInSnapshot(t *testing.T) {
 	tok := makeToken("user@example.com", "access-a", "refresh-a", false)
 	tok.path = "/tmp/health.json"
 
-	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
+	now := fakeTime()
+	lb := TestPoolLB()
+	lb.ErrorCooldown = 30 * time.Second
+	pool := NewAccountPool([]*Token{tok}, func() time.Time { return now }, lb, nil)
 
 	// Initially healthy
 	snap := pool.Snapshot()
@@ -860,6 +915,18 @@ func TestPoolUnhealthyRecovery_ExposedInSnapshot(t *testing.T) {
 	snap = pool.Snapshot()
 	if snap.Accounts[0].Healthy {
 		t.Fatal("expected unhealthy after mark")
+	}
+	if snap.Accounts[0].UnhealthyUntil == nil {
+		t.Fatal("expected unhealthy_until while unhealthy cooldown is active")
+	}
+
+	now = now.Add(31 * time.Second)
+	snap = pool.Snapshot()
+	if !snap.Accounts[0].Healthy {
+		t.Fatal("expected derived healthy after unhealthy cooldown elapsed")
+	}
+	if snap.Accounts[0].UnhealthyUntil != nil {
+		t.Fatalf("expected no unhealthy_until after cooldown elapsed, got %v", snap.Accounts[0].UnhealthyUntil)
 	}
 }
 
