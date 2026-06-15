@@ -26,3 +26,6 @@ config.local.yaml.live-e2e-backup.*
 
 # Factory validation reports
 /.factory/validation/
+
+# Supergoal planning artifacts
+/.supergoal/
