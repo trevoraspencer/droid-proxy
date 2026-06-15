@@ -335,6 +335,56 @@ func TestResponses_OAuthCodexRecordsQuotaMetadata(t *testing.T) {
 	}
 }
 
+// TestResponses_OAuthCodexStreamCoalescesQuotaNewestWins guards the streaming
+// quota-persistence ordering fix: a streamed response delivers several Codex
+// rate_limits events oldest→newest, with the final Primary window exhausted
+// (used 100%). The handler must coalesce them in stream order and persist the
+// final/exhausted window exactly once — never a stale earlier (low-usage)
+// window. Before the fix, each line spawned an async write whose completion
+// order was nondeterministic, so a stale window could clobber the exhausted one.
+func TestResponses_OAuthCodexStreamCoalescesQuotaNewestWins(t *testing.T) {
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		for _, frame := range []string{
+			"event: codex.rate_limits\n" + `data: {"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":10,"window_minutes":300,"reset_at":1893456000}}}` + "\n\n",
+			"event: codex.rate_limits\n" + `data: {"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":55,"window_minutes":300,"reset_at":1893456000}}}` + "\n\n",
+			"event: codex.rate_limits\n" + `data: {"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":100,"window_minutes":300,"reset_at":1893456000}}}` + "\n\n",
+			"event: response.completed\n" + `data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[]}}` + "\n\n",
+		} {
+			_, _ = w.Write([]byte(frame))
+			flusher.Flush()
+		}
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","stream":true}`))
+	api.engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	token, err := api.api.OAuth.LoadToken(config.OAuthProviderCodex, "user@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.CodexQuota == nil || token.CodexQuota.Primary == nil {
+		t.Fatalf("quota metadata not persisted: %+v", token)
+	}
+	if got := token.CodexQuota.Primary.UsedPercent; got != 100 {
+		t.Fatalf("coalesced Primary used_percent = %v, want 100 (final/exhausted window must win)", got)
+	}
+	if !token.CodexQuota.Primary.LimitReached {
+		t.Fatalf("coalesced Primary LimitReached = false, want true for exhausted window")
+	}
+	// reset_at 1893456000 == 2030-01-01T00:00:00Z; the exhausted window drives
+	// RateLimitResetAt via ExhaustedWindowResetAt.
+	if token.RateLimitResetAt != "2030-01-01T00:00:00Z" {
+		t.Fatalf("RateLimitResetAt = %q, want exhausted-window reset 2030-01-01T00:00:00Z", token.RateLimitResetAt)
+	}
+}
+
 func TestResponses_OAuthXAIStreamingForwardsSSEAndConversationID(t *testing.T) {
 	var capturedAuth, capturedConvID, capturedModelOverride string
 	var captured map[string]any

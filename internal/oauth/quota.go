@@ -294,3 +294,12 @@ func mergeCodexQuota(old, next *CodexQuota) *CodexQuota {
 	}
 	return old
 }
+
+// MergeCodexQuota merges two Codex quota snapshots: each per-window field
+// (Primary/Secondary/CodeReview) is taken from next when next provides it
+// (non-nil) and otherwise retained from old — i.e. next wins per non-nil window.
+// It is the exported form of mergeCodexQuota, used by streaming handlers to
+// coalesce in-order SSE quota events into one snapshot before a single persist.
+func MergeCodexQuota(old, next *CodexQuota) *CodexQuota {
+	return mergeCodexQuota(old, next)
+}

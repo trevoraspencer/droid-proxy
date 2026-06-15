@@ -273,17 +273,6 @@ func (a *API) recordCodexUsage(token *oauth.Token, quota *oauth.CodexQuota, rese
 	}
 }
 
-// recordCodexUsageAsync records usage off the calling goroutine. It is used from
-// the SSE forward loop so a synchronous load+fsync write does not add
-// head-of-line latency to the client stream. Writes are still serialized and
-// crash-safe via RecordCodexUsage's per-path lock and atomic save.
-func (a *API) recordCodexUsageAsync(token *oauth.Token, quota *oauth.CodexQuota, resetAt *time.Time) {
-	if a == nil || a.OAuth == nil || token == nil || token.Provider() != config.OAuthProviderCodex {
-		return
-	}
-	go a.recordCodexUsage(token, quota, resetAt)
-}
-
 func responseFromResponsesSSE(body []byte, opts responsesSSERepairOptions) ([]byte, error) {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {

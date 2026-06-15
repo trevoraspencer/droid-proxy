@@ -60,3 +60,19 @@ Results land in `~/.droid-proxy/live-e2e/<run-id>/results.ndjson`.
 - `LIVE_E2E_ENV_FILE` must stay outside the repository.
 - Run artifacts are stored under `~/.droid-proxy/live-e2e/`, not in the repo.
 - Factory Droid UI validation after the automated run is manual.
+
+## Safety behavior
+
+- **Factory settings are merged, not replaced.** `06-write-factory-settings.sh`
+  upserts only the live-e2e model aliases into `~/.factory/settings.json` and
+  **preserves any unrelated custom models** you already configured. A timestamped
+  backup is still written before each change, and the file stays `chmod 600`. The
+  merge is idempotent (rerunning does not duplicate entries) and lives in the
+  testable jq program `merge-custom-models.jq`.
+- **Proxy cleanup is scoped by default.** `01-clean-old-proxies.sh` terminates
+  only processes whose executable basename is exactly `droid-proxy`/`cursor-proxy`
+  **or** that own a proxy port (8787/1455/56121); it never matches by a substring
+  in a command line, and it never kills the current shell or its ancestors.
+  Selection logic is the testable `select-proxy-kills.zsh`. To restore the old
+  broad behavior (`pkill -f 'droid-proxy|cursor-proxy'`, which can hit any
+  process with that string anywhere in its argv), set `LIVE_E2E_FORCE_KILL=1`.

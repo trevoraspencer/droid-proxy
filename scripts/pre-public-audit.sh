@@ -23,16 +23,35 @@ ensure_gitleaks() {
     return 0
   fi
   local ver="8.24.2"
-  local dest="/tmp/gitleaks"
-  info "Installing gitleaks ${ver} to ${dest}"
-  curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_x64.tar.gz" \
-    | tar -xz -C /tmp
-  dest="/tmp/gitleaks"
+  # Resolve the release asset for THIS host. The gitleaks v8.24.2 assets are named
+  # gitleaks_<ver>_<os>_<arch>.tar.gz with os in {darwin,linux}, arch in {x64,arm64}.
+  local os arch
+  case "$(uname -s)" in
+    Darwin) os="darwin" ;;
+    Linux) os="linux" ;;
+    *) fail "gitleaks auto-install: unsupported OS $(uname -s)"; return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64 | amd64) arch="x64" ;;
+    arm64 | aarch64) arch="arm64" ;;
+    *) fail "gitleaks auto-install: unsupported arch $(uname -m)"; return 1 ;;
+  esac
+  local asset="gitleaks_${ver}_${os}_${arch}.tar.gz"
+  # Arch-specific install dir + unconditional re-extract: a cached binary for a
+  # different platform (e.g. a stale linux_x64 /tmp/gitleaks) is never reused.
+  local bindir="/tmp/gitleaks-${ver}-${os}-${arch}"
+  local dest="${bindir}/gitleaks"
+  info "Installing gitleaks ${ver} (${os}/${arch}) to ${dest}"
+  mkdir -p "$bindir"
+  # curl -fsSL fails fast on a 404, so an unsupported os/arch combo surfaces as a
+  # clear download error rather than a silent wrong-arch binary.
+  curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/${asset}" \
+    | tar -xz -C "$bindir" gitleaks
   if [[ ! -x "$dest" ]]; then
     fail "gitleaks install failed"
     return 1
   fi
-  export PATH="/tmp:${PATH}"
+  export PATH="${bindir}:${PATH}"
 }
 
 info "Starting Phase 1 security audit in ${ROOT}"

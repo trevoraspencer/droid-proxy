@@ -56,14 +56,24 @@ fireworks_entry="$(jq -n \
     maxOutputTokens: $maxOutputTokens
   }')"
 
+# The live-e2e model set: the template's models plus the resolved Fireworks entry.
+e2e_models="$(jq -n \
+  --slurpfile live "$TEMPLATE" \
+  --argjson fireworks "$fireworks_entry" \
+  '$live[0].customModels + [$fireworks]')"
+
+MERGE_FILTER="$SCRIPT_DIR/merge-custom-models.jq"
+[[ -f "$MERGE_FILTER" ]] || fail "missing merge filter: $MERGE_FILTER"
+
+# Upsert the e2e models while preserving any unrelated custom models the user
+# already has. For a missing/invalid settings file, start from the template as
+# the base and run the same filter so behavior is consistent and idempotent.
 if [[ -f "$SETTINGS" ]] && jq empty "$SETTINGS" >/dev/null 2>&1; then
-  jq --slurpfile live "$TEMPLATE" \
-     --argjson fireworks "$fireworks_entry" \
-     '.customModels = ($live[0].customModels + [$fireworks])' "$SETTINGS" > "$TMP"
+  merge_base="$SETTINGS"
 else
-  jq --argjson fireworks "$fireworks_entry" \
-     '.customModels += [$fireworks]' "$TEMPLATE" > "$TMP"
+  merge_base="$TEMPLATE"
 fi
+jq --argjson e2e "$e2e_models" -f "$MERGE_FILTER" "$merge_base" > "$TMP"
 
 mv "$TMP" "$SETTINGS"
 chmod 600 "$SETTINGS" 2>/dev/null || true

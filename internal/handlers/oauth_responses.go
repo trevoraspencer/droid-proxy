@@ -548,13 +548,17 @@ func (a *API) forwardOAuthResponsesStream(c *gin.Context, m *config.Model, resp 
 	}
 	repair := newResponsesSSERepairWriter(c.Writer, repairOpts)
 	dst := io.Writer(repair)
+	// Coalesce Codex quota events in stream order. stream.Forward invokes OnLine
+	// sequentially on a single reader goroutine, so this accumulation needs no
+	// locking and preserves arrival order — the newest window per kind wins.
+	var latestQuota *oauth.CodexQuota
 	if err := stream.Forward(c.Request.Context(), dst, flusher, resp.Body, stream.Options{
 		KeepAlive:   a.Cfg.Upstream.StreamKeepAlive,
 		IdleTimeout: a.Cfg.Upstream.HTTPTimeout,
 		IsTerminal:  oauthResponsesTerminal,
 		OnLine: func(line []byte) {
 			if quota := codexQuotaFromSSELine(line); quota != nil {
-				a.recordCodexUsageAsync(token, quota, nil)
+				latestQuota = oauth.MergeCodexQuota(latestQuota, quota)
 			}
 		},
 		WriteTruncationError: a.responsesTruncationWriter(http.StatusBadGateway, "upstream stream ended before terminal marker"),
@@ -563,6 +567,13 @@ func (a *API) forwardOAuthResponsesStream(c *gin.Context, m *config.Model, resp 
 	}
 	if err := repair.Flush(); err != nil && !errors.Is(err, c.Request.Context().Err()) {
 		a.Logger.WithError(err).Warn("could not flush repaired oauth responses stream")
+	}
+	// Persist the coalesced quota exactly once, synchronously, after streaming
+	// completes and before the pool lease is released by the caller. A single
+	// in-order write replaces the prior per-line async writes that could persist
+	// a stale (non-exhausted) window over a newer exhausted one out of order.
+	if latestQuota != nil {
+		a.recordCodexUsage(token, latestQuota, nil)
 	}
 }
 
