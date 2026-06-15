@@ -582,12 +582,28 @@ func (p *AccountPool) Select(account string, exclude map[string]bool, conversati
 		picked, err = p.selector.Select(eligible)
 	}
 
+	// Return a detached copy. Callers read the returned entry without holding
+	// p.mu, while the watcher-driven reload mutates the live map entry's fields
+	// under the lock (see updateEntry); aliasing the live pointer is a data race.
+	out := picked.clone()
 	p.mu.Unlock()
 
 	if err != nil {
 		return nil, err
 	}
-	return picked, nil
+	return out, nil
+}
+
+// clone returns a detached shallow copy of the entry, safe to read without the
+// pool lock. Pointer fields (Quota, RateLimitResetAt) are treated as
+// immutable-after-set — reload replaces them wholesale rather than mutating the
+// pointee — so sharing them across the copy is safe.
+func (e *AccountEntry) clone() *AccountEntry {
+	if e == nil {
+		return nil
+	}
+	cp := *e
+	return &cp
 }
 
 func (p *AccountPool) selectStickyLocked(conversationID string, eligible []*AccountEntry, exclude map[string]bool) *AccountEntry {

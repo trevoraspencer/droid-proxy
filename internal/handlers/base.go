@@ -6,26 +6,17 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/sjson"
 
 	"droid-proxy/internal/config"
 	"droid-proxy/internal/logging"
-	"droid-proxy/internal/oauth"
 	"droid-proxy/internal/upstream"
 )
 
 const TraceRequestBodyKey = "trace_request_body"
-
-// Deps groups the runtime services every handler needs.
-type Deps struct {
-	Cfg    *config.Config
-	Router *upstream.Router
-	Client *upstream.Client
-	OAuth  *oauth.Manager
-	Pool   *oauth.AccountPool
-}
 
 // ErrorBody is the OpenAI-shaped error envelope. Anthropic and Responses payloads
 // use their own envelopes (built in their respective translators); use this only
@@ -119,6 +110,14 @@ func (a *API) beginSSE(c *gin.Context) (http.Flusher, bool) {
 	if !ok {
 		a.Logger.Warn("response writer does not support flushing")
 		return nil, false
+	}
+	// Clear the server's absolute WriteTimeout for this response. That deadline
+	// covers the whole response and is not reset by keep-alive frames, so a
+	// long-running stream would otherwise be truncated mid-flight even while the
+	// upstream is healthy. Idle/stall protection is handled by the stream pump's
+	// IdleTimeout instead. Best-effort: ignored if the writer can't be unwrapped.
+	if err := http.NewResponseController(c.Writer).SetWriteDeadline(time.Time{}); err != nil {
+		a.Logger.WithError(err).Debug("could not clear SSE write deadline")
 	}
 	return flusher, true
 }

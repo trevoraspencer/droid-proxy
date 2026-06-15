@@ -37,7 +37,7 @@ The command opens your default browser (macOS `open`, Linux `xdg-open`, Windows
 `rundll32`). Complete the provider login flow. On success:
 
 ```text
-Saved codex OAuth credentials to /Users/you/.droid-proxy/auth/codex-user@example.com.json
+Saved codex OAuth credentials to ~/.droid-proxy/auth/codex-user@example.com.json
 ```
 
 **Headless / remote machines:** pass `--no-browser` to print the authorization
@@ -221,7 +221,7 @@ dashboard (press `o`).
 `auth status` prints each stored account:
 
 ```text
-OAuth auth directory: /Users/you/.droid-proxy/auth
+OAuth auth directory: ~/.droid-proxy/auth
 codex:
   - provider: codex
     account: user@example.com
@@ -229,7 +229,7 @@ codex:
     expires: 2026-05-29T21:00:00Z
     last_refresh: 2026-05-29T20:00:00Z
     disabled: false
-    path: /Users/you/.droid-proxy/auth/codex-user@example.com.json
+    path: ~/.droid-proxy/auth/codex-user@example.com.json
 xai:
   (no accounts)
 ```

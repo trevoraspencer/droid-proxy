@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -11,7 +9,6 @@ import (
 
 	"droid-proxy/internal/config"
 	"droid-proxy/internal/tokens"
-	"droid-proxy/internal/upstream"
 )
 
 // CountTokens serves POST /v1/messages/count_tokens. With an Anthropic upstream,
@@ -22,19 +19,8 @@ func (a *API) CountTokens(c *gin.Context) {
 	if !ok {
 		return
 	}
-	alias := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-	if alias == "" {
-		BadRequest(c, "request is missing required field: model")
-		return
-	}
-	m, err := a.Router.Resolve(alias)
-	if err != nil {
-		var nf *upstream.NotFoundError
-		if errors.As(err, &nf) {
-			WriteJSONError(c, http.StatusNotFound, "model_not_found", nf.Error())
-			return
-		}
-		WriteJSONError(c, http.StatusInternalServerError, "internal_error", err.Error())
+	m, ok := a.resolveRequestModel(body, openAIModelErrors(c))
+	if !ok {
 		return
 	}
 	if m.FactoryProvider != config.FactoryProviderAnthropic {
@@ -112,8 +98,10 @@ func anthropicContentText(v gjson.Result) string {
 				sb.WriteString(name)
 			}
 			if input := block.Get("input"); input.Exists() {
-				raw, _ := json.Marshal(input.Raw)
-				sb.Write(raw)
+				// input.Raw is already the JSON text of the arguments object;
+				// append it directly. Marshalling it again would re-encode the
+				// JSON as a quoted/escaped string and skew the token estimate.
+				sb.WriteString(input.Raw)
 			}
 		}
 	}

@@ -17,7 +17,7 @@ for port in 1455 56121; do
   fi
 done
 
-[[ -d "$AUTH_DIR" ]] || fail "$AUTH_DIR does not exist; run OAuth login commands from docs/live-e2e/DONE.md"
+[[ -d "$AUTH_DIR" ]] || fail "$AUTH_DIR does not exist; run OAuth login commands from scripts/live-e2e/README.md"
 
 stat -f '%A %N' "$AUTH_DIR" | tee "$LIVE_E2E_RUN_DIR/oauth-auth-dir.stat"
 auth_mode="$(stat -f '%A' "$AUTH_DIR")"

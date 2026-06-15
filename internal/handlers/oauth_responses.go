@@ -554,7 +554,7 @@ func (a *API) forwardOAuthResponsesStream(c *gin.Context, m *config.Model, resp 
 		IsTerminal:  oauthResponsesTerminal,
 		OnLine: func(line []byte) {
 			if quota := codexQuotaFromSSELine(line); quota != nil {
-				a.recordCodexUsage(token, quota, nil)
+				a.recordCodexUsageAsync(token, quota, nil)
 			}
 		},
 		WriteTruncationError: a.responsesTruncationWriter(http.StatusBadGateway, "upstream stream ended before terminal marker"),

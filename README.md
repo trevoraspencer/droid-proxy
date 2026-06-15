@@ -1,9 +1,38 @@
 # droid-proxy
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A localhost HTTP proxy that lets [Factory Droid](https://factory.ai) use any
 BYOK / custom model — Anthropic, OpenAI, DeepSeek, Xiaomi MiMo, xAI, Kimi, ZAI,
 Groq, Fireworks, local Ollama or vLLM, custom OpenAI-compatible endpoints,
 plus Codex/ChatGPT and xAI OAuth — from a single Go binary.
+
+**Status:** Beta — actively developed pre-`v0.1.0` public release. Expect config
+and provider behavior to evolve; pin a release tag once published.
+
+## What this is
+
+- A **local bridge** between Factory Droid and upstream model APIs you configure.
+- A **single Go binary** with no hosted service component — you run it on your machine.
+- A **BYOK/OAuth tool** — your API keys and OAuth tokens stay in local files under
+  `~/.droid-proxy/`, not on a shared server.
+
+## What this is not
+
+- **Not** a hosted proxy, API reseller, or model provider.
+- **Not** affiliated with Factory AI or any upstream provider (see Disclaimer).
+- **Not** designed for exposure to the public internet without extra access controls.
+
+## Security model
+
+- **Listen address defaults to `127.0.0.1`** — only local processes can reach the proxy.
+- **Upstream credentials** live in your environment, `.env.local`, or
+  `~/.droid-proxy/env` (written by `droid-proxy config`, mode `0600`).
+- **OAuth tokens** are stored as JSON under `~/.droid-proxy/auth/` (mode `600`).
+- **Logs redact secrets by default** (`logging.redact: true` in config).
+- Optional `client_auth` can require Droid to present a proxy API key — off by default.
+
+Report vulnerabilities privately: [SECURITY.md](SECURITY.md).
 
 - **Localhost-first.** Examples use `http://127.0.0.1:8787`. No tunneling
   required unless you specifically want remote access.
@@ -46,7 +75,8 @@ The `/v1` prefix is optional on every non-health route.
 ## Install
 
 ```bash
-git clone <this-repo> droid-proxy && cd droid-proxy
+git clone https://github.com/trevoraspencer/droid-proxy.git
+cd droid-proxy
 go build -o droid-proxy ./cmd/droid-proxy
 ```
 
@@ -65,8 +95,7 @@ source ~/.zshrc
 droid-proxy status
 ```
 
-Replace `/path/to/droid-proxy` with the source checkout where you ran
-`go build`; for example, `/Users/trevor/code/droid-proxy`. After this, use
+Replace `/path/to/droid-proxy` with the directory where you ran `go build`. After this, use
 `droid-proxy start`, `droid-proxy status`, `droid-proxy restart`,
 `droid-proxy config`, and
 `droid-proxy update` from any working directory. The `~/.droid-proxy/` directory
@@ -295,6 +324,31 @@ curl -s http://127.0.0.1:8787/v1/models | jq '.data[].id'
 
 Confirm `baseUrl` in Factory settings matches the proxy listen address.
 
+## FAQ
+
+**Can I run this on a remote server?**
+
+The defaults assume localhost. You can bind another host in `config.yaml`, but
+you are responsible for firewalls, TLS, and `client_auth` if the port is reachable
+beyond your machine.
+
+**Do I need to edit three files for every provider?**
+
+No. Run `./droid-proxy config` — it writes `config.yaml`, stores keys in
+`~/.droid-proxy/env`, and syncs Factory settings in one flow.
+
+**Which provider should I start with?**
+
+DeepSeek via the manual quickstart below, or any guide in
+[docs/examples/](docs/examples/). Use [docs/SMOKE.md](docs/SMOKE.md) to verify
+with curl before opening Droid.
+
+**How do I add a second Codex/ChatGPT account?**
+
+Run `droid-proxy auth codex` again. Multiple accounts pool automatically — see
+[docs/OAUTH.md](docs/OAUTH.md) and `oauth.load_balancing` in
+[docs/CONFIG.md](docs/CONFIG.md).
+
 **Where is my data?**
 
 | Data | Location | Notes |
@@ -307,11 +361,15 @@ Confirm `baseUrl` in Factory settings matches the proxy listen address.
 
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide. Recent
+changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
 ```bash
 make build      # build the binary
 make test       # run unit + integration tests
 make test-race  # tests with the race detector
 make lint       # gofmt + go vet
+make docs-audit # documentation consistency checks
 ```
 
 OAuth pool and handler tests:
@@ -330,8 +388,16 @@ GOMAXPROCS=2 go vet ./... && test -z "$(gofmt -l .)"
 
 Workflow validation uses local fake upstreams and does not require provider API keys.
 
-**Contributors:** live validation harness in [docs/LIVE_E2E_PLAN.md](docs/LIVE_E2E_PLAN.md).
+**Contributors:** optional live validation harness in [scripts/live-e2e/README.md](scripts/live-e2e/README.md).
+
+## Disclaimer
+
+droid-proxy is an independent open-source project. It is **not affiliated with,
+endorsed by, or officially supported by** [Factory AI](https://factory.ai) or any
+model provider named in the documentation. Factory Droid and provider names are
+trademarks of their respective owners.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE). Third-party component licenses are listed in
+[`docs/THIRD_PARTY_LICENSES.md`](docs/THIRD_PARTY_LICENSES.md).

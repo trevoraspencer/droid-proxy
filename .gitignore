@@ -23,9 +23,36 @@ config.local.yaml.live-e2e-backup.*
 .env
 .env.local
 .env.live-e2e.local
+.env.*
+!.env.local.example
+secrets.env
+**/*.live-e2e-backup.*
 
-# Factory validation reports
+# Keys and certificates (never commit)
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Local logs and archives
+*.log
+*.tgz
+*.tar.gz
+
+# Factory local validation (never commit)
+/.factory/
+
+# Factory validation reports (legacy path under repo)
 /.factory/validation/
 
 # Supergoal planning artifacts
 /.supergoal/
+
+# Agent and tooling scratch artifacts (never commit)
+.cursor/plans/
+notes/
+scratch/
+tmp/
+/.go-public/

@@ -54,6 +54,14 @@ func (m *Manager) RecordCodexUsage(token *Token, quota *CodexQuota, resetAt *tim
 	if token == nil || token.Provider() != ProviderCodex || strings.TrimSpace(token.path) == "" {
 		return nil
 	}
+	// Serialize the load→merge→save against concurrent usage records and token
+	// refreshes for the same file. This shares the per-path refresh mutex so a
+	// quota write can never read a stale file and clobber a refresh's new tokens
+	// (last-writer-wins), and concurrent requests on the same account don't lose
+	// each other's quota updates.
+	mu := m.refreshMutex(token.path)
+	mu.Lock()
+	defer mu.Unlock()
 	latest, err := m.loadTokenPath(token.path)
 	if err != nil {
 		latest = token

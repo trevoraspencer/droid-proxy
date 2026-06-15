@@ -19,6 +19,34 @@ type modelResolveErrors struct {
 	Internal func(error)
 }
 
+func openAIModelErrors(c *gin.Context) modelResolveErrors {
+	return modelResolveErrors{
+		Missing: func() {
+			BadRequest(c, "request is missing required field: model")
+		},
+		NotFound: func(err error) {
+			WriteJSONError(c, http.StatusNotFound, "model_not_found", err.Error())
+		},
+		Internal: func(err error) {
+			WriteJSONError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		},
+	}
+}
+
+func anthropicModelErrors(c *gin.Context) modelResolveErrors {
+	return modelResolveErrors{
+		Missing: func() {
+			WriteAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "request is missing required field: model")
+		},
+		NotFound: func(err error) {
+			WriteAnthropicError(c, http.StatusNotFound, "not_found_error", err.Error())
+		},
+		Internal: func(err error) {
+			WriteAnthropicError(c, http.StatusInternalServerError, "api_error", err.Error())
+		},
+	}
+}
+
 func (a *API) resolveRequestModel(body []byte, errs modelResolveErrors) (*config.Model, bool) {
 	alias := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	if alias == "" {

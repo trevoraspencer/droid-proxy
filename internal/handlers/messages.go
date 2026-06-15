@@ -28,17 +28,7 @@ func (a *API) Messages(c *gin.Context) {
 	if !ok {
 		return
 	}
-	m, ok := a.resolveRequestModel(body, modelResolveErrors{
-		Missing: func() {
-			WriteAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "request is missing required field: model")
-		},
-		NotFound: func(err error) {
-			WriteAnthropicError(c, http.StatusNotFound, "not_found_error", err.Error())
-		},
-		Internal: func(err error) {
-			WriteAnthropicError(c, http.StatusInternalServerError, "api_error", err.Error())
-		},
-	})
+	m, ok := a.resolveRequestModel(body, anthropicModelErrors(c))
 	if !ok {
 		return
 	}

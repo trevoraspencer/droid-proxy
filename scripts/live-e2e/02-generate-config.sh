@@ -29,4 +29,4 @@ if rg -n 'sk-[A-Za-z0-9_-]{12,}|Bearer [A-Za-z0-9._~+/=-]{12,}|refresh_token|acc
   fail "$LIVE_E2E_CONFIG appears to contain a literal secret"
 fi
 
-info "Config scaffold is ready. Fill $LIVE_E2E_ENV_FILE, then run OAuth commands in docs/live-e2e/DONE.md."
+info "Config scaffold is ready. Fill $LIVE_E2E_ENV_FILE, then run OAuth commands in scripts/live-e2e/README.md."
