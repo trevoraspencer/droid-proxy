@@ -394,6 +394,11 @@ func parseCodexIdentity(idToken, accessToken string) (email, subject, accountID 
 	return email, subject, accountID
 }
 
+// parseJWTIdentity extracts optional identity claims from an unsigned JWT-shaped
+// token payload. This is intentionally best effort: OAuth providers may omit or
+// rotate ID token shapes, so malformed/missing identity data must never invent an
+// account identity. Callers fall back to access-token identity (Codex) or filename
+// selectors, and tests pin that malformed tokens cannot match unrelated accounts.
 func parseJWTIdentity(token string) (email, subject, accountID string) {
 	claims := parseJWTPayload(token)
 	if claims == nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,30 @@ import (
 	"droid-proxy/internal/daemon"
 	"droid-proxy/internal/oauth"
 )
+
+func TestPrintAuthUsageIncludesSubcommands(t *testing.T) {
+	var out bytes.Buffer
+	printAuthUsage(&out)
+	text := out.String()
+	for _, want := range []string{
+		"droid-proxy auth <codex|xai>",
+		"droid-proxy auth status",
+		"droid-proxy auth pool",
+		"droid-proxy auth <enable|disable|logout>",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("auth usage missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestPrintServiceUsage(t *testing.T) {
+	var out bytes.Buffer
+	printServiceUsage(&out)
+	if !strings.Contains(out.String(), "droid-proxy service <install|uninstall>") {
+		t.Fatalf("service usage missing command form:\n%s", out.String())
+	}
+}
 
 func TestResolveDefaultConfigPathPrefersCurrentDirectory(t *testing.T) {
 	dir := t.TempDir()

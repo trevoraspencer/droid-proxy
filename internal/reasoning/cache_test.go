@@ -171,6 +171,30 @@ func TestPatchRequest_InjectsCachedReasoning(t *testing.T) {
 	}
 }
 
+func TestReasoningCaptureThenReplayRoundTrip(t *testing.T) {
+	c := NewCache(8, time.Minute)
+	scope := Scope{Provider: "deepseek", AuthHash: "h", Model: "deepseek-chat", BaseURL: "https://api.deepseek.com", Session: "chat-42"}
+
+	prior := []byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"I will use the tool.","reasoning_content":"Need current weather before answering.","tool_calls":[{"id":"call_weather","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Paris\"}"}}]}}]}`)
+	CaptureNonStream(prior, scope, c)
+
+	next := []byte(`{"messages":[
+		{"role":"user","content":"weather in Paris?"},
+		{"role":"assistant","content":"I will use the tool.","tool_calls":[{"id":"call_weather","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Paris\"}"}}]},
+		{"role":"tool","tool_call_id":"call_weather","content":"sunny"}
+	]}`)
+	patched := PatchRequest(next, scope, c)
+	var root map[string]any
+	if err := json.Unmarshal(patched, &root); err != nil {
+		t.Fatal(err)
+	}
+	msgs := root["messages"].([]any)
+	asst := msgs[1].(map[string]any)
+	if asst["reasoning_content"] != "Need current weather before answering." {
+		t.Fatalf("reasoning replay mismatch: %#v", asst)
+	}
+}
+
 func TestPatchRequest_LeavesPresentReasoning(t *testing.T) {
 	c := NewCache(8, time.Minute)
 	scope := Scope{Provider: "deepseek", AuthHash: "h", Model: "m", BaseURL: "https://api.deepseek.com", Session: "s"}

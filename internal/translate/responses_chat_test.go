@@ -147,6 +147,34 @@ func TestChatToResponsesResponse_OneAndMultipleToolCalls(t *testing.T) {
 	}
 }
 
+func TestChatToResponsesResponse_TextAndToolCallsPreserved(t *testing.T) {
+	body := []byte(`{"id":"chat_1","model":"gpt-test","created":123,"choices":[{"index":0,"message":{"role":"assistant","content":"I will check that now.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"city\":\"Paris\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":4,"completion_tokens":6,"total_tokens":10}}`)
+	got, err := ChatToResponsesResponse(body, "gpt-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj := decodeObject(t, got)
+	if obj["status"] != "completed" {
+		t.Fatalf("status=%v want completed obj=%#v", obj["status"], obj)
+	}
+	output := obj["output"].([]any)
+	if len(output) != 2 {
+		t.Fatalf("output len=%d want 2: %#v", len(output), output)
+	}
+	msg := output[0].(map[string]any)
+	if msg["type"] != "message" || msg["role"] != "assistant" {
+		t.Fatalf("bad message output: %#v", msg)
+	}
+	text := msg["content"].([]any)[0].(map[string]any)
+	if text["type"] != "output_text" || text["text"] != "I will check that now." {
+		t.Fatalf("assistant text was not preserved first: %#v", msg)
+	}
+	call := output[1].(map[string]any)
+	if call["type"] != "function_call" || call["call_id"] != "call_1" || call["name"] != "lookup" {
+		t.Fatalf("bad function call output: %#v", call)
+	}
+}
+
 func TestChatToResponsesResponse_FinishReasonMapping(t *testing.T) {
 	for _, tc := range []struct {
 		reason     string
@@ -333,6 +361,34 @@ func TestChatToAnthropicResponse_FinishReasonMapping(t *testing.T) {
 				t.Fatalf("stop_reason=%v want=%s obj=%#v", obj["stop_reason"], tc.want, obj)
 			}
 		})
+	}
+}
+
+func TestChatToAnthropicResponse_TextAndToolCallsPreserved(t *testing.T) {
+	body := []byte(`{"id":"chat_1","model":"gpt-test","choices":[{"index":0,"message":{"role":"assistant","content":"I will check that now.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"city\":\"Paris\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":4,"completion_tokens":6}}`)
+	got, err := ChatToAnthropicResponse(body, "claude-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj := decodeObject(t, got)
+	if obj["stop_reason"] != "tool_use" {
+		t.Fatalf("stop_reason=%v want tool_use obj=%#v", obj["stop_reason"], obj)
+	}
+	content := obj["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("content len=%d want 2: %#v", len(content), content)
+	}
+	text := content[0].(map[string]any)
+	if text["type"] != "text" || text["text"] != "I will check that now." {
+		t.Fatalf("assistant text was not preserved first: %#v", content)
+	}
+	tool := content[1].(map[string]any)
+	if tool["type"] != "tool_use" || tool["id"] != "call_1" || tool["name"] != "lookup" {
+		t.Fatalf("bad tool_use block: %#v", tool)
+	}
+	input := tool["input"].(map[string]any)
+	if input["city"] != "Paris" {
+		t.Fatalf("tool input lost JSON semantics: %#v", input)
 	}
 }
 

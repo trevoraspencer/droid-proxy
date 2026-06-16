@@ -197,6 +197,43 @@ func TestForward_TerminalMarkerAvoidsTruncationError(t *testing.T) {
 	}
 }
 
+func TestForward_PendingTerminalEOFCompletesFrame(t *testing.T) {
+	src := strings.NewReader("data: [DONE]\n")
+	w := &captureWriter{}
+	err := Forward(context.Background(), w, w, src, Options{
+		IsTerminal: ChatTerminal,
+		WriteTruncationError: func(dst io.Writer) error {
+			_, err := dst.Write([]byte("data: error\n\n"))
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := w.String(); got != "data: [DONE]\n\n" {
+		t.Fatalf("expected terminal event to be completed, got %q", got)
+	}
+}
+
+func TestForward_PendingNonTerminalEOFFlushesBeforeTruncation(t *testing.T) {
+	src := strings.NewReader("data: {\"a\":1}\n")
+	w := &captureWriter{}
+	err := Forward(context.Background(), w, w, src, Options{
+		IsTerminal: ChatTerminal,
+		WriteTruncationError: func(dst io.Writer) error {
+			_, err := dst.Write([]byte("data: {\"error\":{\"code\":\"stream_truncated\"}}\n\n"))
+			return err
+		},
+	})
+	if !errors.Is(err, ErrTruncated) {
+		t.Fatalf("expected ErrTruncated, got %v", err)
+	}
+	want := "data: {\"a\":1}\n\n"
+	if got := w.String(); !strings.HasPrefix(got, want) || !strings.Contains(got, `"stream_truncated"`) {
+		t.Fatalf("expected pending event before truncation frame, got %q", got)
+	}
+}
+
 func TestForward_TruncationEmitsProtocolError(t *testing.T) {
 	src := strings.NewReader("data: {\"a\":1}\n\n")
 	w := &captureWriter{}

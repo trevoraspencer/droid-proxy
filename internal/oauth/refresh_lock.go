@@ -58,7 +58,9 @@ func (m *Manager) acquireRefreshFileLock(ctx context.Context, key string) (func(
 	if err := os.MkdirAll(lockDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create auth lock dir: %w", err)
 	}
-	_ = os.Chmod(lockDir, 0o700)
+	if err := chmodSecure(lockDir, 0o700, "auth lock dir"); err != nil {
+		return nil, err
+	}
 	lockPath := filepath.Join(lockDir, "refresh-"+refreshLockName(key)+".lock")
 	payload := []byte(strconv.Itoa(os.Getpid()) + "\n" + strconv.FormatInt(time.Now().UnixNano(), 10) + "\n")
 	for {

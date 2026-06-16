@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const maxModelsResponseBytes int64 = 4 << 20
+
 // ListModels performs GET {baseURL}/models and returns the discovered model
 // IDs (sorted, de-duplicated). authHeader/authScheme default to
 // "Authorization"/"Bearer"; pass an empty apiKey for no-auth upstreams.
@@ -53,9 +55,12 @@ func ListModels(ctx context.Context, baseURL, apiKey, authHeader, authScheme str
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("provider returned %s", resp.Status)
+	}
+	body, err := readLimitedModelsBody(resp.Body)
+	if err != nil {
+		return nil, err
 	}
 	ids, err := parseModelIDs(body)
 	if err != nil {
@@ -65,6 +70,18 @@ func ListModels(ctx context.Context, baseURL, apiKey, authHeader, authScheme str
 		return nil, fmt.Errorf("no models returned by provider")
 	}
 	return ids, nil
+}
+
+func readLimitedModelsBody(r io.Reader) ([]byte, error) {
+	lr := &io.LimitedReader{R: r, N: maxModelsResponseBytes + 1}
+	body, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, fmt.Errorf("read provider models response: %w", err)
+	}
+	if int64(len(body)) > maxModelsResponseBytes {
+		return nil, fmt.Errorf("provider models response too large")
+	}
+	return body, nil
 }
 
 // parseModelIDs handles the common shapes: {"data":[{"id":...}]} (OpenAI),

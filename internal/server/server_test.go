@@ -208,6 +208,16 @@ func TestClientAPIKeyMatchesExactDigest(t *testing.T) {
 	}
 }
 
+func TestClientAuthUsesConstantTimeCompare(t *testing.T) {
+	raw, err := os.ReadFile("middleware.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte("subtle.ConstantTimeCompare")) {
+		t.Fatal("client auth key comparison must use subtle.ConstantTimeCompare")
+	}
+}
+
 func TestClientAuth_GatesChatBackedCountTokens(t *testing.T) {
 	cfg := mustConfig(t, `
 client_auth:

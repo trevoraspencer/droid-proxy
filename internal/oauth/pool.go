@@ -86,6 +86,12 @@ type PoolSnapshot struct {
 // AccountPool maintains an in-memory view of loaded Codex token files with
 // runtime state for health, cooldown, rate-limiting, and in-flight accounting.
 type AccountPool struct {
+	// mu guards entries and every mutable field inside each live *AccountEntry:
+	// health/cooldown/rate-limit timestamps, last-used, in-flight counts,
+	// identity metadata, quota pointers, and refreshability flags. Selection holds
+	// mu through selector invocation so least-connections reads in-flight state
+	// consistently. Callers must not receive pointers into entries: Select returns
+	// a detached entry copy and Snapshot returns deep-copy public snapshots.
 	mu            sync.Mutex
 	entries       map[string]*AccountEntry // keyed by token file path
 	nowFunc       func() time.Time
