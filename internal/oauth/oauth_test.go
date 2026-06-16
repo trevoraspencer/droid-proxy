@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,13 @@ import (
 
 	"droid-proxy/internal/config"
 )
+
+func withTestChmodPath(t *testing.T, fn func(string, os.FileMode) error) {
+	t.Helper()
+	orig := chmodPath
+	chmodPath = fn
+	t.Cleanup(func() { chmodPath = orig })
+}
 
 func TestGeneratePKCE(t *testing.T) {
 	pkce, err := GeneratePKCE()
@@ -165,6 +173,79 @@ func TestSaveAndLoadTokenPermissionsAndAccountSelection(t *testing.T) {
 	}
 	if _, err := manager.LoadToken(ProviderXAI, "user@example.com"); err == nil {
 		t.Fatal("expected no xai token")
+	}
+}
+
+func TestSaveTokenReturnsAuthDirChmodError(t *testing.T) {
+	denied := errors.New("chmod denied")
+	withTestChmodPath(t, func(string, os.FileMode) error {
+		return denied
+	})
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: t.TempDir()}})
+	_, err := manager.SaveToken(&Token{
+		Type:         string(ProviderCodex),
+		AccessToken:  "access",
+		RefreshToken: "refresh",
+		Email:        "user@example.com",
+	})
+	if !errors.Is(err, denied) || !strings.Contains(err.Error(), "chmod auth dir") {
+		t.Fatalf("expected auth dir chmod error, got %v", err)
+	}
+}
+
+func TestSaveTokenReturnsTokenFileChmodError(t *testing.T) {
+	denied := errors.New("chmod token denied")
+	orig := chmodPath
+	withTestChmodPath(t, func(path string, mode os.FileMode) error {
+		if mode == 0o600 {
+			return denied
+		}
+		return orig(path, mode)
+	})
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: t.TempDir()}})
+	_, err := manager.SaveToken(&Token{
+		Type:         string(ProviderCodex),
+		AccessToken:  "access",
+		RefreshToken: "refresh",
+		Email:        "user@example.com",
+	})
+	if !errors.Is(err, denied) || !strings.Contains(err.Error(), "chmod token file") {
+		t.Fatalf("expected token file chmod error, got %v", err)
+	}
+}
+
+func TestInstallationIDReturnsChmodError(t *testing.T) {
+	denied := errors.New("chmod installation denied")
+	orig := chmodPath
+	withTestChmodPath(t, func(path string, mode os.FileMode) error {
+		if filepath.Base(path) == "installation_id" {
+			return denied
+		}
+		return orig(path, mode)
+	})
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: t.TempDir()}})
+	_, err := manager.InstallationID()
+	if !errors.Is(err, denied) || !strings.Contains(err.Error(), "chmod installation id") {
+		t.Fatalf("expected installation id chmod error, got %v", err)
+	}
+}
+
+func TestAcquireRefreshFileLockReturnsChmodError(t *testing.T) {
+	denied := errors.New("chmod lock denied")
+	orig := chmodPath
+	withTestChmodPath(t, func(path string, mode os.FileMode) error {
+		if filepath.Base(path) == ".locks" {
+			return denied
+		}
+		return orig(path, mode)
+	})
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: t.TempDir()}})
+	cleanup, err := manager.acquireRefreshFileLock(t.Context(), "token-key")
+	if cleanup != nil {
+		cleanup()
+	}
+	if !errors.Is(err, denied) || !strings.Contains(err.Error(), "chmod auth lock dir") {
+		t.Fatalf("expected auth lock dir chmod error, got %v", err)
 	}
 }
 
@@ -664,6 +745,31 @@ func TestParseCodexIdentityFallsBackToAccessToken(t *testing.T) {
 	email, subject, accountID := parseCodexIdentity("", accessToken)
 	if email != "user@example.com" || subject != "sub-access" || accountID != "acct_access" {
 		t.Fatalf("bad codex identity email=%q subject=%q account=%q", email, subject, accountID)
+	}
+
+	email, subject, accountID = parseCodexIdentity("not-a-jwt", accessToken)
+	if email != "user@example.com" || subject != "sub-access" || accountID != "acct_access" {
+		t.Fatalf("malformed id token should fall back to access token, got email=%q subject=%q account=%q", email, subject, accountID)
+	}
+}
+
+func TestMalformedJWTIdentityDoesNotMisattributeAccount(t *testing.T) {
+	email, subject, accountID := parseJWTIdentity("not-a-jwt")
+	if email != "" || subject != "" || accountID != "" {
+		t.Fatalf("malformed JWT invented identity email=%q subject=%q account=%q", email, subject, accountID)
+	}
+
+	tok := &Token{
+		Type:        string(ProviderCodex),
+		AccessToken: "access",
+		IDToken:     "not-a-jwt",
+	}
+	tok.path = filepath.Join(t.TempDir(), "codex-alice.json")
+	if tok.MatchesAccount("bob@example.com") || tok.MatchesAccount("sub-bob") || tok.MatchesAccount("acct-bob") {
+		t.Fatal("malformed ID token matched an unrelated account identity")
+	}
+	if !tok.MatchesAccount("codex-alice") {
+		t.Fatal("token should still be selectable by its explicit filename fallback")
 	}
 }
 

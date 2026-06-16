@@ -69,12 +69,7 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 	}
 	applyOAuthResponsesHeaders(req, c.Request.Header, m, token, payload, installationID, codexConversation)
 
-	var resp *http.Response
-	if downstreamStream {
-		resp, err = a.Client.Do(req)
-	} else {
-		resp, err = a.Client.HTTP.Do(req)
-	}
+	resp, err := a.doPreparedUpstream(req, downstreamStream)
 	if err != nil {
 		WriteJSONError(c, http.StatusBadGateway, "upstream_error", safeErrorMessage(err.Error()))
 		return
@@ -239,14 +234,7 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		}
 		applyOAuthResponsesHeaders(req, c.Request.Header, m, token, payload, installationID, codexConversation)
 
-		// Execute the upstream request.
-		var resp *http.Response
-		var doErr error
-		if downstreamStream {
-			resp, doErr = a.Client.Do(req)
-		} else {
-			resp, doErr = a.Client.HTTP.Do(req)
-		}
+		resp, doErr := a.doPreparedUpstream(req, downstreamStream)
 
 		if doErr != nil {
 			// Downstream cancellation: the client went away. Do not fail over
@@ -323,6 +311,9 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 				if refreshErr != nil {
 					// Refresh failed: mark unhealthy, release lease, try next account.
 					a.Pool.End(entry.Path)
+					if ctxErr := c.Request.Context().Err(); ctxErr != nil {
+						return
+					}
 					a.Pool.MarkUnhealthy(entry.Path)
 					tried[entry.Path] = true
 					continue
@@ -465,14 +456,7 @@ func (a *API) codexAuthReplay(
 	}
 	applyOAuthResponsesHeaders(req, c.Request.Header, m, token, payload, installationID, codexConversation)
 
-	// Execute the replay request.
-	var resp *http.Response
-	var doErr error
-	if downstreamStream {
-		resp, doErr = a.Client.Do(req)
-	} else {
-		resp, doErr = a.Client.HTTP.Do(req)
-	}
+	resp, doErr := a.doPreparedUpstream(req, downstreamStream)
 
 	if doErr != nil {
 		a.Pool.End(entry.Path)
@@ -529,6 +513,13 @@ func (a *API) codexAuthReplay(
 		body = raw
 	}
 	return false, resp.StatusCode, body, ct
+}
+
+func (a *API) doPreparedUpstream(req *http.Request, downstreamStream bool) (*http.Response, error) {
+	if downstreamStream {
+		return a.Client.Do(req)
+	}
+	return a.Client.HTTP.Do(req)
 }
 
 // forwardOAuthResponsesStreamAndRelease forwards a streaming Codex response

@@ -232,6 +232,3 @@ func clientAPIKeyMatches(got string, keys [][sha256.Size]byte) bool {
 	}
 	return match == 1
 }
-
-// ensure imported (logging is used elsewhere; avoid the unused-import warning if a future refactor removes references)
-var _ = logging.Redact

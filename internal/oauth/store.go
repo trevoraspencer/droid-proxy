@@ -143,7 +143,9 @@ func (m *Manager) SaveToken(token *Token) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create auth dir: %w", err)
 	}
-	_ = os.Chmod(dir, 0o700)
+	if err := chmodSecure(dir, 0o700, "auth dir"); err != nil {
+		return "", err
+	}
 	path := token.path
 	if strings.TrimSpace(path) == "" {
 		path = filepath.Join(dir, tokenFileName(token))
@@ -157,7 +159,9 @@ func (m *Manager) SaveToken(token *Token) (string, error) {
 	if err := writeFileAtomic(path, raw, 0o600); err != nil {
 		return "", err
 	}
-	_ = os.Chmod(path, 0o600)
+	if err := chmodSecure(path, 0o600, "token file"); err != nil {
+		return "", err
+	}
 	return path, nil
 }
 

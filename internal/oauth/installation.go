@@ -16,7 +16,9 @@ func (m *Manager) InstallationID() (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create auth dir: %w", err)
 	}
-	_ = os.Chmod(dir, 0o700)
+	if err := chmodSecure(dir, 0o700, "auth dir"); err != nil {
+		return "", err
+	}
 	path := filepath.Join(dir, "installation_id")
 	if raw, err := os.ReadFile(path); err == nil {
 		if id := strings.TrimSpace(string(raw)); id != "" {
@@ -32,7 +34,9 @@ func (m *Manager) InstallationID() (string, error) {
 	if err := writeFileAtomic(path, []byte(id+"\n"), 0o600); err != nil {
 		return "", err
 	}
-	_ = os.Chmod(path, 0o600)
+	if err := chmodSecure(path, 0o600, "installation id"); err != nil {
+		return "", err
+	}
 	return id, nil
 }
 

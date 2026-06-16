@@ -186,6 +186,10 @@ func Forward(ctx context.Context, dst io.Writer, flusher http.Flusher, src io.Re
 		case line, ok := <-lines:
 			if !ok {
 				if event.Name != "" || event.Data != "" {
+					if err := write([]byte("\n")); err != nil {
+						return err
+					}
+					flusher.Flush()
 					flushEvent()
 				}
 				select {

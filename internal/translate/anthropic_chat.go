@@ -353,6 +353,9 @@ func ChatToAnthropicResponse(body []byte, model string) ([]byte, error) {
 
 	content := []any{}
 	stopReason := chatFinishReasonToAnthropicStopReason(stringValue(choice["finish_reason"]))
+	if text := stringValue(message["content"]); text != "" {
+		content = append(content, map[string]any{"type": "text", "text": text})
+	}
 	if rawTools, ok := message["tool_calls"].([]any); ok && len(rawTools) > 0 {
 		for _, rawTool := range rawTools {
 			block, err := chatToolCallToAnthropicToolUse(rawTool)
@@ -362,7 +365,7 @@ func ChatToAnthropicResponse(body []byte, model string) ([]byte, error) {
 			content = append(content, block)
 		}
 		stopReason = "tool_use"
-	} else {
+	} else if len(content) == 0 {
 		content = append(content, map[string]any{"type": "text", "text": stringValue(message["content"])})
 	}
 

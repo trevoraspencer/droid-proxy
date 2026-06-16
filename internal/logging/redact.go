@@ -14,6 +14,7 @@ var redactPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(anthropic-api-key:\s*)([A-Za-z0-9\-\._=+/]+)`),
 	regexp.MustCompile(`(?i)("api_key"\s*:\s*")([^"]+)(")`),
 	regexp.MustCompile(`(?i)("apiKey"\s*:\s*")([^"]+)(")`),
+	regexp.MustCompile(`(?i)("(?:access_token|refresh_token|id_token|authorization|credential|password|api_key|apikey|token|secret|auth|key)"\s*:\s*")([^"]+)(")`),
 	regexp.MustCompile(`(?i)(^|[?&#;\s])((?:access_token|refresh_token|id_token|authorization|credential|password|api_key|apikey|token|secret|auth|key)=)([^&#\s"'` + "`" + `<>]*)`),
 	regexp.MustCompile(`(sk-[A-Za-z0-9_\-]{16,})`),
 }
@@ -32,7 +33,7 @@ func Redact(s string) string {
 			case 3:
 				return groups[1] + "***"
 			case 4:
-				if strings.Contains(groups[2], "=") {
+				if strings.Contains(groups[2], "=") && !strings.Contains(groups[1], `"`) {
 					return groups[1] + groups[2] + "***"
 				}
 				return groups[1] + "***" + groups[3]

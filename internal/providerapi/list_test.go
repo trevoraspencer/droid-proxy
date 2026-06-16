@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -93,6 +94,32 @@ func TestListModelsErrorStatus(t *testing.T) {
 	defer srv.Close()
 	if _, err := ListModels(context.Background(), srv.URL, "k", "", ""); err == nil {
 		t.Fatal("expected error on 401")
+	}
+}
+
+func TestListModelsReadError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := `{"data":[{"id":"partial-but-valid"}]}`
+		w.Header().Set("Content-Length", "4096")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	_, err := ListModels(context.Background(), srv.URL, "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "read provider models response") {
+		t.Fatalf("expected provider response read error, got %v", err)
+	}
+}
+
+func TestListModelsOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("x", (4<<20)+1)))
+	}))
+	defer srv.Close()
+
+	_, err := ListModels(context.Background(), srv.URL, "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "provider models response too large") {
+		t.Fatalf("expected provider body too large error, got %v", err)
 	}
 }
 

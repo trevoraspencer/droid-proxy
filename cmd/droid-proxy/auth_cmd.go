@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -15,13 +16,13 @@ import (
 
 func runAuth(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: droid-proxy auth <codex|xai> [--device] --config config.yaml")
-		fmt.Fprintln(os.Stderr, "       droid-proxy auth status [codex|xai] --config config.yaml")
-		fmt.Fprintln(os.Stderr, "       droid-proxy auth pool [--url http://127.0.0.1:PORT] --config config.yaml")
-		fmt.Fprintln(os.Stderr, "       droid-proxy auth <enable|disable|logout> <provider> <account> --config config.yaml")
+		printAuthUsage(os.Stderr)
 		os.Exit(2)
 	}
 	switch strings.ToLower(strings.TrimSpace(args[0])) {
+	case "-h", "--help", "help":
+		printAuthUsage(os.Stdout)
+		return
 	case "status":
 		runAuthStatus(args[1:])
 		return
@@ -71,6 +72,13 @@ func runAuth(args []string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Saved %s OAuth credentials to %s\n", provider, path)
+}
+
+func printAuthUsage(out io.Writer) {
+	fmt.Fprintln(out, "usage: droid-proxy auth <codex|xai> [--device] --config config.yaml")
+	fmt.Fprintln(out, "       droid-proxy auth status [codex|xai] --config config.yaml")
+	fmt.Fprintln(out, "       droid-proxy auth pool [--url http://127.0.0.1:PORT] --config config.yaml")
+	fmt.Fprintln(out, "       droid-proxy auth <enable|disable|logout> <provider> <account> --config config.yaml")
 }
 
 func runAuthStatus(args []string) {

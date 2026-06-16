@@ -2119,6 +2119,73 @@ func TestResponsesCodex401RefreshFailsThenFailover(t *testing.T) {
 	}
 }
 
+func TestResponsesCodex401RefreshCancellationDoesNotMarkUnhealthy(t *testing.T) {
+	// When the client context is cancelled while force-refresh is in flight,
+	// the selected account must be released without being marked unhealthy
+	// and failover must not continue to another account.
+	var mu sync.Mutex
+	var attempts []string
+	var cancelFn context.CancelFunc
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cancelFn != nil {
+			cancelFn()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"cancelled"}`))
+	}))
+	defer tokenSrv.Close()
+	restore := oauth.SetTestCodexTokenURL(tokenSrv.URL)
+	defer restore()
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 1,
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			auth := authTokenFromRequest(r)
+			mu.Lock()
+			attempts = append(attempts, auth)
+			mu.Unlock()
+
+			if auth != "access-token-0" {
+				codexSuccessResponse(w)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancelFn = cancel
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`)).WithContext(ctx)
+	api.engine.ServeHTTP(w, req)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(attempts) != 1 || attempts[0] != "access-token-0" {
+		t.Fatalf("expected only the cancelled account attempt, got %v", attempts)
+	}
+
+	snap := api.api.Pool.Snapshot()
+	for _, acct := range snap.Accounts {
+		if acct.Selector == "a@test.com" && !acct.Healthy {
+			t.Fatal("cancelled force-refresh marked the account unhealthy")
+		}
+		if acct.InFlight != 0 {
+			t.Fatalf("expected 0 in-flight for %s, got %d", acct.Selector, acct.InFlight)
+		}
+	}
+}
+
 func TestResponsesCodex401ReplayDoesNotConsumeFailoverBudget(t *testing.T) {
 	// The same-account force-refresh replay should NOT consume the
 	// alternate-account failover budget. With max_failovers=2 (3 total attempts)

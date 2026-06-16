@@ -147,10 +147,13 @@ func restartProxy(configPath, envFile string) error {
 
 func runService(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: droid-proxy service <install|uninstall> [--config config.yaml]")
+		printServiceUsage(os.Stderr)
 		os.Exit(2)
 	}
 	switch args[0] {
+	case "-h", "--help", "help":
+		printServiceUsage(os.Stdout)
+		return
 	case "install":
 		fs := flag.NewFlagSet("service install", flag.ExitOnError)
 		configPath := fs.String("config", defaultConfigPath(), "path to config.yaml")
@@ -171,9 +174,13 @@ func runService(args []string) {
 		}
 		fmt.Println("droid-proxy removed from launchd services.")
 	default:
-		fmt.Fprintln(os.Stderr, "usage: droid-proxy service <install|uninstall> [--config config.yaml]")
+		printServiceUsage(os.Stderr)
 		os.Exit(2)
 	}
+}
+
+func printServiceUsage(out io.Writer) {
+	fmt.Fprintln(out, "usage: droid-proxy service <install|uninstall> [--config config.yaml]")
 }
 
 func runLogs(args []string) {

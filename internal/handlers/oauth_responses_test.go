@@ -72,6 +72,33 @@ func newOAuthResponsesTestAPI(t *testing.T, provider config.OAuthProvider, proto
 	return &testAPI{api: api, upstream: srv, engine: engine}
 }
 
+func TestDoPreparedUpstreamStreamAndNonStream(t *testing.T) {
+	var hits int
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}, nil)
+
+	for _, stream := range []bool{false, true} {
+		req, err := http.NewRequest(http.MethodPost, api.upstream.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stream {
+			req.Header.Set("Accept", "text/event-stream")
+		}
+		resp, err := api.api.doPreparedUpstream(req, stream)
+		if err != nil {
+			t.Fatalf("doPreparedUpstream(stream=%v): %v", stream, err)
+		}
+		_ = resp.Body.Close()
+	}
+	if hits != 2 {
+		t.Fatalf("upstream hits=%d want 2", hits)
+	}
+}
+
 func TestResponses_OAuthCodexNonStreamReconstructsResponsesAndPreservesTools(t *testing.T) {
 	var capturedAuth, capturedAccount, capturedOriginator, capturedPath string
 	var capturedBeta, capturedResidency, capturedInstallation, capturedClientRequest, capturedSession, capturedWindow string

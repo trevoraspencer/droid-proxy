@@ -266,6 +266,19 @@ func ChatToResponsesResponse(body []byte, model string) ([]byte, error) {
 	}
 
 	output := []any{}
+	if text := stringValue(message["content"]); text != "" {
+		output = append(output, map[string]any{
+			"id":     "msg_0",
+			"type":   "message",
+			"status": "completed",
+			"role":   "assistant",
+			"content": []any{map[string]any{
+				"type":        "output_text",
+				"text":        text,
+				"annotations": []any{},
+			}},
+		})
+	}
 	if rawTools, ok := message["tool_calls"].([]any); ok && len(rawTools) > 0 {
 		for _, rawTool := range rawTools {
 			item, err := chatToolCallToResponseItem(rawTool)
@@ -274,7 +287,7 @@ func ChatToResponsesResponse(body []byte, model string) ([]byte, error) {
 			}
 			output = append(output, item)
 		}
-	} else {
+	} else if len(output) == 0 {
 		output = append(output, map[string]any{
 			"id":     "msg_0",
 			"type":   "message",

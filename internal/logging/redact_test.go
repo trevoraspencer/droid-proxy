@@ -125,6 +125,39 @@ func TestRedact_QueryCredentialParameters(t *testing.T) {
 	}
 }
 
+func TestRedact_JSONCredentialFields(t *testing.T) {
+	in := `{"access_token":"ya29.generic-access","refresh_token":"rt-refresh","id_token":"header.payload.sig","token":"opaque-token","secret":"client-secret","authorization":"Bearer generic-token","credential":"oauth-credential","model":"keep-me","trace_id":"debug-token-looking-value"}`
+	got := Redact(in)
+	for _, needle := range []string{
+		"ya29.generic-access",
+		"rt-refresh",
+		"header.payload.sig",
+		"opaque-token",
+		"client-secret",
+		"Bearer generic-token",
+		"oauth-credential",
+	} {
+		if strings.Contains(got, needle) {
+			t.Fatalf("Redact(%q) = %q; must not contain %q", in, got, needle)
+		}
+	}
+	for _, needle := range []string{
+		`"access_token":"***"`,
+		`"refresh_token":"***"`,
+		`"id_token":"***"`,
+		`"token":"***"`,
+		`"secret":"***"`,
+		`"authorization":"***"`,
+		`"credential":"***"`,
+		`"model":"keep-me"`,
+		`"trace_id":"debug-token-looking-value"`,
+	} {
+		if !strings.Contains(got, needle) {
+			t.Fatalf("Redact(%q) = %q; must contain %q", in, got, needle)
+		}
+	}
+}
+
 func TestRedact_LeavesNonSecretsAlone(t *testing.T) {
 	in := "GET /v1/chat/completions HTTP/1.1\r\nUser-Agent: droid\r\n"
 	if got := Redact(in); got != in {
