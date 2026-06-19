@@ -11,13 +11,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/configedit"
-	"droid-proxy/internal/daemon"
-	"droid-proxy/internal/factory"
-	"droid-proxy/internal/oauth"
-	"droid-proxy/internal/providerapi"
-	"droid-proxy/internal/secrets"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/configedit"
+	"github.com/trevoraspencer/droid-proxy/internal/daemon"
+	"github.com/trevoraspencer/droid-proxy/internal/factory"
+	"github.com/trevoraspencer/droid-proxy/internal/oauth"
+	"github.com/trevoraspencer/droid-proxy/internal/providerapi"
+	"github.com/trevoraspencer/droid-proxy/internal/secrets"
 )
 
 // backend wires the config editor, secrets store, Factory writer, model

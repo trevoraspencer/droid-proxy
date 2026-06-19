@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/factory"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/factory"
 )
 
 func (m model) keyDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

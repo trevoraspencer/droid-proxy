@@ -10,7 +10,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 func (m *Manager) LoadToken(provider config.OAuthProvider, account string) (*Token, error) {

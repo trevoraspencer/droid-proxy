@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 func (m model) loadCmd() tea.Cmd {

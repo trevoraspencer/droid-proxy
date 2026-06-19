@@ -8,9 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/stream"
-	"droid-proxy/internal/upstream"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/stream"
+	"github.com/trevoraspencer/droid-proxy/internal/upstream"
 )
 
 type modelResolveErrors struct {

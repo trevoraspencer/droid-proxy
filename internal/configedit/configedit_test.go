@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 const sampleConfig = `# top comment

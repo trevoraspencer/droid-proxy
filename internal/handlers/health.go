@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"droid-proxy/internal/version"
+	"github.com/trevoraspencer/droid-proxy/internal/version"
 )
 
 // Health returns a basic liveness response.

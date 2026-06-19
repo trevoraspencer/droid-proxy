@@ -91,6 +91,17 @@ else
   fail "scripts/docs-audit.sh not found"
 fi
 
+if [[ -f "${ROOT}/scripts/ci-audit.sh" ]]; then
+  info "Running Phase 5 ci-audit (required)"
+  if bash "${ROOT}/scripts/ci-audit.sh"; then
+    pass "Phase 5 ci-audit"
+  else
+    fail "Phase 5 ci-audit failed"
+  fi
+else
+  fail "scripts/ci-audit.sh not found"
+fi
+
 info "MANUAL: confirm API keys and OAuth credentials have been rotated (Phase 1.2)"
 info "MANUAL: confirm GitHub repo is still private until after you review public-main"
 

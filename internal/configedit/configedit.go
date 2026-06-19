@@ -14,7 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 var displayEnvRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}`)

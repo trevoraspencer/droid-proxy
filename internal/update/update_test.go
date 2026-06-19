@@ -132,7 +132,7 @@ func TestRunFastForwardBuildsBinary(t *testing.T) {
 	if !runner.called("git", "merge", "--ff-only", "FETCH_HEAD") {
 		t.Fatal("expected fast-forward merge")
 	}
-	if !runner.calledPrefix("go build\x00-ldflags\x00-X droid-proxy/internal/version.Commit=after1234567890abcdef\x00-o") {
+	if !runner.calledPrefix("go build\x00-ldflags\x00-X github.com/trevoraspencer/droid-proxy/internal/version.Commit=after1234567890abcdef\x00-o") {
 		t.Fatal("expected go build with commit ldflags")
 	}
 	data, err := os.ReadFile(binary)

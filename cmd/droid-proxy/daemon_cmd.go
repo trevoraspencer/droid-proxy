@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"droid-proxy/internal/daemon"
+	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 )
 
 func runStart(args []string) {

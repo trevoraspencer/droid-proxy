@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 const DefaultMaxOutputTokens = 128000

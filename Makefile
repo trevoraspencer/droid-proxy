@@ -1,4 +1,4 @@
-.PHONY: build test test-race vet fmt clean run lint audit-secrets pre-public-audit legal-audit docs-audit public-release-preflight create-public-history
+.PHONY: build test test-race vet fmt clean run lint audit-secrets pre-public-audit legal-audit docs-audit ci-audit public-release-preflight create-public-history
 
 BIN := droid-proxy
 
@@ -38,6 +38,9 @@ legal-audit:
 
 docs-audit:
 	@bash scripts/docs-audit.sh
+
+ci-audit:
+	@bash scripts/ci-audit.sh
 
 public-release-preflight:
 	@bash scripts/public-release-preflight.sh

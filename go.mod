@@ -1,4 +1,4 @@
-module droid-proxy
+module github.com/trevoraspencer/droid-proxy
 
 go 1.26.4
 

@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"strings"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/factory"
-	"droid-proxy/internal/secrets"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/factory"
+	"github.com/trevoraspencer/droid-proxy/internal/secrets"
 )
 
 func (b *backend) keyEnvSet(env string) bool {

@@ -15,8 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/upstream"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/upstream"
 )
 
 func newResponsesTestAPI(t *testing.T, upstreamHandler http.HandlerFunc, mutate func(*config.Model)) *testAPI {

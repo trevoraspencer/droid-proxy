@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"droid-proxy/internal/daemon"
+	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 )
 
 func defaultConfigPath() string {

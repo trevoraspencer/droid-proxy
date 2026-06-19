@@ -11,9 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/sjson"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/logging"
-	"droid-proxy/internal/upstream"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/logging"
+	"github.com/trevoraspencer/droid-proxy/internal/upstream"
 )
 
 const TraceRequestBodyKey = "trace_request_body"

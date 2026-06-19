@@ -16,9 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   health endpoint.
 - Interactive `droid-proxy config` dashboard for provider onboarding.
 - Provider examples and Factory settings snippets under `docs/`.
+- GitHub Actions CI workflow and Dependabot configuration.
+- `make ci-audit` for module-path and build verification.
 
 ### Changed
 
+- Go module path is now `github.com/trevoraspencer/droid-proxy` (was local
+  `droid-proxy`).
 - Documentation reorganized for public release (removed internal planning
   artifacts, added contributor guides).
 - Non-streaming Chat translation now preserves assistant text when the same

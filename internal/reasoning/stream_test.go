@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"droid-proxy/internal/stream"
+	"github.com/trevoraspencer/droid-proxy/internal/stream"
 )
 
 func TestStreamCapture_AccumulatesAndStores(t *testing.T) {

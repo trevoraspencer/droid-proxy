@@ -13,8 +13,8 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/oauth"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/oauth"
 )
 
 const (

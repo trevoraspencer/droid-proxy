@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 func TestResolveAPIKey(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 // ---- VAL-WATCH-001: Watcher hot-reloads JSON token changes ----

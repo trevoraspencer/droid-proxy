@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"droid-proxy/internal/daemon"
-	updater "droid-proxy/internal/update"
+	"github.com/trevoraspencer/droid-proxy/internal/daemon"
+	updater "github.com/trevoraspencer/droid-proxy/internal/update"
 )
 
 func runUpdate(args []string) {

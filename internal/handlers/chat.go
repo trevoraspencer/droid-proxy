@@ -9,10 +9,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/reasoning"
-	"droid-proxy/internal/stream"
-	"droid-proxy/internal/upstream"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/reasoning"
+	"github.com/trevoraspencer/droid-proxy/internal/stream"
+	"github.com/trevoraspencer/droid-proxy/internal/upstream"
 )
 
 // ChatCompletions serves POST /v1/chat/completions. It supports the Factory

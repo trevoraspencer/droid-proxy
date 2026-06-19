@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 func TestStreamingHandlers_ProcessListenerGoroutineCleanupEvidence(t *testing.T) {

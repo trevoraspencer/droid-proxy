@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"droid-proxy/internal/daemon"
+	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 )
 
 const managedHeader = "# Managed by `droid-proxy config`. Edit with care."

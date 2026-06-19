@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"droid-proxy/internal/tui"
+	"github.com/trevoraspencer/droid-proxy/internal/tui"
 )
 
 func runConfig(args []string) {

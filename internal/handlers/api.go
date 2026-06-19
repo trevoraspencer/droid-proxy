@@ -3,10 +3,10 @@ package handlers
 import (
 	"github.com/sirupsen/logrus"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/oauth"
-	"droid-proxy/internal/reasoning"
-	"droid-proxy/internal/upstream"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/oauth"
+	"github.com/trevoraspencer/droid-proxy/internal/reasoning"
+	"github.com/trevoraspencer/droid-proxy/internal/upstream"
 )
 
 // API holds the shared dependencies for every endpoint handler.

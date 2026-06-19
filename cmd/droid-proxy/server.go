@@ -8,11 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/daemon"
-	"droid-proxy/internal/logging"
-	"droid-proxy/internal/server"
-	"droid-proxy/internal/version"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/daemon"
+	"github.com/trevoraspencer/droid-proxy/internal/logging"
+	"github.com/trevoraspencer/droid-proxy/internal/server"
+	"github.com/trevoraspencer/droid-proxy/internal/version"
 )
 
 func runServerCLI(args []string) {

@@ -11,10 +11,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/oauth"
-	"droid-proxy/internal/testutil"
-	"droid-proxy/internal/upstream"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/oauth"
+	"github.com/trevoraspencer/droid-proxy/internal/testutil"
+	"github.com/trevoraspencer/droid-proxy/internal/upstream"
 )
 
 func newModelsTestAPI(t *testing.T, models []*config.Model) *gin.Engine {

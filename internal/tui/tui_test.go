@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/factory"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/factory"
 )
 
 func TestDefaultAlias(t *testing.T) {

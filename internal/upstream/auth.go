@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 // ResolveAPIKey looks up the API key for a model from its api_key_env (preferred)
