@@ -11,8 +11,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/oauth"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/oauth"
 )
 
 func runAuthPool(args []string) {

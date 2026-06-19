@@ -17,8 +17,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/testutil"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/testutil"
 )
 
 func mustConfig(t *testing.T, raw string) *config.Config {

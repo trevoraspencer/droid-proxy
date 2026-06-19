@@ -228,7 +228,7 @@ func buildBinary(ctx context.Context, runner Runner, repo, binary, commit string
 	}
 	defer os.Remove(tmpPath)
 
-	ldflags := fmt.Sprintf("-X droid-proxy/internal/version.Commit=%s", commit)
+	ldflags := fmt.Sprintf("-X github.com/trevoraspencer/droid-proxy/internal/version.Commit=%s", commit)
 	if _, err := runner.Run(ctx, repo, "go", "build", "-ldflags", ldflags, "-o", tmpPath, "./cmd/droid-proxy"); err != nil {
 		return fmt.Errorf("building updated droid-proxy: %w", err)
 	}

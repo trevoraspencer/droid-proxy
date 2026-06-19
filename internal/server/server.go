@@ -13,10 +13,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/handlers"
-	"droid-proxy/internal/oauth"
-	"droid-proxy/internal/upstream"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/handlers"
+	"github.com/trevoraspencer/droid-proxy/internal/oauth"
+	"github.com/trevoraspencer/droid-proxy/internal/upstream"
 )
 
 // Server holds the gin engine, the http.Server, and the dependencies it serves.

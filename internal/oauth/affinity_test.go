@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 func TestAffinityStore_BindAndLookup(t *testing.T) {

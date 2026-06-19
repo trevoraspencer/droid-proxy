@@ -13,9 +13,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/handlers"
-	"droid-proxy/internal/logging"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/handlers"
+	"github.com/trevoraspencer/droid-proxy/internal/logging"
 )
 
 const requestIDHeader = "X-Request-ID"

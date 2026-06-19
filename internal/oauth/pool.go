@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 // ErrNoEligibleAccounts is returned when no accounts are eligible for selection.

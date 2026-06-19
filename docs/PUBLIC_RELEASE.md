@@ -43,12 +43,13 @@ If you prefer not to rewrite the private repo at all:
 
 ## Prerequisites (run in order)
 
-1. Phase 4 docs audit passes (`make docs-audit`).
-2. Phase 3 cleanup is complete (`.factory/` removed, internal plan docs removed).
-3. Phase 2 legal audit passes (`make legal-audit`).
-4. `make pre-public-audit` — Phase 1 security scan must pass.
-5. `make public-release-preflight` — Phase 0 readiness checks.
-6. **Rotate** all API keys and OAuth credentials that ever touched the private repo.
+1. Phase 5 CI audit passes (`make ci-audit`).
+2. Phase 4 docs audit passes (`make docs-audit`).
+3. Phase 3 cleanup is complete (`.factory/` removed, internal plan docs removed).
+4. Phase 2 legal audit passes (`make legal-audit`).
+5. `make pre-public-audit` — Phase 1 security scan must pass.
+6. `make public-release-preflight` — Phase 0 readiness checks.
+7. **Rotate** all API keys and OAuth credentials that ever touched the private repo.
 
 ## Execution
 

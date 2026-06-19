@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 // Selector picks a single account from the eligible candidate list.

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 type CallbackResult struct {

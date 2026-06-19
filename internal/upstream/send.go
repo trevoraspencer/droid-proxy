@@ -11,7 +11,7 @@ import (
 	"path"
 	"strings"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 // httpReqAdapter wraps *http.Request to satisfy httpHeaderSetter.

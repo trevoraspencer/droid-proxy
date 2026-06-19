@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 // Client wraps an http.Client used for upstream requests.

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"syscall"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/oauth"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/oauth"
 )
 
 func runAuth(args []string) {

@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 func (m model) View() string {

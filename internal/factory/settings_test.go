@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 func tempSettings(t *testing.T, body string) string {

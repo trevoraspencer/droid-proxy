@@ -30,6 +30,7 @@ make build
 make test
 make lint          # gofmt + go vet
 make test-race     # optional; slower
+make ci-audit      # module path + CI-equivalent checks
 ```
 
 Documentation and config consistency tests:
@@ -88,6 +89,7 @@ When adding a provider:
 make lint
 make test
 make docs-audit
+make ci-audit
 ```
 
 ## Live end-to-end tests (maintainers only)

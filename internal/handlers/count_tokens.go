@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/tokens"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/tokens"
 )
 
 // CountTokens serves POST /v1/messages/count_tokens. With an Anthropic upstream,

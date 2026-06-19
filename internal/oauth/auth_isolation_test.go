@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 // --------------- VAL-CROSS-001: Real auth files are not touched ---------------

@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 func withTestChmodPath(t *testing.T, fn func(string, os.FileMode) error) {

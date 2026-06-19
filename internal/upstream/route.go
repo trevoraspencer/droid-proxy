@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 // Router resolves a client-supplied model alias to a configured Model entry.

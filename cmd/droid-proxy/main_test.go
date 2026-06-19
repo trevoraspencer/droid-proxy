@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/daemon"
-	"droid-proxy/internal/oauth"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/daemon"
+	"github.com/trevoraspencer/droid-proxy/internal/oauth"
 )
 
 func TestPrintAuthUsageIncludesSubcommands(t *testing.T) {

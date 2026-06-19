@@ -12,10 +12,10 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
-	"droid-proxy/internal/config"
-	"droid-proxy/internal/oauth"
-	"droid-proxy/internal/stream"
-	"droid-proxy/internal/translate"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/oauth"
+	"github.com/trevoraspencer/droid-proxy/internal/stream"
+	"github.com/trevoraspencer/droid-proxy/internal/translate"
 )
 
 type responsesSSERepairWriter struct {

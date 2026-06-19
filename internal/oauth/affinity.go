@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 // affinityRecord is one conversation→account binding persisted on disk.
