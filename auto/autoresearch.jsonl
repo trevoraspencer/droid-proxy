@@ -1,0 +1,1 @@
+{"event":"setup","timestamp":"2026-06-23T01:03:41Z","goal":"production-ready autoresearch aligned with VISION.md","model":"Codex/ChatGPT 5.5 xhigh","notes":"Initial loop contract replaces Grok usage with Codex/ChatGPT-only operation and treats VISION.md as canonical."}

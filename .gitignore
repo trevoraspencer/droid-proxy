@@ -56,3 +56,8 @@ notes/
 scratch/
 tmp/
 /.go-public/
+
+# Autoresearch generated outputs
+/auto/eval-last.json
+/auto/tmp/
+/auto/benchmark-results*.json
