@@ -1,0 +1,14 @@
+{
+  "name": "droid-proxy-autoresearch",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "go test ./...",
+    "lint": "make lint",
+    "eval": "node auto/eval-harness.mjs",
+    "benchmark": "node auto/benchmark.mjs"
+  }
+}

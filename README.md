@@ -10,6 +10,10 @@ plus Codex/ChatGPT and xAI OAuth — from a single Go binary.
 **Status:** Beta — actively developed pre-`v0.1.0` public release. Expect config
 and provider behavior to evolve; pin a release tag once published.
 
+Project scope and contributor priorities are defined in
+[`VISION.md`](VISION.md), the canonical source of truth for what this repo is
+and is not trying to become.
+
 ## What this is
 
 - A **local bridge** between Factory Droid and upstream model APIs you configure.
@@ -205,6 +209,7 @@ Complete guides: **[docs/README.md](docs/README.md)**
 
 | Topic | Document |
 |-------|----------|
+| Project vision and scope | [VISION.md](VISION.md) |
 | CLI & daemon | [docs/CLI.md](docs/CLI.md) |
 | YAML schema | [docs/CONFIG.md](docs/CONFIG.md) |
 | Factory Droid settings | [docs/FACTORY.md](docs/FACTORY.md) |

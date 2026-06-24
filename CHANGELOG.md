@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Contributor-facing docs now point to `VISION.md` as the canonical source of
+  truth for project scope, priorities, non-goals, and AI-agent instructions.
 - Go module path is now `github.com/trevoraspencer/droid-proxy` (was local
   `droid-proxy`).
 - Documentation reorganized for public release (removed internal planning

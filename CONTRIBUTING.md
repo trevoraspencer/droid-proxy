@@ -5,6 +5,8 @@ Thanks for helping improve droid-proxy. This project is a localhost HTTP proxy f
 
 ## Before you start
 
+- Read [VISION.md](VISION.md) first. It is the canonical source of truth for
+  project scope, priorities, non-goals, and AI-agent instructions.
 - Read the [README](README.md) and [docs/README.md](docs/README.md) to understand
   how the proxy fits together.
 - Report security issues privately — see [SECURITY.md](SECURITY.md). Do not open
@@ -68,7 +70,7 @@ go test -race ./internal/oauth/... ./internal/handlers/...
 | Audience | Location |
 |----------|----------|
 | Users | `README.md`, `docs/CONFIG.md`, `docs/PROVIDERS.md`, `docs/examples/` |
-| Contributors | `CONTRIBUTING.md` (this file), `docs/CLI.md` |
+| Contributors | `VISION.md`, `CONTRIBUTING.md` (this file), `docs/CLI.md` |
 | Maintainers | `docs/PUBLIC_RELEASE.md`, `scripts/live-e2e/README.md` |
 
 When adding a provider:
