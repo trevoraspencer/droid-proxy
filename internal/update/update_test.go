@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/trevoraspencer/droid-proxy/internal/version"
 )
 
 type fakeRunner struct {
@@ -96,14 +98,50 @@ func commandKey(name string, args []string) string {
 
 func testRepo(t *testing.T) string {
 	t.Helper()
+	return testRepoWithModule(t, publicModule)
+}
+
+func testRepoWithModule(t *testing.T, module string) string {
+	t.Helper()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "cmd", "droid-proxy"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module droid-proxy\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module "+module+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+func TestValidateRepoAcceptsPublicModulePath(t *testing.T) {
+	repo := testRepoWithModule(t, publicModule)
+
+	if err := ValidateRepo(repo); err != nil {
+		t.Fatalf("ValidateRepo(public module) error = %v", err)
+	}
+}
+
+func TestValidateRepoAcceptsLegacyDroidProxyModuleForExistingSourceCheckouts(t *testing.T) {
+	repo := testRepoWithModule(t, legacyModule)
+
+	if err := ValidateRepo(repo); err != nil {
+		t.Fatalf("ValidateRepo(legacy module) error = %v", err)
+	}
+}
+
+func TestValidateRepoRejectsWrongModuleAndNamesAcceptedModulePaths(t *testing.T) {
+	repo := testRepoWithModule(t, "example.com/not-droid-proxy")
+
+	err := ValidateRepo(repo)
+	if err == nil {
+		t.Fatal("ValidateRepo(wrong module) error = nil, want failure")
+	}
+	msg := err.Error()
+	for _, want := range []string{publicModule, legacyModule} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("ValidateRepo error = %q, want accepted module path %q", msg, want)
+		}
+	}
 }
 
 func TestRunFastForwardBuildsBinary(t *testing.T) {
@@ -132,8 +170,23 @@ func TestRunFastForwardBuildsBinary(t *testing.T) {
 	if !runner.called("git", "merge", "--ff-only", "FETCH_HEAD") {
 		t.Fatal("expected fast-forward merge")
 	}
-	if !runner.calledPrefix("go build\x00-ldflags\x00-X github.com/trevoraspencer/droid-proxy/internal/version.Commit=after1234567890abcdef\x00-o") {
-		t.Fatal("expected go build with commit ldflags")
+	buildCall := ""
+	for _, call := range runner.calls {
+		if strings.HasPrefix(call, "go build\x00-ldflags\x00") {
+			buildCall = call
+			break
+		}
+	}
+	if buildCall == "" {
+		t.Fatal("expected go build call")
+	}
+	for _, want := range []string{
+		version.PackagePath + ".Version=0.0.0-dev",
+		version.PackagePath + ".Commit=after1234567890abcdef",
+	} {
+		if !strings.Contains(buildCall, want) {
+			t.Fatalf("go build call = %q, want %q", buildCall, want)
+		}
 	}
 	data, err := os.ReadFile(binary)
 	if err != nil {
@@ -294,6 +347,19 @@ func TestResolveRepoPathUsesCwdThenExecutableDir(t *testing.T) {
 	}
 
 	got, err = ResolveRepoPath("", filepath.Join(t.TempDir(), "not-repo"), exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != exeRepo {
+		t.Fatalf("ResolveRepoPath exe dir = %q, want %q", got, exeRepo)
+	}
+}
+
+func TestResolveRepoPathFindsPublicModuleRepoFromExecutableWhenCwdIsNotRepo(t *testing.T) {
+	exeRepo := testRepoWithModule(t, publicModule)
+	exe := filepath.Join(exeRepo, "droid-proxy")
+
+	got, err := ResolveRepoPath("", filepath.Join(t.TempDir(), "not-repo"), exe)
 	if err != nil {
 		t.Fatal(err)
 	}

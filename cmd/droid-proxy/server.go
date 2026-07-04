@@ -24,7 +24,7 @@ func runServerCLI(args []string) {
 	_ = fs.Parse(args)
 
 	if *showVersion {
-		fmt.Printf("droid-proxy %s (%s)\n", version.Version, version.Commit)
+		fmt.Printf("%s\n", version.String())
 		return
 	}
 
@@ -74,7 +74,7 @@ func runServer(configPath, envFile string, foreground bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	logger.WithField("version", version.Version).Info("droid-proxy starting")
+	logger.WithField("version", version.Current().Version).Info("droid-proxy starting")
 	if err := srv.Run(ctx); err != nil {
 		return fmt.Errorf("server: %w", err)
 	}

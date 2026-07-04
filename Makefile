@@ -1,15 +1,38 @@
-.PHONY: build test test-race vet fmt clean run lint audit-secrets pre-public-audit legal-audit docs-audit ci-audit public-release-preflight create-public-history
+.PHONY: build install-user test test-race test-installer vet fmt clean run lint audit-secrets pre-public-audit legal-audit docs-audit ci-audit public-release-preflight create-public-history release-dry-run
 
 BIN := droid-proxy
+VERSION ?= 0.0.0-dev
+COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+VERSION_PKG := github.com/trevoraspencer/droid-proxy/internal/version
+VERSION_LDFLAGS := -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT)
+PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+CONFIG_DIR ?= $(HOME)/Library/Application Support/droid-proxy
+else
+XDG_CONFIG_HOME ?= $(HOME)/.config
+CONFIG_DIR ?= $(XDG_CONFIG_HOME)/droid-proxy
+endif
 
 build:
-	go build -o $(BIN) ./cmd/droid-proxy
+	go build -ldflags "$(VERSION_LDFLAGS)" -o $(BIN) ./cmd/droid-proxy
+
+install-user: build
+	mkdir -p "$(BINDIR)"
+	install -m 0755 "$(BIN)" "$(BINDIR)/droid-proxy"
+	"$(BINDIR)/droid-proxy" setup --config "$(CONFIG_DIR)/config.yaml"
+	@echo "installed binary: $(BINDIR)/droid-proxy"
+	@echo "user config: $(CONFIG_DIR)/config.yaml"
 
 test:
 	go test ./...
 
 test-race:
 	go test -race ./...
+
+test-installer:
+	bash scripts/install_test.sh
 
 vet:
 	go vet ./...
@@ -47,3 +70,6 @@ public-release-preflight:
 
 create-public-history:
 	@APPLY=$${APPLY:-0} bash scripts/create-public-history.sh
+
+release-dry-run:
+	bash scripts/release-assets.sh --dry-run

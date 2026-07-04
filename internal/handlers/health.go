@@ -10,9 +10,12 @@ import (
 
 // Health returns a basic liveness response.
 func Health(c *gin.Context) {
+	info := version.Current()
 	c.JSON(http.StatusOK, gin.H{
-		"status":  "ok",
-		"service": "droid-proxy",
-		"version": version.Version,
+		"status":   "ok",
+		"service":  "droid-proxy",
+		"version":  info.Version,
+		"commit":   info.Commit,
+		"modified": info.Modified,
 	})
 }

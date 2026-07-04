@@ -1,7 +1,8 @@
 # CLI reference
 
 `droid-proxy` is a single binary with a foreground server mode, background
-daemon commands, macOS launchd integration, and OAuth login helpers.
+daemon commands, per-user macOS launchd and Linux systemd integration, and OAuth
+login helpers.
 
 ## Synopsis
 
@@ -9,6 +10,7 @@ daemon commands, macOS launchd integration, and OAuth login helpers.
 droid-proxy [--config PATH] [--env-file PATH] [--foreground] [--version]
 
 droid-proxy config [--config PATH]          # interactive dashboard (alias: onboard)
+droid-proxy setup  [--config PATH] [--service]
 
 droid-proxy start   [--config PATH] [--env-file PATH] [--foreground]
 droid-proxy stop
@@ -19,6 +21,7 @@ droid-proxy logs    [-n LINES] [PATH]
 droid-proxy service install   [--config PATH]
 droid-proxy service uninstall
 
+droid-proxy doctor [--repo PATH]
 droid-proxy update [--repo PATH] [--remote origin] [--branch main] [--binary PATH] [--no-restart] [--dry-run]
 
 droid-proxy auth codex|xai [--config PATH] [--no-browser] [--device]
@@ -63,17 +66,20 @@ the repo `.env.local` value wins.
 
 ## Config and env file resolution
 
-**Config path** (for `start`, `restart`, `service install`, and `auth`):
+**Config path** (for `start`, `restart`, `setup`, `service install`, and `auth`):
 
 1. `config.local.yaml` in the current directory (if it exists)
 2. `config.yaml` in the current directory (if it exists)
 3. The config path recorded by the running proxy in `~/.droid-proxy/runtime.json`
-4. `config.local.yaml` or `config.yaml` beside the `droid-proxy` executable
-5. Otherwise `config.yaml`
+4. The per-user config path, when it exists:
+   `~/Library/Application Support/droid-proxy/config.yaml` on macOS, or
+   `~/.config/droid-proxy/config.yaml` on Linux
+5. `config.local.yaml` or `config.yaml` beside the `droid-proxy` executable
+6. Otherwise `config.yaml`
 
 Override with `--config /absolute/or/relative/path.yaml`.
 
-**Env file** (for `start`, `restart`, `auth`, and launchd):
+**Env file** (for `start`, `restart`, `auth`, launchd, and systemd):
 
 API keys are loaded in layers, with later layers overriding earlier ones:
 
@@ -90,11 +96,13 @@ lines are ignored.
 Recommended end-user setup:
 
 ```bash
-cp config.example.yaml config.yaml
-cp .env.local.example .env.local   # fill in your API keys
-set -a && source .env.local && set +a
-./droid-proxy start --config config.yaml
+curl -fsSL https://github.com/trevoraspencer/droid-proxy/releases/latest/download/install.sh | sh
+droid-proxy config
+droid-proxy setup --service
 ```
+
+`droid-proxy setup` creates the per-user config if missing. The embedded install
+template is intentionally minimal and never overwrites an existing config.
 
 ## Foreground server
 
@@ -111,11 +119,11 @@ Run the HTTP proxy in the current terminal. Useful for debugging.
 |------|---------|-------------|
 | `--config` | `config.yaml` | Path to YAML config |
 | `--env-file` | _(none)_ | Load API keys from this file before reading config |
-| `--foreground` | false | Run in foreground (also used internally by daemon/launchd) |
-| `--version` | | Print version and exit |
+| `--foreground` | false | Run in foreground (also used internally by daemon/services) |
+| `--version` | | Print version and commit identity, for example `droid-proxy 0.0.0-dev (414d18494e9a)` |
 
 Logs go to stderr. No PID file is written unless `--foreground` is set (daemon
-and launchd use that flag internally).
+and user services use that flag internally).
 
 ## Background daemon
 
@@ -134,7 +142,7 @@ Keep the proxy running without an open terminal.
 |---------|-------------|
 | `start` | Detaches a child process, writes PID to `~/.droid-proxy/droid-proxy.pid` |
 | `status` | Prints running PID or "not running" |
-| `restart` | Restarts launchd when installed; otherwise stops and starts the background daemon |
+| `restart` | Restarts the installed launchd/systemd user service when present; otherwise stops and starts the background daemon |
 | `stop` | Sends SIGTERM; waits up to 10 seconds |
 | `logs` | Tails the last 40 lines of `~/.droid-proxy/stderr.log` (override path as optional arg) |
 
@@ -145,32 +153,56 @@ health-check hint:
 curl -s http://127.0.0.1:8787/health
 ```
 
-Daemon and launchd logs:
+Daemon and service logs:
 
 - `~/.droid-proxy/stdout.log`
 - `~/.droid-proxy/stderr.log`
 
-## macOS launchd service
+## Per-user service
 
-Auto-start on login and auto-restart on crash. **macOS only.**
+Auto-start on login and auto-restart on crash. Uses launchd on macOS and
+`systemd --user` on Linux.
 
 ```bash
-./droid-proxy service install --config "$(pwd)/config.yaml"
-./droid-proxy service uninstall
+droid-proxy setup --service
+droid-proxy service install --config "$HOME/Library/Application Support/droid-proxy/config.yaml"
+droid-proxy service uninstall
 ```
+
+`setup --service` creates the per-user config if missing, then writes and starts
+the right user service for the current OS. `service install` is the lower-level
+compatibility command. Durable service installs should run the binary from
+`~/.local/bin/droid-proxy` and should not point at a source checkout.
 
 | Detail | Value |
 |--------|-------|
-| LaunchAgent label | `com.droid-proxy.agent` |
-| Plist path | `~/Library/LaunchAgents/com.droid-proxy.agent.plist` |
+| macOS service | launchd label `com.droid-proxy.agent` |
+| macOS path | `~/Library/LaunchAgents/com.droid-proxy.agent.plist` |
+| Linux service | systemd user unit `droid-proxy.service` |
+| Linux path | `${XDG_CONFIG_HOME:-~/.config}/systemd/user/droid-proxy.service` |
 | Working directory | Directory containing the config file |
-| Env file | Same resolution order as `start` (relative to config directory) |
+| Env file | Includes an absolute `--env-file` only when `.env.local` or `~/.droid-proxy/env` exists; missing env files are omitted |
 | Logs | `~/.droid-proxy/stdout.log`, `~/.droid-proxy/stderr.log` |
 
-The plist runs `droid-proxy start --foreground --config <abs> --env-file <resolved>`.
+The service runs `droid-proxy start --foreground --config <abs>` and only adds
+`--env-file <abs>` for an existing env file. Live E2E env files are never
+selected by default.
 
-On Linux or other platforms, use `start` with your own process supervisor
-(systemd user unit, `tmux`, etc.) — there is no built-in service installer.
+## Doctor
+
+Diagnose a release or source install without printing env file contents or
+secrets:
+
+```bash
+./droid-proxy doctor
+./droid-proxy doctor --repo /path/to/droid-proxy
+```
+
+The doctor reports the executable path, resolved symlink target, CLI version and
+commit, source checkout status when one is available, updater dry-run status for
+source installs, daemon status, and launchd/systemd service issues. Missing
+source checkouts are normal for release installs; pass `--repo` when you want a
+source checkout audited.
 
 ## Update from GitHub
 
@@ -249,7 +281,7 @@ All persistent runtime files live under `~/.droid-proxy/`:
 | File | Purpose |
 |------|---------|
 | `droid-proxy.pid` | Background daemon PID |
-| `stdout.log` / `stderr.log` | Daemon and launchd output |
+| `stdout.log` / `stderr.log` | Daemon and user-service output |
 | `env` | Managed secrets file written by `droid-proxy config` (chmod 600); always loaded as the base env layer |
 | `auth/*.json` | OAuth token files |
 

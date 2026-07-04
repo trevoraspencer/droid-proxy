@@ -291,11 +291,15 @@ func TestDocsREADMELinksToDocsIndex(t *testing.T) {
 	if !strings.Contains(readme, "docs/README.md") {
 		t.Fatal("README.md must link to docs/README.md documentation hub")
 	}
+	if !strings.Contains(readme, "docs/UPGRADE.md") {
+		t.Fatal("README.md must link to docs/UPGRADE.md from install/update guidance")
+	}
 }
 
 func TestDocsCLIDocumented(t *testing.T) {
 	cli := readRepoFile(t, "docs", "CLI.md")
 	for _, cmd := range []string{
+		"setup",
 		"config",
 		"onboard",
 		"start",
@@ -305,6 +309,7 @@ func TestDocsCLIDocumented(t *testing.T) {
 		"logs",
 		"service install",
 		"service uninstall",
+		"doctor",
 		"update",
 		"auth codex",
 		"auth xai",
@@ -313,10 +318,50 @@ func TestDocsCLIDocumented(t *testing.T) {
 		"auth disable",
 		"auth logout",
 		"--env-file",
+		"--version",
 		"--no-browser",
 	} {
 		if !strings.Contains(cli, cmd) {
 			t.Fatalf("docs/CLI.md must document %q", cmd)
+		}
+	}
+}
+
+func TestDocsUpgradeGuideCoversSourceRecoveryAndLaunchdRepair(t *testing.T) {
+	upgrade := readRepoFile(t, "docs", "UPGRADE.md")
+	for _, want := range []string{
+		"curl -fsSL",
+		"go.mod module is not droid-proxy",
+		"make install-user",
+		"~/.local/bin/droid-proxy",
+		"~/Library/Application Support/droid-proxy/config.yaml",
+		"${XDG_CONFIG_HOME:-~/.config}/droid-proxy/config.yaml",
+		"systemd/user/droid-proxy.service",
+		"make build",
+		"service uninstall",
+		"setup --service",
+		"droid-proxy doctor",
+		"update --dry-run",
+	} {
+		if !strings.Contains(upgrade, want) {
+			t.Fatalf("docs/UPGRADE.md must document %q", want)
+		}
+	}
+}
+
+func TestDocsCLICoversDoctorVersionServiceAndUpdateBehavior(t *testing.T) {
+	cli := readRepoFile(t, "docs", "CLI.md")
+	for _, want := range []string{
+		"droid-proxy doctor",
+		"commit identity",
+		"setup --service",
+		"~/.local/bin/droid-proxy",
+		"systemd",
+		"per-user config path",
+		"Print planned actions without fetching, merging, building, or restarting",
+	} {
+		if !strings.Contains(cli, want) {
+			t.Fatalf("docs/CLI.md must document %q", want)
 		}
 	}
 }

@@ -112,4 +112,29 @@ func TestChangelogHasUnreleasedSection(t *testing.T) {
 	if !strings.Contains(string(raw), "## [Unreleased]") {
 		t.Fatal("CHANGELOG.md must have an [Unreleased] section")
 	}
+	for _, want := range []string{"droid-proxy doctor", "Build identity", "droid-proxy setup", "install.sh", "docs/UPGRADE.md"} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("CHANGELOG.md Unreleased notes must mention %q", want)
+		}
+	}
+}
+
+func TestPublicReleaseDocsExplainFirstReleaseTag(t *testing.T) {
+	root := repoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "docs", "PUBLIC_RELEASE.md"))
+	if err != nil {
+		t.Fatalf("read docs/PUBLIC_RELEASE.md: %v", err)
+	}
+	body := string(raw)
+	for _, want := range []string{
+		"latest-release endpoint is expected to return",
+		"404",
+		"git tag -a v0.1.0",
+		"make release-dry-run",
+		"release workflow builds",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("docs/PUBLIC_RELEASE.md must document %q", want)
+		}
+	}
 }

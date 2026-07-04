@@ -79,51 +79,63 @@ The `/v1` prefix is optional on every non-health route.
 ## Install
 
 ```bash
-git clone https://github.com/trevoraspencer/droid-proxy.git
-cd droid-proxy
-go build -o droid-proxy ./cmd/droid-proxy
+curl -fsSL https://github.com/trevoraspencer/droid-proxy/releases/latest/download/install.sh | sh
 ```
 
-Requires Go 1.26.4 or newer in the Go 1.26 line. The build produces a single static binary.
+The installer downloads the latest GitHub release for macOS or Linux, verifies
+the checksum, installs the binary to `~/.local/bin/droid-proxy`, and seeds a
+per-user config if one does not already exist. Existing configs and secrets are
+preserved on re-run, so the same command is the release upgrade path.
 
-To run `droid-proxy` commands from any directory, put the built binary on your
-shell `PATH`. On macOS or Linux, a symlink in `~/.local/bin` keeps the source
-checkout in place while making the command globally available:
+Inspect-first install:
 
 ```bash
-cd /path/to/droid-proxy
-mkdir -p ~/.local/bin
-ln -sf "$PWD/droid-proxy" ~/.local/bin/droid-proxy
+curl -fsSLO https://github.com/trevoraspencer/droid-proxy/releases/latest/download/install.sh
+sh install.sh
+```
+
+Add the per-user binary directory to your shell `PATH` if needed:
+
+```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
-droid-proxy status
 ```
 
-Replace `/path/to/droid-proxy` with the directory where you ran `go build`. After this, use
-`droid-proxy start`, `droid-proxy status`, `droid-proxy restart`,
-`droid-proxy config`, and
-`droid-proxy update` from any working directory. The `~/.droid-proxy/` directory
-is only for runtime state, logs, saved auth tokens, and managed env files; it
-does not contain the executable. When there is no config file in the current
-directory, commands such as `droid-proxy config` fall back to the config path
-recorded by the running proxy.
+Per-user runtime layout:
 
-To update a source install later:
+| Item | macOS | Linux |
+|---|---|---|
+| Installed binary | `~/.local/bin/droid-proxy` | `~/.local/bin/droid-proxy` |
+| Runtime config | `~/Library/Application Support/droid-proxy/config.yaml` | `${XDG_CONFIG_HOME:-~/.config}/droid-proxy/config.yaml` |
+| Service | `~/Library/LaunchAgents/com.droid-proxy.agent.plist` | `${XDG_CONFIG_HOME:-~/.config}/systemd/user/droid-proxy.service` |
+| Runtime state, logs, managed env | `~/.droid-proxy/` | `~/.droid-proxy/` |
+
+After install:
 
 ```bash
-./droid-proxy update --dry-run
-./droid-proxy update
+droid-proxy config
+droid-proxy setup --service
+droid-proxy doctor
 ```
 
-The updater fetches `origin/main` from GitHub, refuses to touch dirty or locally
-ahead checkouts, rebuilds the binary, and restarts a running proxy.
+For source builds and contributor workflows:
+
+```bash
+git clone https://github.com/trevoraspencer/droid-proxy.git
+cd droid-proxy
+make install-user
+```
+
+Requires Go 1.26.4 or newer in the Go 1.26 line. See
+[docs/UPGRADE.md](docs/UPGRADE.md) before mixing release installs and source
+checkout updates.
 
 ## Quickstart: interactive setup
 
 The easiest way to onboard a provider and model is the interactive dashboard:
 
 ```bash
-./droid-proxy config
+droid-proxy config
 ```
 
 It picks a provider from the built-in registry (or a custom endpoint / OAuth),
@@ -195,13 +207,19 @@ The manual, file-based flow is below.
 Use the background daemon so you do not need a terminal open while Droid runs:
 
 ```bash
-./droid-proxy start --config config.yaml
-./droid-proxy stop
-./droid-proxy logs
+droid-proxy start
+droid-proxy stop
+droid-proxy logs
 ```
 
-For auto-start on login (macOS), install the launchd user agent. Full command
-reference: [`docs/CLI.md`](docs/CLI.md).
+For auto-start on login, install the per-user service:
+
+```bash
+droid-proxy setup --service
+```
+
+This writes a launchd user agent on macOS or a systemd user unit on Linux. Full
+command reference: [`docs/CLI.md`](docs/CLI.md).
 
 ## Documentation
 
@@ -211,6 +229,7 @@ Complete guides: **[docs/README.md](docs/README.md)**
 |-------|----------|
 | Project vision and scope | [VISION.md](VISION.md) |
 | CLI & daemon | [docs/CLI.md](docs/CLI.md) |
+| Install, upgrade, repair | [docs/UPGRADE.md](docs/UPGRADE.md) |
 | YAML schema | [docs/CONFIG.md](docs/CONFIG.md) |
 | Factory Droid settings | [docs/FACTORY.md](docs/FACTORY.md) |
 | Provider matrix | [docs/PROVIDERS.md](docs/PROVIDERS.md) |
@@ -359,7 +378,7 @@ Run `droid-proxy auth codex` again. Multiple accounts pool automatically — see
 | Data | Location | Notes |
 |------|----------|-------|
 | Reasoning cache | In-memory | Lost on restart |
-| Daemon / launchd logs | `~/.droid-proxy/stdout.log`, `stderr.log` | Written by `start` and `service install` |
+| Daemon / service logs | `~/.droid-proxy/stdout.log`, `stderr.log` | Written by `start` and user services |
 | OAuth tokens | `~/.droid-proxy/auth/*.json` | From `auth codex` / `auth xai` |
 | Foreground logs | stderr | Unless you redirect manually |
 | Upstream API keys | Your env / `.env.local`, or `~/.droid-proxy/env` | Only written to disk (chmod 600) when you save them via `droid-proxy config` |

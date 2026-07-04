@@ -44,7 +44,7 @@ func TestResolveDefaultConfigPathPrefersCurrentDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := resolveDefaultConfigPath(dir, "", daemon.RuntimeMetadata{
+	got := resolveDefaultConfigPath(dir, "", filepath.Join(t.TempDir(), "config.yaml"), daemon.RuntimeMetadata{
 		ConfigPath: filepath.Join(t.TempDir(), "config.local.yaml"),
 	}, true, regularFileExists)
 	if got != configPath {
@@ -59,7 +59,25 @@ func TestResolveDefaultConfigPathUsesRuntimeMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := resolveDefaultConfigPath(t.TempDir(), "", daemon.RuntimeMetadata{ConfigPath: configPath}, true, regularFileExists)
+	got := resolveDefaultConfigPath(t.TempDir(), "", filepath.Join(t.TempDir(), "config.yaml"), daemon.RuntimeMetadata{ConfigPath: configPath}, true, regularFileExists)
+	if got != configPath {
+		t.Fatalf("default config path = %q, want %q", got, configPath)
+	}
+}
+
+func TestResolveDefaultConfigPathUsesPerUserConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "droid-proxy", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("models: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := resolveDefaultConfigPath(t.TempDir(), "", configPath, daemon.RuntimeMetadata{
+		ConfigPath: filepath.Join(t.TempDir(), "missing.yaml"),
+	}, true, regularFileExists)
 	if got != configPath {
 		t.Fatalf("default config path = %q, want %q", got, configPath)
 	}
@@ -72,7 +90,7 @@ func TestResolveDefaultConfigPathUsesExecutableDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := resolveDefaultConfigPath(t.TempDir(), filepath.Join(exeDir, "droid-proxy"), daemon.RuntimeMetadata{
+	got := resolveDefaultConfigPath(t.TempDir(), filepath.Join(exeDir, "droid-proxy"), filepath.Join(t.TempDir(), "config.yaml"), daemon.RuntimeMetadata{
 		ConfigPath: filepath.Join(t.TempDir(), "missing.yaml"),
 	}, true, regularFileExists)
 	if got != configPath {
@@ -81,7 +99,7 @@ func TestResolveDefaultConfigPathUsesExecutableDirectory(t *testing.T) {
 }
 
 func TestResolveDefaultConfigPathFallsBackToConfigYAML(t *testing.T) {
-	got := resolveDefaultConfigPath(t.TempDir(), "", daemon.RuntimeMetadata{}, false, regularFileExists)
+	got := resolveDefaultConfigPath(t.TempDir(), "", filepath.Join(t.TempDir(), "config.yaml"), daemon.RuntimeMetadata{}, false, regularFileExists)
 	if got != "config.yaml" {
 		t.Fatalf("default config path = %q, want config.yaml", got)
 	}

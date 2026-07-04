@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"encoding/xml"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,8 +28,10 @@ var plistTemplate = template.Must(template.New("plist").Parse(`<?xml version="1.
         <string>--foreground</string>
         <string>--config</string>
         <string>{{.ConfigPath}}</string>
+{{- if .EnvFile }}
         <string>--env-file</string>
         <string>{{.EnvFile}}</string>
+{{- end }}
     </array>
     <key>WorkingDirectory</key>
     <string>{{.WorkDir}}</string>
@@ -43,6 +47,8 @@ var plistTemplate = template.Must(template.New("plist").Parse(`<?xml version="1.
 </plist>
 `))
 
+var launchAgentLoader = loadLaunchAgent
+
 type plistData struct {
 	Label      string
 	Executable string
@@ -56,6 +62,10 @@ func plistPath() string {
 	return filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", launchdLabel+".plist")
 }
 
+func LaunchdPlistPath() string {
+	return plistPath()
+}
+
 func LaunchdInstalled() bool {
 	if runtime.GOOS != "darwin" {
 		return false
@@ -64,17 +74,91 @@ func LaunchdInstalled() bool {
 	return err == nil
 }
 
+type LaunchdPlistCheck struct {
+	Path             string
+	Installed        bool
+	ProgramArguments []string
+	Issues           []string
+}
+
+func CheckLaunchdPlist(path string) (LaunchdPlistCheck, error) {
+	check := LaunchdPlistCheck{Path: path}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return check, nil
+		}
+		return check, err
+	}
+	check.Installed = true
+	args, err := plistProgramArguments(raw)
+	if err != nil {
+		check.Issues = append(check.Issues, "could not parse ProgramArguments: "+err.Error())
+		return check, nil
+	}
+	check.ProgramArguments = args
+	if len(args) == 0 {
+		check.Issues = append(check.Issues, "missing ProgramArguments")
+		return check, nil
+	}
+	check.Issues = append(check.Issues, serviceArgumentIssues(args)...)
+	return check, nil
+}
+
+func plistProgramArguments(raw []byte) ([]string, error) {
+	dec := xml.NewDecoder(strings.NewReader(string(raw)))
+	inProgramArguments := false
+	waitingForProgramArray := false
+	var args []string
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			if err == io.EOF {
+				return args, nil
+			}
+			return nil, err
+		}
+		switch tok := tok.(type) {
+		case xml.StartElement:
+			switch tok.Name.Local {
+			case "key":
+				var key string
+				if err := dec.DecodeElement(&key, &tok); err != nil {
+					return nil, err
+				}
+				waitingForProgramArray = key == "ProgramArguments"
+			case "array":
+				if waitingForProgramArray {
+					inProgramArguments = true
+					waitingForProgramArray = false
+				}
+			case "string":
+				if inProgramArguments {
+					var value string
+					if err := dec.DecodeElement(&value, &tok); err != nil {
+						return nil, err
+					}
+					args = append(args, value)
+				}
+			}
+		case xml.EndElement:
+			if tok.Name.Local == "array" && inProgramArguments {
+				return args, nil
+			}
+		}
+	}
+}
+
 // InstallLaunchd registers droid-proxy as a user launchd agent.
 func InstallLaunchd(configPath string) error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("service install is supported on macOS only (launchd)")
 	}
 
-	absConfig, err := filepath.Abs(configPath)
+	absConfig, workDir, err := ValidateLaunchdConfig(configPath)
 	if err != nil {
-		return fmt.Errorf("config path: %w", err)
+		return err
 	}
-	workDir := filepath.Dir(absConfig)
 
 	exe, err := os.Executable()
 	if err != nil {
@@ -99,7 +183,7 @@ func InstallLaunchd(configPath string) error {
 		Label:      launchdLabel,
 		Executable: exe,
 		ConfigPath: absConfig,
-		EnvFile:    ResolveEnvFile(workDir),
+		EnvFile:    ResolveExistingEnvFile(workDir),
 		WorkDir:    workDir,
 		LogDir:     stateDir,
 	}
@@ -107,7 +191,27 @@ func InstallLaunchd(configPath string) error {
 		return err
 	}
 
-	return loadLaunchAgent(path)
+	return launchAgentLoader(path)
+}
+
+func ValidateLaunchdConfig(configPath string) (string, string, error) {
+	return validateServiceConfig(configPath)
+}
+
+func ResolveExistingEnvFile(workDir string) string {
+	envFile := ResolveEnvFile(workDir)
+	if strings.TrimSpace(envFile) == "" {
+		return ""
+	}
+	absEnv, err := filepath.Abs(envFile)
+	if err != nil {
+		return ""
+	}
+	info, err := os.Stat(absEnv)
+	if err != nil || info.IsDir() {
+		return ""
+	}
+	return absEnv
 }
 
 func writeLaunchdPlist(path string, data plistData) error {

@@ -36,7 +36,7 @@ Keys are loaded in **layers**, with later layers overriding earlier ones. See
 | Layer | Source | Behavior |
 |-------|--------|----------|
 | Base | `~/.droid-proxy/env` | Managed secrets file written by `droid-proxy config` (chmod 600). Always loaded. |
-| Override | `--env-file PATH` | Explicit path for foreground mode, `start`, and `service install`. |
+| Override | `--env-file PATH` | Explicit path for foreground mode, `start`, and user services. |
 | Override (default) | Repo env file | When `--env-file` is omitted: `.env.local` in the config directory, if present. |
 
 This means keys onboarded via `droid-proxy config` are available even when a

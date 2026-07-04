@@ -113,8 +113,8 @@ func runRestart(args []string) {
 }
 
 func restartProxy(configPath, envFile string) error {
-	if daemon.LaunchdInstalled() {
-		return daemon.RestartLaunchd()
+	if daemon.ServiceInstalled() {
+		return daemon.RestartService()
 	}
 	if _, running := daemon.IsRunning(); running {
 		if err := daemon.StopWithTimeout(10 * time.Second); err != nil {
@@ -158,21 +158,20 @@ func runService(args []string) {
 		fs := flag.NewFlagSet("service install", flag.ExitOnError)
 		configPath := fs.String("config", defaultConfigPath(), "path to config.yaml")
 		_ = fs.Parse(args[1:])
-		if err := daemon.InstallLaunchd(*configPath); err != nil {
+		if err := daemon.InstallService(*configPath); err != nil {
 			fmt.Fprintf(os.Stderr, "droid-proxy service install error: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Println("droid-proxy installed as launchd service.")
+		fmt.Printf("droid-proxy installed as %s.\n", daemon.ServiceDescription())
 		fmt.Println(" - Auto-starts on login")
 		fmt.Println(" - Auto-restarts on crash")
-		fmt.Printf(" - Process name shown to macOS: droid-proxy\n")
 		fmt.Printf(" - Logs: %s/stdout.log, %s/stderr.log\n", daemon.StateDir(), daemon.StateDir())
 	case "uninstall":
-		if err := daemon.UninstallLaunchd(); err != nil {
+		if err := daemon.UninstallService(); err != nil {
 			fmt.Fprintf(os.Stderr, "droid-proxy service uninstall error: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Println("droid-proxy removed from launchd services.")
+		fmt.Println("droid-proxy removed from user services.")
 	default:
 		printServiceUsage(os.Stderr)
 		os.Exit(2)

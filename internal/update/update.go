@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/trevoraspencer/droid-proxy/internal/version"
 )
 
 const (
@@ -16,6 +18,8 @@ const (
 	DefaultBranch = "main"
 
 	expectedRemote = "github.com/trevoraspencer/droid-proxy"
+	publicModule   = "github.com/trevoraspencer/droid-proxy"
+	legacyModule   = "droid-proxy"
 )
 
 // Runner abstracts command execution so update safety behavior can be tested
@@ -85,6 +89,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("repo path: %w", err)
 	}
+	if real, err := filepath.EvalSymlinks(repo); err == nil {
+		repo = real
+	}
 	binary, err := filepath.Abs(opts.BinaryPath)
 	if err != nil {
 		return Result{}, fmt.Errorf("binary path: %w", err)
@@ -109,6 +116,12 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	top, err := runTrim(ctx, runner, repo, "git", "rev-parse", "--show-toplevel")
 	if err != nil {
 		return res, fmt.Errorf("repo is not a git checkout: %w", err)
+	}
+	if topAbs, err := filepath.Abs(top); err == nil {
+		top = topAbs
+	}
+	if real, err := filepath.EvalSymlinks(top); err == nil {
+		top = real
 	}
 	if filepath.Clean(top) != filepath.Clean(repo) {
 		return res, fmt.Errorf("repo path %s is inside %s; pass the repository root", repo, top)
@@ -228,7 +241,7 @@ func buildBinary(ctx context.Context, runner Runner, repo, binary, commit string
 	}
 	defer os.Remove(tmpPath)
 
-	ldflags := fmt.Sprintf("-X github.com/trevoraspencer/droid-proxy/internal/version.Commit=%s", commit)
+	ldflags := version.LDFlags("", commit)
 	if _, err := runner.Run(ctx, repo, "go", "build", "-ldflags", ldflags, "-o", tmpPath, "./cmd/droid-proxy"); err != nil {
 		return fmt.Errorf("building updated droid-proxy: %w", err)
 	}
@@ -247,16 +260,28 @@ func ValidateRepo(repo string) error {
 		return fmt.Errorf("%s is not a droid-proxy source checkout: missing go.mod", repo)
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(line) == "module droid-proxy" {
+		module, ok := strings.CutPrefix(strings.TrimSpace(line), "module ")
+		if ok && isAcceptedModulePath(strings.TrimSpace(module)) {
 			return nil
 		}
 	}
-	return fmt.Errorf("%s is not a droid-proxy source checkout: go.mod module is not droid-proxy", repo)
+	return fmt.Errorf("%s is not a droid-proxy source checkout: go.mod module must be %s or legacy %s", repo, publicModule, legacyModule)
+}
+
+func isAcceptedModulePath(module string) bool {
+	return module == publicModule || module == legacyModule
 }
 
 func ResolveRepoPath(explicit, cwd, executable string) (string, error) {
 	if explicit != "" {
-		return filepath.Abs(explicit)
+		abs, err := filepath.Abs(explicit)
+		if err != nil {
+			return "", err
+		}
+		if real, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = real
+		}
+		return abs, nil
 	}
 	if cwd != "" && ValidateRepo(cwd) == nil {
 		return filepath.Abs(cwd)

@@ -16,10 +16,10 @@ func defaultConfigPath() string {
 		meta = m
 		haveMeta = true
 	}
-	return resolveDefaultConfigPath(".", exe, meta, haveMeta, regularFileExists)
+	return resolveDefaultConfigPath(".", exe, perUserConfigPath(), meta, haveMeta, regularFileExists)
 }
 
-func resolveDefaultConfigPath(currentDir, executable string, meta daemon.RuntimeMetadata, haveMeta bool, exists func(string) bool) string {
+func resolveDefaultConfigPath(currentDir, executable, userConfig string, meta daemon.RuntimeMetadata, haveMeta bool, exists func(string) bool) string {
 	for _, name := range []string{"config.local.yaml", "config.yaml"} {
 		candidate := filepath.Join(currentDir, name)
 		if exists(candidate) {
@@ -32,6 +32,9 @@ func resolveDefaultConfigPath(currentDir, executable string, meta daemon.Runtime
 	if haveMeta && meta.ConfigPath != "" && exists(meta.ConfigPath) {
 		return meta.ConfigPath
 	}
+	if userConfig != "" && exists(userConfig) {
+		return userConfig
+	}
 	if executable != "" {
 		exeDir := filepath.Dir(executable)
 		for _, name := range []string{"config.local.yaml", "config.yaml"} {
@@ -42,6 +45,14 @@ func resolveDefaultConfigPath(currentDir, executable string, meta daemon.Runtime
 		}
 	}
 	return "config.yaml"
+}
+
+func perUserConfigPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil || strings.TrimSpace(dir) == "" {
+		return ""
+	}
+	return filepath.Join(dir, "droid-proxy", "config.yaml")
 }
 
 func regularFileExists(path string) bool {

@@ -109,6 +109,25 @@ want to adjust wording before `APPLY=1`.
 
 ## Post-publish
 
-- Tag `v0.1.0` or `v1.0.0` on the new `main`
+- Before the first tag, GitHub's latest-release endpoint is expected to return
+  404 because no releases exist yet. That is intentional before `v0.1.0`.
+- Tag `v0.1.0` on the reviewed public `main`; the release workflow builds and
+  attaches `install.sh`, checksums, and macOS/Linux archives:
+
+  ```bash
+  git status --short
+  make ci-audit
+  make release-dry-run
+  git tag -a v0.1.0 -m "droid-proxy v0.1.0"
+  git push origin v0.1.0
+  ```
+
+  Review the generated GitHub release assets and release notes before
+  announcing the release.
 - Enable GitHub secret scanning and Dependabot (Phase 6)
-- Run a fresh-clone smoke test on another machine
+- Run a fresh-machine installer smoke test:
+
+  ```bash
+  curl -fsSL https://github.com/trevoraspencer/droid-proxy/releases/latest/download/install.sh | sh
+  droid-proxy doctor
+  ```

@@ -33,8 +33,14 @@ func main() {
 		case "config", "onboard":
 			runConfig(os.Args[2:])
 			return
+		case "setup":
+			runSetup(os.Args[2:])
+			return
 		case "update":
 			runUpdate(os.Args[2:])
+			return
+		case "doctor":
+			runDoctor(os.Args[2:])
 			return
 		}
 	}

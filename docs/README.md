@@ -9,10 +9,11 @@ Guides for running `droid-proxy` with [Factory Droid](https://factory.ai).
 1. Read the [README](../README.md) for install.
 2. Read the canonical project scope in [VISION.md](../VISION.md) before making
    contributor-facing changes.
-3. Run `./droid-proxy config` to onboard providers, store API keys, write
+3. Run `droid-proxy config` to onboard providers, store API keys, write
    `config.yaml`, and sync Factory settings — see
    [CLI reference](CLI.md#interactive-config-dashboard).
-4. Start the proxy — see [CLI reference](CLI.md).
+4. Install the user service with `droid-proxy setup --service` or start the
+   proxy manually — see [CLI reference](CLI.md).
 
 **Manual alternative:**
 
@@ -26,7 +27,8 @@ Guides for running `droid-proxy` with [Factory Droid](https://factory.ai).
 | Document | Description |
 |----------|-------------|
 | [../VISION.md](../VISION.md) | Canonical project scope, priorities, non-goals, and AI-agent instructions |
-| [CLI.md](CLI.md) | `config` dashboard, `start`, `stop`, `status`, `logs`, launchd `service`, `auth` (login + `status`/`enable`/`disable`/`logout`), env files |
+| [CLI.md](CLI.md) | `setup`, `config` dashboard, `start`, `stop`, `status`, `logs`, launchd/systemd `service`, `auth` (login + `status`/`enable`/`disable`/`logout`), env files |
+| [UPGRADE.md](UPGRADE.md) | Release upgrades, source-install recovery, and user-service repair |
 | [CONFIG.md](CONFIG.md) | Full YAML schema |
 | [FACTORY.md](FACTORY.md) | `~/.factory/settings.json` integration |
 | [PROVIDERS.md](PROVIDERS.md) | Provider matrix, tiers, OAuth summary |
