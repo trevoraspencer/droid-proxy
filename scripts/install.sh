@@ -1,0 +1,224 @@
+#!/usr/bin/env sh
+set -eu
+
+REPO="trevoraspencer/droid-proxy"
+PREFIX="${PREFIX:-$HOME/.local}"
+VERSION=""
+YES=0
+NO_CONFIG=0
+NO_SERVICE=0
+
+usage() {
+  cat <<'USAGE'
+droid-proxy installer
+
+Usage:
+  install.sh [--version VERSION] [--prefix DIR] [--yes] [--no-config] [--no-service]
+
+Installs droid-proxy as a per-user binary under ~/.local/bin by default.
+Re-run the same command to upgrade. Existing config and secrets are preserved.
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --version)
+      [ "$#" -ge 2 ] || { echo "install.sh: --version needs a value" >&2; exit 2; }
+      VERSION="$2"
+      shift 2
+      ;;
+    --prefix)
+      [ "$#" -ge 2 ] || { echo "install.sh: --prefix needs a value" >&2; exit 2; }
+      PREFIX="$2"
+      shift 2
+      ;;
+    --yes|-y)
+      YES=1
+      shift
+      ;;
+    --no-config)
+      NO_CONFIG=1
+      shift
+      ;;
+    --no-service)
+      NO_SERVICE=1
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "install.sh: unknown argument $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "install.sh: required command not found: $1" >&2
+    exit 1
+  }
+}
+
+detect_os() {
+  if [ -n "${DROID_PROXY_INSTALL_OS:-}" ]; then
+    printf '%s\n' "$DROID_PROXY_INSTALL_OS"
+    return
+  fi
+  case "$(uname -s)" in
+    Darwin) printf 'darwin\n' ;;
+    Linux) printf 'linux\n' ;;
+    *) echo "install.sh: unsupported OS $(uname -s)" >&2; exit 1 ;;
+  esac
+}
+
+detect_arch() {
+  if [ -n "${DROID_PROXY_INSTALL_ARCH:-}" ]; then
+    printf '%s\n' "$DROID_PROXY_INSTALL_ARCH"
+    return
+  fi
+  case "$(uname -m)" in
+    x86_64|amd64) printf 'amd64\n' ;;
+    arm64|aarch64) printf 'arm64\n' ;;
+    *) echo "install.sh: unsupported architecture $(uname -m)" >&2; exit 1 ;;
+  esac
+}
+
+sha256_verify() {
+  file="$1"
+  sums="$2"
+  base="$(basename "$file")"
+  expected="$(awk -v f="$base" '$2 == f {print $1}' "$sums" | head -n 1)"
+  if [ -z "$expected" ]; then
+    echo "install.sh: no checksum entry for $base" >&2
+    exit 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$file" | awk '{print $1}')"
+  else
+    actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+  fi
+  if [ "$actual" != "$expected" ]; then
+    echo "install.sh: checksum mismatch for $base" >&2
+    echo "expected: $expected" >&2
+    echo "actual:   $actual" >&2
+    exit 1
+  fi
+}
+
+download() {
+  url="$1"
+  out="$2"
+  curl -fsSL "$url" -o "$out"
+}
+
+is_interactive() {
+  [ "${DROID_PROXY_INSTALL_INTERACTIVE:-}" = "1" ] && return 0
+  [ "${DROID_PROXY_INSTALL_INTERACTIVE:-}" = "0" ] && return 1
+  [ -t 0 ] && [ -t 1 ]
+}
+
+confirm() {
+  prompt="$1"
+  if [ "$YES" = "1" ]; then
+    return 0
+  fi
+  if ! is_interactive; then
+    return 1
+  fi
+  printf '%s [y/N] ' "$prompt"
+  read ans || return 1
+  case "$ans" in
+    y|Y|yes|YES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+need_cmd curl
+need_cmd tar
+OS="$(detect_os)"
+ARCH="$(detect_arch)"
+
+if [ -n "${DROID_PROXY_INSTALL_BASE_URL:-}" ]; then
+  BASE_URL="$DROID_PROXY_INSTALL_BASE_URL"
+elif [ -n "$VERSION" ]; then
+  BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+else
+  BASE_URL="https://github.com/${REPO}/releases/latest/download"
+fi
+
+ASSET="droid-proxy_${OS}_${ARCH}.tar.gz"
+WORKDIR="${DROID_PROXY_INSTALL_TMPDIR:-}"
+if [ -z "$WORKDIR" ]; then
+  tmp_base="${TMPDIR:-/tmp}"
+  mkdir -p "$tmp_base"
+  WORKDIR="$(mktemp -d "$tmp_base/droid-proxy-install.XXXXXX")"
+  CLEAN_TMP=1
+else
+  mkdir -p "$WORKDIR"
+  CLEAN_TMP=0
+fi
+cleanup() {
+  if [ "${CLEAN_TMP:-0}" = "1" ]; then
+    rm -rf "$WORKDIR"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+archive="$WORKDIR/$ASSET"
+checksums="$WORKDIR/checksums.txt"
+download "${BASE_URL}/${ASSET}" "$archive"
+download "${BASE_URL}/checksums.txt" "$checksums"
+sha256_verify "$archive" "$checksums"
+
+extract="$WORKDIR/extract"
+mkdir -p "$extract"
+tar -xzf "$archive" -C "$extract"
+if [ ! -x "$extract/droid-proxy" ]; then
+  echo "install.sh: archive did not contain executable droid-proxy" >&2
+  exit 1
+fi
+
+BINDIR="${BINDIR:-$PREFIX/bin}"
+mkdir -p "$BINDIR"
+tmpbin="$BINDIR/.droid-proxy.install.$$"
+cp "$extract/droid-proxy" "$tmpbin"
+chmod 0755 "$tmpbin"
+mv "$tmpbin" "$BINDIR/droid-proxy"
+
+echo "installed: $BINDIR/droid-proxy"
+"$BINDIR/droid-proxy" --version || true
+
+if [ "$NO_CONFIG" = "0" ]; then
+  "$BINDIR/droid-proxy" setup
+fi
+
+if is_interactive && [ "$NO_CONFIG" = "0" ]; then
+  if confirm "Open the interactive droid-proxy config dashboard now?"; then
+    "$BINDIR/droid-proxy" config
+  fi
+fi
+
+if [ "$NO_SERVICE" = "0" ]; then
+  if confirm "Install and start the per-user service now?"; then
+    if ! "$BINDIR/droid-proxy" setup --service; then
+      echo "install.sh: service setup did not complete; run droid-proxy config, then droid-proxy setup --service" >&2
+    fi
+  fi
+fi
+
+if [ "${DROID_PROXY_INSTALL_SKIP_DOCTOR:-0}" != "1" ]; then
+  "$BINDIR/droid-proxy" doctor || true
+fi
+
+cat <<EOF
+
+Next steps:
+  export PATH="$BINDIR:\$PATH"
+  droid-proxy config
+  droid-proxy setup --service
+  droid-proxy doctor
+EOF

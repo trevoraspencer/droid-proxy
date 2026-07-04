@@ -1,0 +1,363 @@
+package configedit
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/trevoraspencer/droid-proxy/internal/config"
+)
+
+const sampleConfig = `# top comment
+listen:
+  host: 127.0.0.1
+  port: 8787
+
+models:
+  # deepseek block
+  - alias: deepseek-v4-flash
+    display_name: "DeepSeek V4 Flash (DeepSeek)"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: deepseek
+    upstream_model: deepseek-v4-flash
+`
+
+func writeTemp(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	return path
+}
+
+func TestUpsertAddPreservesComments(t *testing.T) {
+	path := writeTemp(t, sampleConfig)
+	doc, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	m := &config.Model{
+		Alias:            "deepseek-v4-pro",
+		DisplayName:      "DeepSeek V4 Pro (Fireworks)",
+		FactoryProvider:  config.FactoryProviderGeneric,
+		UpstreamProtocol: config.UpstreamOpenAIChat,
+		KnownAuth:        "fireworks",
+		UpstreamModel:    "accounts/fireworks/models/deepseek-v4-pro",
+	}
+	if err := doc.Upsert(m); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if err := doc.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	out, _ := os.ReadFile(path)
+	s := string(out)
+	if !strings.Contains(s, "# top comment") {
+		t.Error("top comment not preserved")
+	}
+	if !strings.Contains(s, "# deepseek block") {
+		t.Error("inline model comment not preserved")
+	}
+	if !strings.Contains(s, "deepseek-v4-pro") {
+		t.Error("new model alias not written")
+	}
+
+	models, err := LoadModels(path)
+	if err != nil {
+		t.Fatalf("LoadModels: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("got %d models, want 2", len(models))
+	}
+}
+
+func TestUpsertReplacesExisting(t *testing.T) {
+	path := writeTemp(t, sampleConfig)
+	doc, _ := Load(path)
+	m := &config.Model{
+		Alias:            "deepseek-v4-flash",
+		DisplayName:      "Renamed",
+		FactoryProvider:  config.FactoryProviderGeneric,
+		UpstreamProtocol: config.UpstreamOpenAIChat,
+		KnownAuth:        "deepseek",
+		UpstreamModel:    "deepseek-v4-flash",
+	}
+	if err := doc.Upsert(m); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	_ = doc.Save()
+
+	models, _ := LoadModels(path)
+	if len(models) != 1 {
+		t.Fatalf("got %d models, want 1 (replace, not append)", len(models))
+	}
+	if models[0].DisplayName != "Renamed" {
+		t.Errorf("display_name = %q, want Renamed", models[0].DisplayName)
+	}
+}
+
+func TestLoadModelsExpandsDefaultsForDisplay(t *testing.T) {
+	path := writeTemp(t, `models:
+  - alias: "${MODEL_ALIAS}"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: "${KNOWN_AUTH:-mimo}"
+    upstream_model: "${UPSTREAM_MODEL:-mimo-v2.5-pro}"
+`)
+
+	models, err := LoadModels(path)
+	if err != nil {
+		t.Fatalf("LoadModels: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("got %d models, want 1", len(models))
+	}
+	if models[0].Alias != "${MODEL_ALIAS}" {
+		t.Fatalf("unresolved alias = %q, want placeholder preserved", models[0].Alias)
+	}
+	if models[0].KnownAuth != "mimo" {
+		t.Fatalf("known_auth = %q, want mimo", models[0].KnownAuth)
+	}
+	if models[0].APIKeyEnv != "MIMO_API_KEY" {
+		t.Fatalf("api_key_env = %q, want MIMO_API_KEY", models[0].APIKeyEnv)
+	}
+	if models[0].UpstreamModel != "mimo-v2.5-pro" {
+		t.Fatalf("upstream_model = %q, want mimo-v2.5-pro", models[0].UpstreamModel)
+	}
+}
+
+func TestRemove(t *testing.T) {
+	path := writeTemp(t, sampleConfig)
+	doc, _ := Load(path)
+	removed, err := doc.Remove("deepseek-v4-flash")
+	if err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if !removed {
+		t.Fatal("expected removed=true")
+	}
+	_ = doc.Save()
+	models, _ := LoadModels(path)
+	if len(models) != 0 {
+		t.Fatalf("got %d models, want 0", len(models))
+	}
+}
+
+func TestUpsertOAuthModel(t *testing.T) {
+	path := writeTemp(t, sampleConfig)
+	doc, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	m := &config.Model{
+		Alias:            "grok",
+		DisplayName:      "Grok 4",
+		FactoryProvider:  config.FactoryProviderOpenAI,
+		UpstreamProtocol: config.UpstreamXAIResponses,
+		OAuthProvider:    config.OAuthProviderXAI,
+		UpstreamModel:    "grok-4",
+		Capabilities: config.Capabilities{
+			FactoryReasoning: config.FactoryReasoningPassthrough,
+		},
+	}
+	if err := doc.Upsert(m); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if err := doc.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	out, _ := os.ReadFile(path)
+	if !strings.Contains(string(out), "oauth_provider: xai") {
+		t.Errorf("oauth_provider not written:\n%s", out)
+	}
+	if !strings.Contains(string(out), "factory_reasoning: passthrough") {
+		t.Errorf("factory_reasoning not written:\n%s", out)
+	}
+
+	models, err := LoadModels(path)
+	if err != nil {
+		t.Fatalf("LoadModels: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("got %d models, want 2", len(models))
+	}
+	var got *config.Model
+	for _, mm := range models {
+		if mm.Alias == "grok" {
+			got = mm
+		}
+	}
+	if got == nil {
+		t.Fatal("oauth model not found after round-trip")
+	}
+	if got.OAuthProvider != config.OAuthProviderXAI || got.UpstreamProtocol != config.UpstreamXAIResponses {
+		t.Errorf("round-trip mismatch: %#v", got)
+	}
+	if got.Capabilities.FactoryReasoning != config.FactoryReasoningPassthrough {
+		t.Errorf("factory_reasoning round-trip = %q", got.Capabilities.FactoryReasoning)
+	}
+}
+
+func TestUpsertRejectsInvalid(t *testing.T) {
+	path := writeTemp(t, sampleConfig)
+	doc, _ := Load(path)
+	// Missing factory_provider / known_auth / base_url -> invalid.
+	err := doc.Upsert(&config.Model{Alias: "broken"})
+	if err == nil {
+		t.Fatal("expected validation error for incomplete model")
+	}
+}
+
+// VAL-CONFIG-007: configedit preserves load-balancing values through model edits.
+
+const configWithLoadBalancing = `# top comment
+listen:
+  host: 127.0.0.1
+  port: 8787
+
+oauth:
+  auth_dir: "~/.droid-proxy/auth"
+  codex_callback_host: localhost
+  codex_callback_port: 1455
+  xai_callback_host: 127.0.0.1
+  xai_callback_port: 56121
+  load_balancing:
+    strategy: fill-first
+    max_failovers: 5
+    rate_limit_cooldown: 120s
+    error_cooldown: 45s
+
+models:
+  - alias: deepseek-v4-flash
+    display_name: "DeepSeek V4 Flash (DeepSeek)"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: deepseek
+    upstream_model: deepseek-v4-flash
+`
+
+func TestUpsertPreservesLoadBalancing(t *testing.T) {
+	path := writeTemp(t, configWithLoadBalancing)
+	doc, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	m := &config.Model{
+		Alias:            "deepseek-v4-pro",
+		DisplayName:      "DeepSeek V4 Pro (Fireworks)",
+		FactoryProvider:  config.FactoryProviderGeneric,
+		UpstreamProtocol: config.UpstreamOpenAIChat,
+		KnownAuth:        "fireworks",
+		UpstreamModel:    "accounts/fireworks/models/deepseek-v4-pro",
+	}
+	if err := doc.Upsert(m); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if err := doc.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	s := string(out)
+
+	// OAuth block must be preserved entirely.
+	for _, want := range []string{
+		"load_balancing:",
+		"strategy: fill-first",
+		"max_failovers: 5",
+		"rate_limit_cooldown: 120s",
+		"error_cooldown: 45s",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("output missing %q after upsert:\n%s", want, s)
+		}
+	}
+}
+
+func TestUpsertUpdatePreservesLoadBalancing(t *testing.T) {
+	path := writeTemp(t, configWithLoadBalancing)
+	doc, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// Update the existing model.
+	m := &config.Model{
+		Alias:            "deepseek-v4-flash",
+		DisplayName:      "Renamed Model",
+		FactoryProvider:  config.FactoryProviderGeneric,
+		UpstreamProtocol: config.UpstreamOpenAIChat,
+		KnownAuth:        "deepseek",
+		UpstreamModel:    "deepseek-v4-flash",
+	}
+	if err := doc.Upsert(m); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if err := doc.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	s := string(out)
+
+	// Model updated.
+	if !strings.Contains(s, "Renamed Model") {
+		t.Error("model display_name not updated")
+	}
+	// Load-balancing preserved.
+	if !strings.Contains(s, "strategy: fill-first") {
+		t.Errorf("load_balancing.strategy lost after update:\n%s", s)
+	}
+	if !strings.Contains(s, "max_failovers: 5") {
+		t.Errorf("load_balancing.max_failovers lost after update:\n%s", s)
+	}
+}
+
+func TestRemovePreservesLoadBalancing(t *testing.T) {
+	path := writeTemp(t, configWithLoadBalancing)
+	doc, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	removed, err := doc.Remove("deepseek-v4-flash")
+	if err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if !removed {
+		t.Fatal("expected removed=true")
+	}
+	if err := doc.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	s := string(out)
+
+	// Models list should be empty now.
+	if strings.Contains(s, "deepseek-v4-flash") {
+		t.Error("model should have been removed")
+	}
+	// Load-balancing must be preserved.
+	for _, want := range []string{
+		"load_balancing:",
+		"strategy: fill-first",
+		"max_failovers: 5",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("output missing %q after remove:\n%s", want, s)
+		}
+	}
+}

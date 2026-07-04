@@ -1,0 +1,60 @@
+{
+  "customModels": [
+    {
+      "model": "gpt-5.2-codex",
+      "displayName": "GPT-5.2 Codex (ChatGPT OAuth)",
+      "provider": "openai",
+      "baseUrl": "http://127.0.0.1:8787",
+      "apiKey": "not-required-when-client-auth-disabled",
+      "maxOutputTokens": 128000
+    },
+    {
+      "model": "grok-build-0.1",
+      "displayName": "Grok Build 0.1 (xAI OAuth)",
+      "provider": "openai",
+      "baseUrl": "http://127.0.0.1:8787",
+      "apiKey": "not-required-when-client-auth-disabled",
+      "maxOutputTokens": 128000
+    },
+    {
+      "model": "grok-composer-2.5-fast",
+      "displayName": "Composer 2.5 Fast (xAI OAuth)",
+      "provider": "openai",
+      "baseUrl": "http://127.0.0.1:8787",
+      "apiKey": "not-required-when-client-auth-disabled",
+      "maxOutputTokens": 128000
+    },
+    {
+      "model": "grok-4.3",
+      "displayName": "Grok 4.3 (xAI OAuth)",
+      "provider": "openai",
+      "baseUrl": "http://127.0.0.1:8787",
+      "apiKey": "not-required-when-client-auth-disabled",
+      "maxOutputTokens": 128000
+    },
+    {
+      "model": "glm-5.1",
+      "displayName": "GLM 5.1 (Z.AI GLM Coding Plan)",
+      "provider": "generic-chat-completion-api",
+      "baseUrl": "http://127.0.0.1:8787",
+      "apiKey": "not-required-when-client-auth-disabled",
+      "maxOutputTokens": 131072
+    },
+    {
+      "model": "mimo-v2.5-pro",
+      "displayName": "MiMo V2.5 Pro (Xiaomi MiMo)",
+      "provider": "generic-chat-completion-api",
+      "baseUrl": "http://127.0.0.1:8787",
+      "apiKey": "not-required-when-client-auth-disabled",
+      "maxOutputTokens": 131072
+    },
+    {
+      "model": "deepseek-v4-flash",
+      "displayName": "DeepSeek V4 Flash (DeepSeek)",
+      "provider": "generic-chat-completion-api",
+      "baseUrl": "http://127.0.0.1:8787",
+      "apiKey": "not-required-when-client-auth-disabled",
+      "maxOutputTokens": 128000
+    }
+  ]
+}

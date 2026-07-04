@@ -1,0 +1,220 @@
+# droid-proxy example configuration.
+#
+# Setup:
+#   cp config.example.yaml config.yaml
+#   cp .env.local.example .env.local   # add API keys
+#   set -a && source .env.local && set +a
+#   ./droid-proxy start --config config.yaml
+#
+# See docs/CLI.md and docs/README.md for full documentation.
+
+listen:
+  host: 127.0.0.1
+  port: 8787
+
+server:
+  request_body_max_bytes: 10485760
+  read_header_timeout: 30s
+  read_timeout: 60s
+  write_timeout: 600s
+  idle_timeout: 120s
+  shutdown_timeout: 5s
+
+# Optional: require Droid (or any client) to send a matching API key in
+# Authorization. When disabled, localhost is trusted by default.
+client_auth:
+  enabled: false
+  # api_keys:
+  #   - "${DROID_PROXY_API_KEY}"
+
+logging:
+  level: info
+  format: text
+  redact: true
+  trace_requests: false
+
+reasoning_cache:
+  enabled: true
+  max_entries: 1024
+  ttl: 30m
+
+upstream:
+  http_timeout: 600s
+  stream_keep_alive: 15s
+  response_body_max_bytes: 104857600
+  error_body_max_bytes: 1048576
+
+oauth:
+  auth_dir: "~/.droid-proxy/auth"
+  codex_callback_host: localhost
+  codex_callback_port: 1455
+  xai_callback_host: 127.0.0.1
+  xai_callback_port: 56121
+  # Load balancing for Codex OAuth multi-account pooling.
+  # Does not apply to xAI OAuth (single-account only).
+  # All fields have defaults; omit the block or individual fields to use defaults.
+  # load_balancing:
+  #   strategy: sticky                 # sticky (default), round-robin, fill-first, least-connections, random
+  #   quota_soft_cap_percent: 80       # prefer accounts below this used_percent (0 = disable)
+  #   affinity_path: ~/.droid-proxy/conversation_affinity.json
+  #   max_failovers: 2                 # additional alternate-account attempts (0 = single attempt only)
+  #   rate_limit_cooldown: 60s         # cooldown after 429 when no Retry-After / exhausted-window reset
+  #   error_cooldown: 30s              # cooldown after 5xx or transport timeout
+
+models:
+  # Example: DeepSeek via Factory's generic-chat-completion-api mode.
+  - alias: deepseek-v4-flash
+    display_name: "DeepSeek V4 Flash (DeepSeek)"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    known_auth: deepseek
+    upstream_model: deepseek-v4-flash
+    max_output_tokens: 128000
+    max_context_tokens: 64000
+    capabilities:
+      reasoning: deepseek
+    extra_args:
+      thinking:
+        type: enabled
+      reasoning_effort: high
+
+  # Example: Local Ollama, exposed to Droid as generic chat completions.
+  # - alias: llama3
+  #   display_name: "Llama 3 8B (Ollama local)"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: ollama
+  #   upstream_model: llama3:8b
+  #   # No API key is required for local Ollama by default.
+
+  # Example: Xiaomi MiMo via Factory's generic-chat-completion-api mode.
+  # - alias: mimo-v2.5-pro
+  #   display_name: "MiMo V2.5 Pro (Xiaomi MiMo)"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: mimo
+  #   upstream_model: mimo-v2.5-pro
+  #   max_output_tokens: 131072
+  #   max_context_tokens: 1048576
+  #   capabilities:
+  #     reasoning: deepseek
+  #   extra_args:
+  #     thinking:
+  #       type: enabled
+
+  # Example: Anthropic native pass-through.
+  # - alias: claude-sonnet-4-5-20250929
+  #   display_name: "Claude Sonnet 4.5 (Anthropic)"
+  #   factory_provider: anthropic
+  #   upstream_protocol: anthropic-messages
+  #   base_url: "https://api.anthropic.com"
+  #   api_key_env: ANTHROPIC_API_KEY
+
+  # Example: OpenAI via Responses API.
+  # - alias: gpt-4o
+  #   display_name: "GPT-4o (OpenAI)"
+  #   factory_provider: openai
+  #   upstream_protocol: openai-responses
+  #   base_url: "https://api.openai.com/v1"
+  #   api_key_env: OPENAI_API_KEY
+
+  # Example: Codex/ChatGPT OAuth via Factory's OpenAI mode.
+  # Run first: droid-proxy auth codex --config config.yaml
+  # - alias: gpt-5.2-codex
+  #   display_name: "GPT-5.2 Codex (ChatGPT OAuth)"
+  #   factory_provider: openai
+  #   upstream_protocol: codex-responses
+  #   oauth_provider: codex
+  #   upstream_model: gpt-5.2-codex
+  #
+  # Standard and fast mode as separate Factory models (reasoning levels use one alias):
+  # - alias: gpt-5.5-chatgpt
+  #   display_name: "GPT 5.5 (ChatGPT)"
+  #   factory_provider: openai
+  #   upstream_protocol: codex-responses
+  #   oauth_provider: codex
+  #   upstream_model: gpt-5.5
+  #   max_output_tokens: 128000
+  # - alias: gpt-5.5-chatgpt-fast
+  #   display_name: "GPT 5.5 Fast (ChatGPT)"
+  #   factory_provider: openai
+  #   upstream_protocol: codex-responses
+  #   oauth_provider: codex
+  #   upstream_model: gpt-5.5
+  #   max_output_tokens: 128000
+  #   extra_args:
+  #     service_tier: priority # "fast" is also accepted and normalized to priority
+
+  # Example: xAI OAuth via Factory's OpenAI mode.
+  # Run first: droid-proxy auth xai --config config.yaml
+  # - alias: grok-build-0.1
+  #   display_name: "Grok Build 0.1 (xAI OAuth)"
+  #   factory_provider: openai
+  #   upstream_protocol: xai-responses
+  #   oauth_provider: xai
+  #   upstream_model: grok-build-0.1
+  #   max_context_tokens: 256000
+  #   capabilities:
+  #     factory_reasoning: drop
+  # - alias: grok-composer-2.5-fast
+  #   display_name: "Composer 2.5 Fast (xAI OAuth)"
+  #   factory_provider: openai
+  #   upstream_protocol: xai-responses
+  #   oauth_provider: xai
+  #   base_url: https://cli-chat-proxy.grok.com/v1
+  #   upstream_model: grok-composer-2.5-fast
+  #   max_output_tokens: 128000
+  #   max_context_tokens: 200000
+  #   capabilities:
+  #     factory_reasoning: drop
+  # - alias: grok-4.3
+  #   display_name: "Grok 4.3 (xAI OAuth)"
+  #   factory_provider: openai
+  #   upstream_protocol: xai-responses
+  #   oauth_provider: xai
+  #   upstream_model: grok-4.3
+  #   max_context_tokens: 1000000
+  #   capabilities:
+  #     factory_reasoning: passthrough
+
+  # Example: xAI API key (generic chat mode). See docs/examples/xai.md.
+  # - alias: grok-3
+  #   display_name: "Grok 3 (xAI)"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: xai
+  #   upstream_model: grok-3
+
+  # Example: Kimi (Moonshot). See docs/examples/kimi.md.
+  # - alias: kimi-k2
+  #   display_name: "Kimi K2 (Moonshot)"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: kimi
+  #   upstream_model: kimi-k2-0711-preview
+
+  # Example: Groq. See docs/examples/groq.md.
+  # - alias: llama-3.3-70b
+  #   display_name: "Llama 3.3 70B (Groq)"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: groq
+  #   upstream_model: llama-3.3-70b-versatile
+
+  # Example: Fireworks. See docs/examples/fireworks.md.
+  # - alias: deepseek-v4-pro
+  #   display_name: "DeepSeek V4 Pro (Fireworks)"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: fireworks
+  #   upstream_model: accounts/fireworks/models/deepseek-v4-pro
+  #   capabilities:
+  #     reasoning: deepseek
+
+  # Example: Z.AI GLM Coding Plan. See docs/examples/zai.md.
+  # - alias: glm-5.1
+  #   display_name: "GLM 5.1 (Z.AI)"
+  #   factory_provider: generic-chat-completion-api
+  #   upstream_protocol: openai-chat
+  #   known_auth: zai-coding-api
+  #   upstream_model: glm-5.1

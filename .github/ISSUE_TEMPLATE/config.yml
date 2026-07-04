@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/trevoraspencer/droid-proxy/security/advisories/new
+    about: Please report vulnerabilities privately. Do not open a public issue.
+  - name: Contributing guide
+    url: https://github.com/trevoraspencer/droid-proxy/blob/main/CONTRIBUTING.md
+    about: Setup, build, test, and PR conventions for contributors.

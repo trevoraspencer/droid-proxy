@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version string to package"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build release assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [[ -n "${INPUT_VERSION:-}" ]]; then
+            version="$INPUT_VERSION"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME}"
+          else
+            version="$(git describe --tags --always)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Build release assets
+        run: VERSION="${{ steps.version.outputs.version }}" bash scripts/release-assets.sh
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v3.0.1
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: droid-proxy ${{ steps.version.outputs.version }}
+          files: |
+            dist/droid-proxy_*.tar.gz
+            dist/checksums.txt
+            dist/install.sh

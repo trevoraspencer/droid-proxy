@@ -1,0 +1,12 @@
+{
+  "customModels": [
+    {
+      "model": "gpt-5.2-codex",
+      "displayName": "GPT-5.2 Codex (ChatGPT OAuth)",
+      "provider": "openai",
+      "baseUrl": "http://127.0.0.1:8787",
+      "apiKey": "x",
+      "maxOutputTokens": 128000
+    }
+  ]
+}
