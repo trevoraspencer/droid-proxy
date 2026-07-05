@@ -72,8 +72,8 @@ func (a *API) messagesViaChat(c *gin.Context, m *config.Model, body []byte) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, ok := a.rawUpstreamErrorBody(resp, func() {
-			WriteAnthropicError(c, http.StatusBadGateway, "api_error", "upstream body too large")
+		raw, ok := a.rawUpstreamErrorBody(resp, func(msg string) {
+			WriteAnthropicError(c, http.StatusBadGateway, "api_error", msg)
 		})
 		if !ok {
 			return
@@ -102,8 +102,8 @@ func (a *API) messagesViaChat(c *gin.Context, m *config.Model, body []byte) {
 		return
 	}
 
-	raw, ok := a.rawUpstreamSuccessBody(resp, func() {
-		WriteAnthropicError(c, http.StatusBadGateway, "api_error", "upstream response body too large")
+	raw, ok := a.rawUpstreamSuccessBody(resp, func(msg string) {
+		WriteAnthropicError(c, http.StatusBadGateway, "api_error", msg)
 	})
 	if !ok {
 		return
@@ -184,8 +184,8 @@ func (a *API) messagesNative(c *gin.Context, m *config.Model, body []byte, path 
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, ok := a.rawUpstreamErrorBody(resp, func() {
-			WriteAnthropicError(c, http.StatusBadGateway, "api_error", "upstream error body too large")
+		raw, ok := a.rawUpstreamErrorBody(resp, func(msg string) {
+			WriteAnthropicError(c, http.StatusBadGateway, "api_error", msg)
 		})
 		if !ok {
 			return
@@ -195,8 +195,8 @@ func (a *API) messagesNative(c *gin.Context, m *config.Model, body []byte, path 
 	}
 
 	if !isStream {
-		raw, ok := a.rawUpstreamSuccessBody(resp, func() {
-			WriteAnthropicError(c, http.StatusBadGateway, "api_error", "upstream response body too large")
+		raw, ok := a.rawUpstreamSuccessBody(resp, func(msg string) {
+			WriteAnthropicError(c, http.StatusBadGateway, "api_error", msg)
 		})
 		if !ok {
 			return

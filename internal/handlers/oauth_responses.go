@@ -82,8 +82,8 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, ok := a.rawUpstreamErrorBody(resp, func() {
-			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream error body too large")
+		raw, ok := a.rawUpstreamErrorBody(resp, func(msg string) {
+			WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
 		})
 		if !ok {
 			return
@@ -101,8 +101,8 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 		return
 	}
 
-	raw, ok := a.rawUpstreamSuccessBody(resp, func() {
-		WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream response body too large")
+	raw, ok := a.rawUpstreamSuccessBody(resp, func(msg string) {
+		WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
 	})
 	if !ok {
 		return
@@ -271,8 +271,8 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 				return
 			}
 
-			raw, ok := a.rawUpstreamSuccessBody(resp, func() {
-				WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream response body too large")
+			raw, ok := a.rawUpstreamSuccessBody(resp, func(msg string) {
+				WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
 			})
 			_ = resp.Body.Close()
 			a.Pool.End(entry.Path)
@@ -294,7 +294,7 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		// --- 401/403: force refresh + same-account replay in multi-account mode ---
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			// Read body for potential relay.
-			raw, ok := a.rawUpstreamErrorBody(resp, func() {})
+			raw, ok := a.rawUpstreamErrorBody(resp, func(string) {})
 			ct := resp.Header.Get("Content-Type")
 			_ = resp.Body.Close()
 			if ok {
@@ -370,7 +370,7 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		}
 
 		// Error response: read body for potential relay.
-		raw, ok := a.rawUpstreamErrorBody(resp, func() {})
+		raw, ok := a.rawUpstreamErrorBody(resp, func(string) {})
 		ct := resp.Header.Get("Content-Type")
 		_ = resp.Body.Close()
 		a.Pool.End(entry.Path)
@@ -482,8 +482,8 @@ func (a *API) codexAuthReplay(
 			return true, 0, nil, ""
 		}
 
-		raw, ok := a.rawUpstreamSuccessBody(resp, func() {
-			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream response body too large")
+		raw, ok := a.rawUpstreamSuccessBody(resp, func(msg string) {
+			WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
 		})
 		_ = resp.Body.Close()
 		a.Pool.End(entry.Path)
@@ -503,7 +503,7 @@ func (a *API) codexAuthReplay(
 	}
 
 	// Replay returned an error: read body and release lease.
-	raw, ok := a.rawUpstreamErrorBody(resp, func() {})
+	raw, ok := a.rawUpstreamErrorBody(resp, func(string) {})
 	ct := resp.Header.Get("Content-Type")
 	_ = resp.Body.Close()
 	a.Pool.End(entry.Path)

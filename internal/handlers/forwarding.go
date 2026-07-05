@@ -80,19 +80,24 @@ func (a *API) doUpstream(c *gin.Context, opts upstream.SendOptions, writeBuildEr
 	return resp, true
 }
 
-func (a *API) rawUpstreamSuccessBody(resp *http.Response, writeTooLarge func()) ([]byte, bool) {
-	body, ok := a.readUpstreamSuccessBody(resp)
-	if !ok {
-		writeTooLarge()
+// rawUpstreamSuccessBody reads a 2xx upstream body. On failure it calls
+// writeReadError with the client-facing message ("too large" only when the
+// configured cap was actually exceeded) so the handler can wrap it in its
+// protocol-specific error envelope.
+func (a *API) rawUpstreamSuccessBody(resp *http.Response, writeReadError func(msg string)) ([]byte, bool) {
+	body, err := a.readUpstreamSuccessBody(resp)
+	if err != nil {
+		writeReadError(upstreamReadFailureMessage(err, "response"))
 		return nil, false
 	}
 	return body, true
 }
 
-func (a *API) rawUpstreamErrorBody(resp *http.Response, writeTooLarge func()) ([]byte, bool) {
-	body, ok := a.readUpstreamErrorBody(resp)
-	if !ok {
-		writeTooLarge()
+// rawUpstreamErrorBody is rawUpstreamSuccessBody for non-2xx upstream bodies.
+func (a *API) rawUpstreamErrorBody(resp *http.Response, writeReadError func(msg string)) ([]byte, bool) {
+	body, err := a.readUpstreamErrorBody(resp)
+	if err != nil {
+		writeReadError(upstreamReadFailureMessage(err, "error"))
 		return nil, false
 	}
 	return body, true

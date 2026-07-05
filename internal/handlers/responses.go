@@ -70,8 +70,8 @@ func (a *API) responsesViaChat(c *gin.Context, m *config.Model, body []byte) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, ok := a.rawUpstreamErrorBody(resp, func() {
-			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream body too large")
+		raw, ok := a.rawUpstreamErrorBody(resp, func(msg string) {
+			WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
 		})
 		if !ok {
 			return
@@ -100,8 +100,8 @@ func (a *API) responsesViaChat(c *gin.Context, m *config.Model, body []byte) {
 		return
 	}
 
-	raw, ok := a.rawUpstreamSuccessBody(resp, func() {
-		WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream response body too large")
+	raw, ok := a.rawUpstreamSuccessBody(resp, func(msg string) {
+		WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
 	})
 	if !ok {
 		return
@@ -135,8 +135,8 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, ok := a.rawUpstreamErrorBody(resp, func() {
-			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream error body too large")
+		raw, ok := a.rawUpstreamErrorBody(resp, func(msg string) {
+			WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
 		})
 		if !ok {
 			return
@@ -153,8 +153,8 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 	}
 
 	if !isStream {
-		raw, ok := a.rawUpstreamSuccessBody(resp, func() {
-			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream response body too large")
+		raw, ok := a.rawUpstreamSuccessBody(resp, func(msg string) {
+			WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
 		})
 		if !ok {
 			return
