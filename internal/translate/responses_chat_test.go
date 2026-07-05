@@ -424,3 +424,56 @@ func parseTranslateSSE(t *testing.T, body string) []translateSSEEvent {
 	}
 	return events
 }
+
+// TestChatStreamTranslatorsTolerateEmptyChoiceChunks pins that zero-choice
+// chunks — Azure OpenAI's leading prompt-filter-results chunk and the final
+// usage chunk emitted under stream_options.include_usage — are skipped rather
+// than aborting the translated stream with an error frame.
+func TestChatStreamTranslatorsTolerateEmptyChoiceChunks(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"id":"chat_1","choices":[],"prompt_filter_results":[{"prompt_index":0}]}`,
+		``,
+		`data: {"id":"chat_1","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"chat_1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: {"id":"chat_1","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	t.Run("responses_target", func(t *testing.T) {
+		got, err := ChatStreamToResponsesSSE(strings.NewReader(body), "gpt-test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := string(got)
+		if strings.Contains(out, "event: error") {
+			t.Fatalf("empty-choice chunks must not abort the stream:\n%s", out)
+		}
+		if !strings.Contains(out, "response.completed") {
+			t.Fatalf("expected response.completed, got:\n%s", out)
+		}
+		if !strings.Contains(out, "hello") {
+			t.Fatalf("expected text delta preserved, got:\n%s", out)
+		}
+	})
+
+	t.Run("anthropic_target", func(t *testing.T) {
+		got, err := ChatStreamToAnthropicSSE(strings.NewReader(body), "claude-test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := string(got)
+		if strings.Contains(out, "event: error") {
+			t.Fatalf("empty-choice chunks must not abort the stream:\n%s", out)
+		}
+		if !strings.Contains(out, "message_stop") {
+			t.Fatalf("expected message_stop, got:\n%s", out)
+		}
+		if !strings.Contains(out, "hello") {
+			t.Fatalf("expected text delta preserved, got:\n%s", out)
+		}
+	})
+}
