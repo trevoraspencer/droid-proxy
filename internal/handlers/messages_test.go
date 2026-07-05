@@ -751,3 +751,55 @@ func TestCountTokens_LocalFallbackWrongProviderRejectsWithoutUpstream(t *testing
 		t.Fatalf("upstream was called %d times", calls)
 	}
 }
+
+// TestCountTokens_ErrorsUseAnthropicEnvelope pins that the Anthropic-protocol
+// count_tokens surface reports resolve/provider/local failures with the
+// Anthropic error envelope ({"type":"error","error":{...}}), matching the
+// sibling /v1/messages handler, not the OpenAI {"error":{...}} shape.
+func TestCountTokens_ErrorsUseAnthropicEnvelope(t *testing.T) {
+	assertAnthropicEnvelope := func(t *testing.T, w *httptest.ResponseRecorder) {
+		t.Helper()
+		if w.Code < 400 {
+			t.Fatalf("expected error status, got %d body=%s", w.Code, w.Body.String())
+		}
+		var out map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("non-JSON error body: %v (%s)", err, w.Body.String())
+		}
+		if out["type"] != "error" {
+			t.Fatalf("expected Anthropic envelope with top-level type=error, got %s", w.Body.String())
+		}
+		if _, ok := out["error"].(map[string]any); !ok {
+			t.Fatalf("expected nested error object, got %s", w.Body.String())
+		}
+	}
+
+	t.Run("missing and unknown model", func(t *testing.T) {
+		api := newAnthropicTestAPI(t, func(http.ResponseWriter, *http.Request) {
+			t.Fatal("upstream must not be called")
+		}, func(m *config.Model) {
+			m.UpstreamProtocol = config.UpstreamOpenAIChat
+		})
+		for _, body := range []string{
+			`{"messages":[{"role":"user","content":"hi"}]}`,
+			`{"model":"missing-model","messages":[{"role":"user","content":"hi"}]}`,
+		} {
+			w := httptest.NewRecorder()
+			api.engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(body)))
+			assertAnthropicEnvelope(t, w)
+		}
+	})
+
+	t.Run("wrong factory provider", func(t *testing.T) {
+		api := newAnthropicTestAPI(t, func(http.ResponseWriter, *http.Request) {
+			t.Fatal("upstream must not be called")
+		}, func(m *config.Model) {
+			m.FactoryProvider = config.FactoryProviderOpenAI
+			m.UpstreamProtocol = config.UpstreamOpenAIChat
+		})
+		w := httptest.NewRecorder()
+		api.engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens",
+			strings.NewReader(`{"model":"droid-claude","messages":[{"role":"user","content":"hi"}]}`)))
+		assertAnthropicEnvelope(t, w)
+	})
+}

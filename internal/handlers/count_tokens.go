@@ -19,12 +19,14 @@ func (a *API) CountTokens(c *gin.Context) {
 	if !ok {
 		return
 	}
-	m, ok := a.resolveRequestModel(body, openAIModelErrors(c))
+	// count_tokens is an Anthropic-protocol surface, so failures use the
+	// Anthropic error envelope like the sibling /v1/messages handler.
+	m, ok := a.resolveRequestModel(body, anthropicModelErrors(c))
 	if !ok {
 		return
 	}
 	if m.FactoryProvider != config.FactoryProviderAnthropic {
-		BadRequest(c, "model "+m.Alias+" is configured for factory_provider "+string(m.FactoryProvider)+" and does not accept /v1/messages/count_tokens")
+		WriteAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "model "+m.Alias+" is configured for factory_provider "+string(m.FactoryProvider)+" and does not accept /v1/messages/count_tokens")
 		return
 	}
 	if m.UpstreamProtocol == config.UpstreamAnthropicMessages {
@@ -34,7 +36,7 @@ func (a *API) CountTokens(c *gin.Context) {
 	// Local fallback.
 	count, err := countLocally(body)
 	if err != nil {
-		WriteJSONError(c, http.StatusInternalServerError, "internal_error", err.Error())
+		WriteAnthropicError(c, http.StatusInternalServerError, "api_error", err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"input_tokens": count})
