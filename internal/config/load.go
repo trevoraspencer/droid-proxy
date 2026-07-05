@@ -28,7 +28,6 @@ func parse(raw []byte) (*Config, error) {
 	if err := yaml.Unmarshal([]byte(expanded), &root); err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
-	cfg.present = collectPresence(&root)
 	dec := yaml.NewDecoder(strings.NewReader(expanded))
 	dec.KnownFields(true)
 	if err := dec.Decode(cfg); err != nil {
