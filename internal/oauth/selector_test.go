@@ -1006,3 +1006,18 @@ func TestPoolSelect_ConcurrentLeastConnections(t *testing.T) {
 		}
 	}
 }
+
+// TestNewConcurrencySafeRNG_DefaultIsNotFixedSeed guards against the
+// production RNG regressing to a constant seed, which made the "random"
+// strategy replay the identical account sequence after every restart.
+func TestNewConcurrencySafeRNG_DefaultIsNotFixedSeed(t *testing.T) {
+	r1 := newConcurrencySafeRNG()
+	time.Sleep(2 * time.Millisecond) // guarantee distinct time-based seeds
+	r2 := newConcurrencySafeRNG()
+	for i := 0; i < 32; i++ {
+		if r1.Int63() != r2.Int63() {
+			return
+		}
+	}
+	t.Fatal("two independently created RNGs produced identical 32-draw sequences; seed appears fixed")
+}

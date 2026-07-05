@@ -394,3 +394,33 @@ func TestChat_NoTrailingV1PrefixWorks(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 }
+
+// TestChat_NonStream_BodyReadFailureIsNotReportedAsTooLarge pins that a
+// transport failure while reading the upstream body (here: upstream declares
+// a Content-Length it never delivers) is reported as a read failure, not as a
+// size-cap ("too large") violation.
+func TestChat_NonStream_BodyReadFailureIsNotReportedAsTooLarge(t *testing.T) {
+	api := newTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "512")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"truncated`))
+		// Handler returns having written fewer bytes than Content-Length; the
+		// server closes the connection and the proxy's body read fails.
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"droid-test","messages":[{"role":"user","content":"hi"}],"stream":false}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "too large") {
+		t.Fatalf("read failure must not be reported as size-cap violation: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "failed to read upstream response body") {
+		t.Fatalf("expected read-failure message, got: %s", w.Body.String())
+	}
+}

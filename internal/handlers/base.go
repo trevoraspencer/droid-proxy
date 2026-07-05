@@ -59,25 +59,39 @@ func ReadRequestBody(c *gin.Context) ([]byte, bool) {
 	return nil, false
 }
 
-func (a *API) readUpstreamSuccessBody(resp *http.Response) ([]byte, bool) {
+func (a *API) readUpstreamSuccessBody(resp *http.Response) ([]byte, error) {
 	return a.readUpstreamBody(resp, a.Cfg.Upstream.ResponseBodyMaxBytes)
 }
 
-func (a *API) readUpstreamErrorBody(resp *http.Response) ([]byte, bool) {
+func (a *API) readUpstreamErrorBody(resp *http.Response) ([]byte, error) {
 	return a.readUpstreamBody(resp, a.Cfg.Upstream.ErrorBodyMaxBytes)
 }
 
-func (a *API) readUpstreamBody(resp *http.Response, limit int64) ([]byte, bool) {
+// readUpstreamBody reads and closes an upstream response body, enforcing
+// limit. The returned error preserves upstream.ErrBodyTooLarge so callers can
+// distinguish a size-cap violation from a transport read failure.
+func (a *API) readUpstreamBody(resp *http.Response, limit int64) ([]byte, error) {
 	body, err := upstream.ReadAllAndCloseLimit(resp.Body, limit)
 	if err == nil {
-		return body, true
+		return body, nil
 	}
 	if errors.Is(err, upstream.ErrBodyTooLarge) {
 		a.Logger.WithField("status", resp.StatusCode).Warn("upstream body exceeded configured cap")
-		return nil, false
+	} else {
+		a.Logger.WithError(err).Warn("read upstream body failed")
 	}
-	a.Logger.WithError(err).Warn("read upstream body failed")
-	return nil, false
+	return nil, err
+}
+
+// upstreamReadFailureMessage converts a body-read error into the client-facing
+// message: the size-cap message only when the body actually exceeded the
+// configured cap, a generic read-failure message otherwise. kind names the
+// body being read ("response" or "error").
+func upstreamReadFailureMessage(err error, kind string) string {
+	if errors.Is(err, upstream.ErrBodyTooLarge) {
+		return "upstream " + kind + " body too large"
+	}
+	return "failed to read upstream " + kind + " body"
 }
 
 // applyUpstreamPayloadOverrides rewrites native provider payloads with the

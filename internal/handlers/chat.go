@@ -72,8 +72,8 @@ func (a *API) ChatCompletions(c *gin.Context) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, ok := a.rawUpstreamErrorBody(resp, func() {
-			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream error body too large")
+		body, ok := a.rawUpstreamErrorBody(resp, func(msg string) {
+			WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
 		})
 		if !ok {
 			return
@@ -83,8 +83,8 @@ func (a *API) ChatCompletions(c *gin.Context) {
 	}
 
 	if !isStream {
-		respBody, ok := a.rawUpstreamSuccessBody(resp, func() {
-			WriteJSONError(c, http.StatusBadGateway, "upstream_error", "upstream response body too large")
+		respBody, ok := a.rawUpstreamSuccessBody(resp, func(msg string) {
+			WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
 		})
 		if !ok {
 			return

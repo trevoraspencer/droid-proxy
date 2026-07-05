@@ -1326,3 +1326,54 @@ func TestEnabledCodexCount(t *testing.T) {
 	}
 	_ = disabledPath // ensure it's used
 }
+
+// TestDeepCopyCodexQuota_Independence pins that deepCopyCodexQuota duplicates
+// all three windows and their pointer fields, so mutating the source never
+// leaks into a snapshot copy.
+func TestDeepCopyCodexQuota_Independence(t *testing.T) {
+	fp := func(v float64) *float64 { return &v }
+	ip := func(v int64) *int64 { return &v }
+	src := &CodexQuota{
+		Primary:    &CodexQuotaWindow{UsedPercent: 10, RemainingPercent: fp(90), WindowMinutes: fp(300), ResetAt: ip(111), LimitReached: false},
+		Secondary:  &CodexQuotaWindow{UsedPercent: 20, RemainingPercent: fp(80), WindowMinutes: fp(10080), ResetAt: ip(222)},
+		CodeReview: &CodexQuotaWindow{UsedPercent: 30, RemainingPercent: fp(70), WindowMinutes: fp(60), ResetAt: ip(333), LimitReached: true},
+	}
+
+	cp := deepCopyCodexQuota(src)
+	if cp == nil || cp.Primary == nil || cp.Secondary == nil || cp.CodeReview == nil {
+		t.Fatalf("copy dropped windows: %#v", cp)
+	}
+
+	// Mutate every source pointer field and a value field.
+	for _, w := range []*CodexQuotaWindow{src.Primary, src.Secondary, src.CodeReview} {
+		*w.RemainingPercent = -1
+		*w.WindowMinutes = -1
+		*w.ResetAt = -1
+		w.UsedPercent = -1
+	}
+
+	for _, tc := range []struct {
+		name string
+		got  *CodexQuotaWindow
+		want CodexQuotaWindow
+	}{
+		{"primary", cp.Primary, CodexQuotaWindow{UsedPercent: 10, RemainingPercent: fp(90), WindowMinutes: fp(300), ResetAt: ip(111)}},
+		{"secondary", cp.Secondary, CodexQuotaWindow{UsedPercent: 20, RemainingPercent: fp(80), WindowMinutes: fp(10080), ResetAt: ip(222)}},
+		{"code_review", cp.CodeReview, CodexQuotaWindow{UsedPercent: 30, RemainingPercent: fp(70), WindowMinutes: fp(60), ResetAt: ip(333), LimitReached: true}},
+	} {
+		if tc.got.UsedPercent != tc.want.UsedPercent ||
+			*tc.got.RemainingPercent != *tc.want.RemainingPercent ||
+			*tc.got.WindowMinutes != *tc.want.WindowMinutes ||
+			*tc.got.ResetAt != *tc.want.ResetAt ||
+			tc.got.LimitReached != tc.want.LimitReached {
+			t.Errorf("%s window mutated through shared memory: got %+v want %+v", tc.name, tc.got, tc.want)
+		}
+	}
+
+	if deepCopyCodexQuota(nil) != nil {
+		t.Error("nil quota must copy to nil")
+	}
+	if deepCopyCodexQuotaWindow(nil) != nil {
+		t.Error("nil window must copy to nil")
+	}
+}

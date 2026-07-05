@@ -262,6 +262,12 @@ func sanitizeXAIToolFields(tool map[string]any) map[string]any {
 	return tool
 }
 
+// sanitizeXAIToolSchema strips JSON-Schema keywords xAI rejects (pattern,
+// format, and enum values containing "/") from a tool schema. Stripping only
+// applies where map keys are JSON-Schema keywords: maps whose keys are
+// user-defined names (properties, patternProperties, $defs, definitions)
+// recurse into each value as a schema instead, so a tool parameter that is
+// itself named "format", "pattern", or "enum" is preserved.
 func sanitizeXAIToolSchema(value any) any {
 	switch v := value.(type) {
 	case map[string]any:
@@ -276,6 +282,8 @@ func sanitizeXAIToolSchema(value any) any {
 				} else {
 					v[key] = filtered
 				}
+			case "properties", "patternProperties", "$defs", "definitions":
+				v[key] = sanitizeXAISchemaMap(child)
 			default:
 				v[key] = sanitizeXAIToolSchema(child)
 			}
@@ -289,6 +297,20 @@ func sanitizeXAIToolSchema(value any) any {
 	default:
 		return value
 	}
+}
+
+// sanitizeXAISchemaMap sanitizes a map whose keys are user-defined names
+// (property names, definition names) and whose values are schemas. The keys
+// themselves are never treated as JSON-Schema keywords.
+func sanitizeXAISchemaMap(value any) any {
+	m, ok := value.(map[string]any)
+	if !ok {
+		return sanitizeXAIToolSchema(value)
+	}
+	for name, child := range m {
+		m[name] = sanitizeXAIToolSchema(child)
+	}
+	return m
 }
 
 func sanitizeXAIEnum(value any) []any {

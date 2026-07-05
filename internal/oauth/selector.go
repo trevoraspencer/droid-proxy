@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
@@ -122,11 +123,12 @@ func (s *RandomSelector) Select(eligible []*AccountEntry) (*AccountEntry, error)
 
 // newConcurrencySafeRNG creates the RNG for the random selector.
 // If a Rand is provided via rng, it is used directly (tests can inject
-// deterministic sources). Otherwise a new Rand seeded from the default
-// source is created.
+// deterministic sources). Otherwise a new time-seeded Rand is created so the
+// "random" strategy does not replay the identical account sequence after
+// every restart.
 func newConcurrencySafeRNG(rng ...*rand.Rand) *rand.Rand {
 	if len(rng) > 0 && rng[0] != nil {
 		return rng[0]
 	}
-	return rand.New(rand.NewSource(0)) // deterministic seed for reproducibility
+	return rand.New(rand.NewSource(time.Now().UnixNano()))
 }

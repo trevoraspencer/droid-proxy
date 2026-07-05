@@ -98,7 +98,11 @@ func (s *responsesStreamState) observe(ev chatStreamChunk) error {
 		return errors.New("Chat stream contains multiple choices, which this translator does not merge")
 	}
 	if len(ev.Choices) == 0 {
-		return errors.New("Chat stream chunk is missing choices")
+		// Tolerate zero-choice chunks: Azure OpenAI emits a leading
+		// prompt-filter-results chunk with empty choices, and
+		// stream_options.include_usage makes the final usage chunk carry no
+		// choices. Neither carries content, so skip them.
+		return nil
 	}
 	ch := ev.Choices[0]
 	if ch.Index != 0 {
@@ -219,7 +223,11 @@ func (s *anthropicStreamState) observe(ev chatStreamChunk) error {
 		return errors.New("Chat stream contains multiple choices, which this translator does not merge")
 	}
 	if len(ev.Choices) == 0 {
-		return errors.New("Chat stream chunk is missing choices")
+		// Tolerate zero-choice chunks: Azure OpenAI emits a leading
+		// prompt-filter-results chunk with empty choices, and
+		// stream_options.include_usage makes the final usage chunk carry no
+		// choices. Neither carries content, so skip them.
+		return nil
 	}
 	ch := ev.Choices[0]
 	if ch.Index != 0 {

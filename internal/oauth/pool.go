@@ -268,9 +268,11 @@ func (p *AccountPool) Reload(tokens []*Token) {
 	//     and will call End to release it, decrementing InFlight.
 	//   - Keeping the entry ensures End does not panic on a missing path
 	//     and InFlight never goes negative.
-	//   - These stale entries are skipped by Eligible/Select (their
-	//     provider may no longer be Codex, or they may be filtered by
-	//     the exclusion set) so they cannot be selected for new requests.
+	//   - A stale entry can still be selected for a new request while it
+	//     remains in flight (isEligible has no staleness filter), but the
+	//     handler's subsequent LoadTokenAtPath fails for the missing file
+	//     and the failover loop marks the entry unhealthy and moves on to
+	//     another account, so no request is served with stale credentials.
 	//   - Once InFlight reaches zero via End, the next Reload will
 	//     garbage-collect the entry.
 	for path := range p.entries {
@@ -787,53 +789,30 @@ func deepCopyCodexQuota(q *CodexQuota) *CodexQuota {
 		return nil
 	}
 	cp := *q
-	if q.Primary != nil {
-		w := *q.Primary
-		if q.Primary.RemainingPercent != nil {
-			v := *q.Primary.RemainingPercent
-			w.RemainingPercent = &v
-		}
-		if q.Primary.WindowMinutes != nil {
-			v := *q.Primary.WindowMinutes
-			w.WindowMinutes = &v
-		}
-		if q.Primary.ResetAt != nil {
-			v := *q.Primary.ResetAt
-			w.ResetAt = &v
-		}
-		cp.Primary = &w
+	cp.Primary = deepCopyCodexQuotaWindow(q.Primary)
+	cp.Secondary = deepCopyCodexQuotaWindow(q.Secondary)
+	cp.CodeReview = deepCopyCodexQuotaWindow(q.CodeReview)
+	return &cp
+}
+
+// deepCopyCodexQuotaWindow creates a deep copy of a single quota window,
+// duplicating pointer fields so the copy shares no memory with the source.
+func deepCopyCodexQuotaWindow(w *CodexQuotaWindow) *CodexQuotaWindow {
+	if w == nil {
+		return nil
 	}
-	if q.Secondary != nil {
-		w := *q.Secondary
-		if q.Secondary.RemainingPercent != nil {
-			v := *q.Secondary.RemainingPercent
-			w.RemainingPercent = &v
-		}
-		if q.Secondary.WindowMinutes != nil {
-			v := *q.Secondary.WindowMinutes
-			w.WindowMinutes = &v
-		}
-		if q.Secondary.ResetAt != nil {
-			v := *q.Secondary.ResetAt
-			w.ResetAt = &v
-		}
-		cp.Secondary = &w
+	cp := *w
+	if w.RemainingPercent != nil {
+		v := *w.RemainingPercent
+		cp.RemainingPercent = &v
 	}
-	if q.CodeReview != nil {
-		w := *q.CodeReview
-		if q.CodeReview.RemainingPercent != nil {
-			v := *q.CodeReview.RemainingPercent
-			w.RemainingPercent = &v
-		}
-		if q.CodeReview.WindowMinutes != nil {
-			v := *q.CodeReview.WindowMinutes
-			w.WindowMinutes = &v
-		}
-		if q.CodeReview.ResetAt != nil {
-			v := *q.CodeReview.ResetAt
-			w.ResetAt = &v
-		}
-		cp.CodeReview = &w
+	if w.WindowMinutes != nil {
+		v := *w.WindowMinutes
+		cp.WindowMinutes = &v
+	}
+	if w.ResetAt != nil {
+		v := *w.ResetAt
+		cp.ResetAt = &v
 	}
 	return &cp
 }

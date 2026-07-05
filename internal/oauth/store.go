@@ -243,21 +243,18 @@ func sanitizeFileSegment(value string) string {
 
 // IsTokenFileName returns true if the filename looks like a token file
 // that should be processed. It excludes:
-//   - Non-.json files
+//   - Non-.json files (this also rejects lock files, whose ".lock"
+//     extension fails the .json check)
 //   - Hidden files (starting with .)
-//   - Lock files (.lock extension)
 //   - Atomic-save temp files (.<name>.tmp-* pattern, caught by hidden-file check)
 func IsTokenFileName(name string) bool {
-	// Must end with .json
+	// Must end with .json. Lock files ("name.json.lock") have extension
+	// ".lock" and are rejected here too.
 	if filepath.Ext(name) != ".json" {
 		return false
 	}
 	// Skip hidden files (e.g. .codex-user.json.tmp-12345)
 	if strings.HasPrefix(name, ".") {
-		return false
-	}
-	// Skip lock files
-	if strings.HasSuffix(name, ".lock") {
 		return false
 	}
 	return true
