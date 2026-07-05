@@ -188,8 +188,8 @@ func runLogs(args []string) {
 	_ = fs.Parse(args)
 
 	path := filepath.Join(daemon.StateDir(), "stderr.log")
-	if len(args) > 0 && args[0] != "" && !strings.HasPrefix(args[0], "-") {
-		path = args[0]
+	if arg := fs.Arg(0); arg != "" {
+		path = arg
 	}
 
 	f, err := os.Open(path)
