@@ -295,32 +295,6 @@ func (s *anthropicStreamState) complete() error {
 	return writeSSETo(s.w, "message_stop", map[string]any{"type": "message_stop"})
 }
 
-func chatStreamHasText(events []chatStreamChunk) bool {
-	for _, ev := range events {
-		for _, ch := range ev.Choices {
-			if stringValue(ch.Delta["content"]) != "" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func readChatStreamEvents(r io.Reader) ([]chatStreamChunk, error) {
-	var out []chatStreamChunk
-	err := readChatStreamEventsIncremental(r, ChatStreamForwardOptions{}, nil, nil, func(ev chatStreamChunk) error {
-		out = append(out, ev)
-		return nil
-	}, func() error { return nil })
-	if err != nil {
-		return nil, err
-	}
-	if len(out) == 0 {
-		return nil, errors.New("Chat stream contained no data events")
-	}
-	return out, nil
-}
-
 func readChatStreamEventsIncremental(r io.Reader, opts ChatStreamForwardOptions, w io.Writer, flushWriter func(), onEvent func(chatStreamChunk) error, onDone func() error) error {
 	ctx := opts.Context
 	if ctx == nil {
@@ -483,10 +457,6 @@ func sortedIntKeys(m map[int]bool) []int {
 	}
 	sort.Ints(keys)
 	return keys
-}
-
-func writeSSE(w *bytes.Buffer, event string, payload any) {
-	writeSSETo(w, event, payload)
 }
 
 func writeSSETo(w io.Writer, event string, payload any) error {
