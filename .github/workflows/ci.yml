@@ -18,6 +18,7 @@ jobs:
   lint:
     name: Lint (gofmt + vet)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -26,12 +27,15 @@ jobs:
           cache: true
       - name: Verify module integrity
         run: go mod verify
+        timeout-minutes: 5
       - name: Lint
         run: make lint
+        timeout-minutes: 5
 
   test:
     name: Build & test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -40,14 +44,18 @@ jobs:
           cache: true
       - name: Build
         run: make build
+        timeout-minutes: 5
       - name: Test
         run: make test
+        timeout-minutes: 5
       - name: Test (race detector)
         run: make test-race
+        timeout-minutes: 5
 
   audit:
     name: Docs & legal audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -56,14 +64,18 @@ jobs:
           cache: true
       - name: Install ripgrep
         run: sudo apt-get update && sudo apt-get install -y ripgrep
+        timeout-minutes: 5
       - name: Legal & licensing audit
         run: make legal-audit
+        timeout-minutes: 5
       - name: Documentation audit
         run: make docs-audit
+        timeout-minutes: 5
 
   secrets:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -76,5 +88,7 @@ jobs:
           curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_x64.tar.gz" \
             | tar -xz -C "$RUNNER_TEMP/bin" gitleaks
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+        timeout-minutes: 5
       - name: Audit secrets
         run: make audit-secrets
+        timeout-minutes: 5
