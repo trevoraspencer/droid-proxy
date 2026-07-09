@@ -305,7 +305,7 @@ func TestWorkflowValidation_EndToEndDroidProviderWorkflows(t *testing.T) {
 			name:         "responses over chat streaming tool prefixless",
 			path:         "/responses",
 			body:         `{"model":"droid-openai-chat","stream":true,"input":"tool please","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]}`,
-			wantEvents:   []string{"response.output_item.added", "response.function_call_arguments.delta", "response.completed"},
+			wantEvents:   []string{"response.output_item.added", "response.function_call_arguments.delta", "response.output_item.done", "response.completed"},
 			wantUpstream: "/chat/completions",
 		},
 		{

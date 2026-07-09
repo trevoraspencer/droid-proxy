@@ -9,7 +9,7 @@ curl -fsSL https://github.com/trevoraspencer/droid-proxy/releases/latest/downloa
 droid-proxy doctor
 ```
 
-The installer replaces the binary at `~/.local/bin/droid-proxy` and preserves existing config, OAuth tokens, logs, and managed secrets. It only creates a config when the target config file is missing.
+The installer verifies `checksums.txt`, rejects archives with unsafe paths or link entries before extraction, replaces the binary at `~/.local/bin/droid-proxy`, and preserves existing config, OAuth tokens, logs, and managed secrets. It only creates a config when the target config file is missing.
 
 ## Per-User Runtime Layout
 
@@ -24,7 +24,7 @@ The service should run from the installed binary path and the per-user runtime c
 
 ## Service Repair
 
-Use this when `droid-proxy doctor` reports a stale service executable, a missing config path, or a missing env file referenced by the service.
+Use this when `droid-proxy doctor` reports a stale service executable, a missing config path, an invalid service config, or a missing env file referenced by the service.
 
 ```bash
 droid-proxy doctor || true
@@ -34,6 +34,7 @@ droid-proxy doctor || true
 ```
 
 These commands preserve config, tokens, and managed secrets. They only remove and reinstall the launchd plist or systemd user unit.
+If repair fails with `config is not ready to run`, run `droid-proxy config` to add at least one model or fix missing credential env vars, then repeat `droid-proxy setup --service`.
 
 ## Source Installs
 

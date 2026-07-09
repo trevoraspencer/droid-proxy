@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/trevoraspencer/droid-proxy/internal/config"
 	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 	"github.com/trevoraspencer/droid-proxy/internal/setup"
 )
@@ -48,9 +47,5 @@ func runSetup(args []string) {
 }
 
 func validateSetupServiceConfig(configPath string) error {
-	loadConfigEnv(configPath)
-	if _, err := config.Load(configPath); err != nil {
-		return fmt.Errorf("config is not ready to run: %w\nrun droid-proxy config --config %q first", err, configPath)
-	}
-	return nil
+	return validateServiceInstallConfig(configPath)
 }

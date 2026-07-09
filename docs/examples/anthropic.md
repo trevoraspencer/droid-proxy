@@ -34,8 +34,9 @@ models:
     max_context_tokens: 200000
 ```
 
-`known_auth: anthropic` injects `anthropic-version: 2023-06-01` and uses
-`x-api-key` instead of `Authorization`.
+`known_auth: anthropic` injects `anthropic-version: 2023-06-01`, uses
+`x-api-key` instead of `Authorization`, and lets `droid-proxy config` discover
+models from Anthropic's `/v1/models` endpoint.
 
 ## ~/.factory/settings.json
 

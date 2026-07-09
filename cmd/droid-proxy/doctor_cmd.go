@@ -103,6 +103,11 @@ func writeDoctor(out io.Writer, explicitRepo string) doctorResult {
 			fmt.Fprintln(out, msg)
 			res.HardIssues = append(res.HardIssues, msg)
 		}
+		for _, issue := range doctorServiceConfigIssues(check.ProgramArguments) {
+			msg := "service: issue: " + issue
+			fmt.Fprintln(out, msg)
+			res.HardIssues = append(res.HardIssues, msg)
+		}
 	}
 
 	if len(res.HardIssues) == 0 {

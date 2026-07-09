@@ -1,7 +1,7 @@
-// Package providerapi queries OpenAI-compatible providers for their available
-// model IDs so the interactive config UI can offer a pick-list instead of
-// requiring the user to paste a model slug. Callers fall back to free-text
-// entry when discovery is unsupported or fails.
+// Package providerapi queries configured providers for their available model
+// IDs so the interactive config UI can offer a pick-list instead of requiring
+// the user to paste a model slug. Callers fall back to free-text entry when
+// discovery is unsupported or fails.
 package providerapi
 
 import (
@@ -10,22 +10,46 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"path"
 	"sort"
 	"strings"
 	"time"
 )
 
 const maxModelsResponseBytes int64 = 4 << 20
+const defaultModelsPath = "models"
+
+// ListOptions controls model discovery against a provider profile.
+type ListOptions struct {
+	BaseURL      string
+	ModelsPath   string
+	APIKey       string
+	AuthHeader   string
+	AuthScheme   string
+	ExtraHeaders map[string]string
+}
 
 // ListModels performs GET {baseURL}/models and returns the discovered model
 // IDs (sorted, de-duplicated). authHeader/authScheme default to
 // "Authorization"/"Bearer"; pass an empty apiKey for no-auth upstreams.
 func ListModels(ctx context.Context, baseURL, apiKey, authHeader, authScheme string) ([]string, error) {
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if base == "" {
-		return nil, fmt.Errorf("provider base_url is empty")
+	return ListModelsWithOptions(ctx, ListOptions{
+		BaseURL:    baseURL,
+		APIKey:     apiKey,
+		AuthHeader: authHeader,
+		AuthScheme: authScheme,
+	})
+}
+
+// ListModelsWithOptions performs provider model discovery and returns model IDs
+// sorted and de-duplicated. ModelsPath is appended to BaseURL and defaults to
+// "models"; ExtraHeaders carries profile-required headers such as API versions.
+func ListModelsWithOptions(ctx context.Context, opts ListOptions) ([]string, error) {
+	endpoint, err := modelsEndpoint(opts.BaseURL, opts.ModelsPath)
+	if err != nil {
+		return nil, err
 	}
-	endpoint := base + "/models"
 
 	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -33,18 +57,26 @@ func ListModels(ctx context.Context, baseURL, apiKey, authHeader, authScheme str
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(apiKey) != "" {
-		header := strings.TrimSpace(authHeader)
+	for k, v := range opts.ExtraHeaders {
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		if k == "" || v == "" {
+			continue
+		}
+		req.Header.Set(k, v)
+	}
+	if strings.TrimSpace(opts.APIKey) != "" {
+		header := strings.TrimSpace(opts.AuthHeader)
 		if header == "" {
 			header = "Authorization"
 		}
-		scheme := strings.TrimSpace(authScheme)
+		scheme := strings.TrimSpace(opts.AuthScheme)
 		if strings.EqualFold(header, "Authorization") && scheme == "" {
 			scheme = "Bearer"
 		}
-		value := apiKey
+		value := opts.APIKey
 		if scheme != "" {
-			value = scheme + " " + apiKey
+			value = scheme + " " + opts.APIKey
 		}
 		req.Header.Set(header, value)
 	}
@@ -70,6 +102,35 @@ func ListModels(ctx context.Context, baseURL, apiKey, authHeader, authScheme str
 		return nil, fmt.Errorf("no models returned by provider")
 	}
 	return ids, nil
+}
+
+func modelsEndpoint(baseURL, modelsPath string) (string, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return "", fmt.Errorf("provider base_url is empty")
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	u.User = nil
+	p := strings.TrimSpace(modelsPath)
+	if p == "" {
+		p = defaultModelsPath
+	}
+	parts := []string{u.Path}
+	for _, part := range strings.Split(p, "/") {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	u.Path = path.Join(parts...)
+	if !strings.HasPrefix(u.Path, "/") {
+		u.Path = "/" + u.Path
+	}
+	return u.String(), nil
 }
 
 func readLimitedModelsBody(r io.Reader) ([]byte, error) {

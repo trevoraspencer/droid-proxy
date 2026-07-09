@@ -190,6 +190,13 @@ curl -s http://127.0.0.1:8787/v1/oauth/pool-health | jq .
 droid-proxy auth pool --config config.yaml
 ```
 
+If a Codex token file is deleted while a request using it is still in flight,
+the live pool-health snapshot may keep that account visible with
+`token_file_present: false` until the request finishes. Such removed entries
+are not eligible for new requests, are shown as `removed` by
+`droid-proxy auth pool`, and any sticky conversation bindings to the deleted
+token path are pruned on reload.
+
 For **xAI OAuth**, the proxy uses the existing single-account path; xAI accounts
 are not pooled or load-balanced.
 

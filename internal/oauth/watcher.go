@@ -267,7 +267,8 @@ func (w *Watcher) scheduleReload() {
 
 // reload loads tokens from the auth dir and reloads the pool.
 // Invalid files are logged and skipped. Missing directories result in an
-// empty token set, effectively clearing removed entries.
+// empty token set; in-flight entries become non-selectable tombstones until
+// their leases finish.
 func (w *Watcher) reload() {
 	tokens, err := w.loadCodexTokensSafe()
 	if err != nil {

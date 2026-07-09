@@ -61,7 +61,7 @@ The `/v1` prefix is optional on non-health routes.
 curl -fsSL https://github.com/trevoraspencer/droid-proxy/releases/latest/download/install.sh | sh
 ```
 
-The installer downloads the latest macOS or Linux release archive, verifies `checksums.txt`, installs `droid-proxy` to `~/.local/bin/droid-proxy`, and creates a per-user config if one does not already exist. Re-running the command upgrades the binary and preserves existing config, OAuth tokens, logs, and managed secrets.
+The installer downloads the latest macOS or Linux release archive, verifies `checksums.txt`, rejects unsafe archive paths or link entries before extraction, installs `droid-proxy` to `~/.local/bin/droid-proxy`, and creates a per-user config if one does not already exist. Re-running the command upgrades the binary and preserves existing config, OAuth tokens, logs, and managed secrets.
 
 Inspect the script first if preferred:
 

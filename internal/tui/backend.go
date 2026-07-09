@@ -153,13 +153,19 @@ func (b *backend) syncFactory(models []*config.Model) error {
 	return settings.Save(true)
 }
 
-// discover queries the provider's /models endpoint for the given model's
-// upstream. Only meaningful for OpenAI-compatible upstreams.
+// discover queries the provider's model-list endpoint for the selected profile.
 func (b *backend) discover(ka config.KnownAuth, baseURL, apiKey string) ([]string, error) {
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = ka.BaseURL
 	}
-	return providerapi.ListModels(context.Background(), baseURL, apiKey, ka.AuthHeader, ka.AuthScheme)
+	return providerapi.ListModelsWithOptions(context.Background(), providerapi.ListOptions{
+		BaseURL:      baseURL,
+		ModelsPath:   ka.ModelsPath,
+		APIKey:       apiKey,
+		AuthHeader:   ka.AuthHeader,
+		AuthScheme:   ka.AuthScheme,
+		ExtraHeaders: ka.ExtraHeaders,
+	})
 }
 
 // oauthAccounts returns saved tokens for a provider.

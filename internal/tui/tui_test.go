@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
@@ -136,6 +139,43 @@ func TestFactoryAPIKey(t *testing.T) {
 	blank.ClientAuth.Enabled = true
 	if got := factoryAPIKey(blank); got != "x" {
 		t.Errorf("client auth enabled without keys = %q, want x", got)
+	}
+}
+
+func TestBackendDiscoverUsesKnownAuthDiscoveryProfile(t *testing.T) {
+	var gotPath, gotVersion, gotKey string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotVersion = r.Header.Get("anthropic-version")
+		gotKey = r.Header.Get("x-api-key")
+		_, _ = w.Write([]byte(`{"data":[{"id":"claude-sonnet"}]}`))
+	}))
+	defer srv.Close()
+
+	be := &backend{}
+	ids, err := be.discover(config.KnownAuth{
+		Name:       "anthropic-test",
+		BaseURL:    srv.URL,
+		AuthHeader: "x-api-key",
+		ModelsPath: "/v1/models",
+		ExtraHeaders: map[string]string{
+			"anthropic-version": "2023-06-01",
+		},
+	}, "", "sk-ant-test")
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if gotPath != "/v1/models" {
+		t.Fatalf("path = %q, want /v1/models", gotPath)
+	}
+	if gotVersion != "2023-06-01" {
+		t.Fatalf("anthropic-version = %q, want 2023-06-01", gotVersion)
+	}
+	if gotKey != "sk-ant-test" {
+		t.Fatalf("x-api-key = %q, want raw API key", gotKey)
+	}
+	if want := []string{"claude-sonnet"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
 	}
 }
 

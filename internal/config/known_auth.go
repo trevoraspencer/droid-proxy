@@ -16,6 +16,9 @@ type KnownAuth struct {
 	UpstreamProtocol UpstreamProtocol
 	NoAuth           bool
 	DefaultReasoning ReasoningMode
+	// ModelsPath is appended to BaseURL for interactive model discovery.
+	// Empty means "models", which fits OpenAI-compatible /v1 base URLs.
+	ModelsPath string
 	// ExtraArgs are merged into every outgoing request to this provider unless
 	// the model config already sets that top-level key.
 	ExtraArgs map[string]any
@@ -48,6 +51,7 @@ var knownAuthRegistry = map[string]KnownAuth{
 		Name: "anthropic", BaseURL: "https://api.anthropic.com",
 		APIKeyEnv: "ANTHROPIC_API_KEY", UpstreamProtocol: UpstreamAnthropicMessages,
 		AuthHeader: "x-api-key",
+		ModelsPath: "/v1/models",
 		ExtraHeaders: map[string]string{
 			"anthropic-version": "2023-06-01",
 		},
