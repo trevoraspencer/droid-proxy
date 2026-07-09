@@ -341,6 +341,8 @@ func TestDocsUpgradeGuideCoversReleaseSourceAndServiceRepair(t *testing.T) {
 		"setup --service",
 		"droid-proxy doctor",
 		"update --dry-run",
+		"--restart",
+		"--no-restart",
 		"development checkout",
 	} {
 		if !strings.Contains(upgrade, want) {

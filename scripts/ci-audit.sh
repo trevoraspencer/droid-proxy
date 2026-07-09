@@ -65,11 +65,18 @@ else
   fail "go build failed"
 fi
 
-info "Running module-path release tests"
-if go test ./internal/security/ -run 'GoMod|GoSources|CIWorkflow|CIAudit' -count=1; then
-  pass "module/CI release tests"
+info "Running release asset audit"
+if bash scripts/release-audit.sh; then
+  pass "release asset audit"
 else
-  fail "module/CI release tests failed"
+  fail "release asset audit failed"
+fi
+
+info "Running module-path release tests"
+if go test ./internal/security/ -run 'GoMod|GoSources|CIWorkflow|CIAudit|Release' -count=1; then
+  pass "module/CI/release tests"
+else
+  fail "module/CI/release tests failed"
 fi
 
 info "NOTE: full suite runs in GitHub Actions (.github/workflows/ci.yml)"

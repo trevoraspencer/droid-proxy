@@ -157,7 +157,11 @@ func procExecutablePath(pid int) (string, bool) {
 	if err != nil || strings.TrimSpace(path) == "" {
 		return "", false
 	}
-	return path, true
+	return trimDeletedExecutableSuffix(path), true
+}
+
+func trimDeletedExecutableSuffix(path string) string {
+	return strings.TrimSuffix(path, " (deleted)")
 }
 
 func processCommandName(pid int) (string, bool) {

@@ -70,6 +70,13 @@ curl -fsSLO https://github.com/trevoraspencer/droid-proxy/releases/latest/downlo
 sh install.sh
 ```
 
+When upgrading while `droid-proxy` is already running, ask the installer to
+restart the proxy after replacing the binary:
+
+```bash
+curl -fsSL https://github.com/trevoraspencer/droid-proxy/releases/latest/download/install.sh | sh -s -- --restart
+```
+
 Add the per-user binary directory to your shell `PATH` if needed:
 
 ```bash
@@ -216,6 +223,13 @@ For `codex-responses`, the proxy passes Factory's `reasoning` object through to 
 **`config error: model "X": env var Y is empty`**
 
 Run `droid-proxy config`, export the variable in your shell, or add it to `.env.local`. Runtime env files are layered from `~/.droid-proxy/env` and then `.env.local` when present.
+
+To verify the exact config/env files the CLI can load without printing secret
+values:
+
+```bash
+droid-proxy doctor --config config.yaml --env-file .env.local
+```
 
 **Factory shows a model, but the proxy says it is not configured**
 

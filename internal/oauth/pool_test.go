@@ -104,6 +104,9 @@ func TestPoolSnapshot_ExposesOnlySafeCodexEntries(t *testing.T) {
 	if acct.Selector != "user@example.com" {
 		t.Fatalf("expected selector user@example.com, got %q", acct.Selector)
 	}
+	if !acct.Eligible || acct.EligibilityStatus != "eligible" || len(acct.EligibilityReasons) != 0 {
+		t.Fatalf("expected eligible snapshot status, got eligible=%t status=%q reasons=%v", acct.Eligible, acct.EligibilityStatus, acct.EligibilityReasons)
+	}
 
 	// Verify no secrets are exposed in the snapshot JSON
 	snapJSON, err := json.Marshal(snap)
@@ -792,6 +795,45 @@ func TestPoolEligibility_ExpiredNoRefreshIneligible(t *testing.T) {
 
 	if len(eligible) != 0 {
 		t.Fatalf("expected 0 eligible (expired without refresh), got %d", len(eligible))
+	}
+
+	snap := pool.Snapshot()
+	if len(snap.Accounts) != 1 {
+		t.Fatalf("expected account to remain visible in snapshot, got %d", len(snap.Accounts))
+	}
+	acct := snap.Accounts[0]
+	if acct.Eligible {
+		t.Fatalf("expected snapshot to mark account ineligible: %+v", acct)
+	}
+	if acct.EligibilityStatus != "expired_no_refresh" {
+		t.Fatalf("eligibility_status = %q, want expired_no_refresh", acct.EligibilityStatus)
+	}
+	if !reflect.DeepEqual(acct.EligibilityReasons, []string{"expired_no_refresh"}) {
+		t.Fatalf("eligibility_reasons = %#v", acct.EligibilityReasons)
+	}
+}
+
+func TestPoolSnapshot_EligibilityReasonsCanExplainMultipleBlocks(t *testing.T) {
+	tok := makeToken("user@example.com", "access-expired", "", true)
+	tok.path = "/tmp/disabled-expired-no-refresh.json"
+	tok.Disabled = true
+
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
+	snap := pool.Snapshot()
+	if len(snap.Accounts) != 1 {
+		t.Fatalf("expected 1 account in snapshot, got %d", len(snap.Accounts))
+	}
+
+	acct := snap.Accounts[0]
+	if acct.Eligible {
+		t.Fatalf("expected disabled expired account to be ineligible: %+v", acct)
+	}
+	if acct.EligibilityStatus != "disabled" {
+		t.Fatalf("eligibility_status = %q, want disabled", acct.EligibilityStatus)
+	}
+	wantReasons := []string{"disabled", "expired_no_refresh"}
+	if !reflect.DeepEqual(acct.EligibilityReasons, wantReasons) {
+		t.Fatalf("eligibility_reasons = %#v, want %#v", acct.EligibilityReasons, wantReasons)
 	}
 }
 

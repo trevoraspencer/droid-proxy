@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Release asset audit for packaged archives, checksums, installer upload artifacts, and release build identity.
+- Release installer `--restart` / `--no-restart` flags so upgrades can restart a running proxy after the binary is replaced.
+
+### Fixed
+
+- Linux daemon PID checks now recognize the procfs ` (deleted)` executable suffix left behind after replacing a running binary.
+
 ### Security
 
 - Hardened the release installer to reject archives with unsafe paths or link entries before extraction.

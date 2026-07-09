@@ -104,6 +104,7 @@ func TestBuild_IgnoresReservedOutboundExtraHeaders(t *testing.T) {
 		APIKeyEnv:        "DROID_PROXY_TEST_KEY",
 		ExtraHeaders: map[string]string{
 			"Authorization":     "Bearer attacker",
+			"Accept-Encoding":   "br",
 			"x-api-key":         "attacker",
 			"Host":              "evil.example",
 			"Connection":        "keep-alive",
@@ -124,7 +125,7 @@ func TestBuild_IgnoresReservedOutboundExtraHeaders(t *testing.T) {
 	if got := req.Header.Get("Authorization"); got != "Bearer upstream-secret" {
 		t.Fatalf("provider auth was overridden or missing: %q", got)
 	}
-	for _, h := range []string{"x-api-key", "Connection", "X-Forwarded-For", "Cookie"} {
+	for _, h := range []string{"Accept-Encoding", "x-api-key", "Connection", "X-Forwarded-For", "Cookie"} {
 		if got := req.Header.Get(h); got != "" {
 			t.Fatalf("reserved header %s was forwarded: %q", h, got)
 		}

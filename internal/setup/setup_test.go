@@ -49,6 +49,9 @@ func TestEnsureConfigDoesNotOverwriteExistingConfig(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o640); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
 
 	res, err := EnsureConfig(path)
 	if err != nil {

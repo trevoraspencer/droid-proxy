@@ -35,6 +35,16 @@ case "\${1:-}" in
   doctor)
     echo "doctor ok"
     ;;
+  status)
+    if [ -f "$TMP/status.out" ]; then
+      cat "$TMP/status.out"
+    else
+      echo "droid-proxy is not running."
+    fi
+    ;;
+  restart)
+    echo "restart $version" >> "$TMP/restart.log"
+    ;;
   config)
     echo "config should not run in noninteractive test" >> "$TMP/config.log"
     ;;
@@ -137,10 +147,25 @@ DROID_PROXY_INSTALL_SKIP_DOCTOR=1 \
   sh "$ROOT/scripts/install.sh" --version 9.9.10 --prefix "$prefix"
 assert_installed_version "9.9.10"
 
-make_asset "9.9.11" "bad"
+printf 'droid-proxy is running (pid 12345)\n' > "$TMP/status.out"
+rm -f "$TMP/restart.log"
+make_asset "9.9.11" "restart"
+DROID_PROXY_INSTALL_BASE_URL="file://$asset_dir" \
+DROID_PROXY_INSTALL_OS=linux \
+DROID_PROXY_INSTALL_ARCH=amd64 \
+DROID_PROXY_INSTALL_INTERACTIVE=0 \
+DROID_PROXY_INSTALL_SKIP_DOCTOR=1 \
+  sh "$ROOT/scripts/install.sh" --version 9.9.11 --prefix "$prefix" --restart
+if ! grep -q "restart 9.9.11" "$TMP/restart.log"; then
+  echo "--restart did not restart the running proxy after upgrade" >&2
+  exit 1
+fi
+rm -f "$TMP/status.out" "$TMP/restart.log"
+
+make_asset "9.9.12" "bad"
 printf '0000000000000000000000000000000000000000000000000000000000000000  droid-proxy_linux_amd64.tar.gz\n' > "$asset_dir/checksums.txt"
 expect_install_failure "checksum-mismatch" "checksum mismatch"
-assert_installed_version "9.9.10"
+assert_installed_version "9.9.11"
 
 make_traversal_asset
 expect_install_failure "archive-traversal" "unsafe archive entry"
@@ -148,10 +173,10 @@ if [[ -e "$TMP/install-work-archive-traversal/evil/owned" ]]; then
   echo "path traversal archive wrote outside extraction directory" >&2
   exit 1
 fi
-assert_installed_version "9.9.10"
+assert_installed_version "9.9.11"
 
 make_symlink_asset
 expect_install_failure "archive-symlink" "archive contains link entries"
-assert_installed_version "9.9.10"
+assert_installed_version "9.9.11"
 
 echo "install_test: ok"

@@ -37,6 +37,7 @@ var hopByHopHeaders = map[string]struct{}{
 // the proxy itself, before/after filtering as appropriate.
 var reservedOutboundHeaders = map[string]struct{}{
 	"Authorization":       {},
+	"Accept-Encoding":     {},
 	"X-Api-Key":           {},
 	"Host":                {},
 	"Content-Length":      {},

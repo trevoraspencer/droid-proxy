@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 )
 
 func TestDoctorHealthySourceInstallExitsZero(t *testing.T) {
@@ -49,6 +51,8 @@ func TestDoctorReleaseInstallWithoutRepoIsHealthy(t *testing.T) {
 	}
 	text := out.String()
 	for _, want := range []string{
+		"config: not found at",
+		"config load: skipped (run droid-proxy setup or pass --config)",
 		"source repo: not found",
 		"updater dry-run: skipped (release install)",
 		"status: ok",
@@ -56,6 +60,191 @@ func TestDoctorReleaseInstallWithoutRepoIsHealthy(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestDoctorExplicitMissingConfigIsHardIssue(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	missing := filepath.Join(t.TempDir(), "missing.yaml")
+
+	var out bytes.Buffer
+	res := writeDoctorWithOptions(&out, doctorOptions{
+		ConfigPath:     missing,
+		ConfigExplicit: true,
+	})
+	if len(res.HardIssues) == 0 {
+		t.Fatalf("HardIssues empty, want config issue\noutput:\n%s", out.String())
+	}
+	text := out.String()
+	for _, want := range []string{
+		"config: issue: not found at " + missing,
+		"config load: skipped",
+		"status: 1 issue(s)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestDoctorValidatesExplicitConfigAndSummarizesModels(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("DOCTOR_REMOTE_KEY", "")
+	t.Chdir(t.TempDir())
+	tmp := t.TempDir()
+	managedEnv := filepath.Join(tmp, "managed-env")
+	envPath := filepath.Join(tmp, "doctor.env")
+	configPath := filepath.Join(tmp, "config.yaml")
+	withDoctorEnvHooks(t, managedEnv)
+
+	if err := os.WriteFile(envPath, []byte("DOCTOR_REMOTE_KEY=doctor-secret-sentinel\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rawConfig := `
+listen:
+  host: 127.0.0.1
+  port: 9009
+models:
+  - alias: remote-ready
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    upstream_model: remote-model
+    base_url: https://example.invalid/v1
+    api_key_env: DOCTOR_REMOTE_KEY
+  - alias: local-tools-off
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    upstream_model: llama
+    known_auth: ollama
+    capabilities:
+      tools: false
+`
+	if err := os.WriteFile(configPath, []byte(rawConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	res := writeDoctorWithOptions(&out, doctorOptions{
+		ConfigPath:      configPath,
+		ConfigExplicit:  true,
+		EnvFile:         envPath,
+		EnvFileExplicit: true,
+	})
+	if len(res.HardIssues) != 0 {
+		t.Fatalf("HardIssues = %#v\noutput:\n%s", res.HardIssues, out.String())
+	}
+	text := out.String()
+	for _, want := range []string{
+		"config: " + configPath,
+		"env managed: not found at " + managedEnv,
+		"env override (--env-file): found " + envPath,
+		"config load: ok",
+		"listen: 127.0.0.1:9009",
+		"models: 2 configured, 1 agent-ready",
+		`model "remote-ready": factory=generic-chat-completion-api upstream=openai-chat auth=api_key_env:DOCTOR_REMOTE_KEY agent_ready=true`,
+		`model "local-tools-off": factory=generic-chat-completion-api upstream=openai-chat auth=known_auth:ollama agent_ready=false`,
+		"status: ok",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "doctor-secret-sentinel") {
+		t.Fatalf("doctor output leaked env value:\n%s", text)
+	}
+}
+
+func TestDoctorExplicitMissingEnvFileIsHardIssue(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	tmp := t.TempDir()
+	managedEnv := filepath.Join(tmp, "managed-env")
+	missingEnv := filepath.Join(tmp, "missing.env")
+	configPath := filepath.Join(tmp, "config.yaml")
+	withDoctorEnvHooks(t, managedEnv)
+
+	rawConfig := `
+models:
+  - alias: local
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    upstream_model: llama
+    known_auth: ollama
+`
+	if err := os.WriteFile(configPath, []byte(rawConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	res := writeDoctorWithOptions(&out, doctorOptions{
+		ConfigPath:      configPath,
+		ConfigExplicit:  true,
+		EnvFile:         missingEnv,
+		EnvFileExplicit: true,
+	})
+	if len(res.HardIssues) == 0 {
+		t.Fatalf("HardIssues empty, want env-file issue\noutput:\n%s", out.String())
+	}
+	text := out.String()
+	for _, want := range []string{
+		"env override (--env-file): issue: not found at " + missingEnv,
+		"config load: ok",
+		"status: 1 issue(s)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestDoctorEnvLoadIssueDoesNotLeakInvalidLine(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	tmp := t.TempDir()
+	managedEnv := filepath.Join(tmp, "managed-env")
+	envPath := filepath.Join(tmp, "bad.env")
+	configPath := filepath.Join(tmp, "config.yaml")
+	withDoctorEnvHooks(t, managedEnv)
+
+	if err := os.WriteFile(envPath, []byte("not-an-env-line doctor-secret-sentinel\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rawConfig := `
+models:
+  - alias: local
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    upstream_model: llama
+    known_auth: ollama
+`
+	if err := os.WriteFile(configPath, []byte(rawConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	res := writeDoctorWithOptions(&out, doctorOptions{
+		ConfigPath:      configPath,
+		ConfigExplicit:  true,
+		EnvFile:         envPath,
+		EnvFileExplicit: true,
+	})
+	if len(res.HardIssues) == 0 {
+		t.Fatalf("HardIssues empty, want env load issue\noutput:\n%s", out.String())
+	}
+	text := out.String()
+	for _, want := range []string{
+		"env load: issue:",
+		"invalid env line",
+		"config load: skipped (env file issue)",
+		"status: 1 issue(s)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "doctor-secret-sentinel") || strings.Contains(text, "not-an-env-line") {
+		t.Fatalf("doctor output leaked invalid env line:\n%s", text)
 	}
 }
 
@@ -123,6 +312,20 @@ func TestDoctorLaunchdMissingPathsAreSecretSafe(t *testing.T) {
 			t.Fatalf("doctor output missing %q:\n%s", want, text)
 		}
 	}
+}
+
+func withDoctorEnvHooks(t *testing.T, managedEnv string) {
+	t.Helper()
+	oldManagedEnvFile := doctorManagedEnvFile
+	oldLoadLayeredEnv := doctorLoadLayeredEnv
+	doctorManagedEnvFile = func() string { return managedEnv }
+	doctorLoadLayeredEnv = func(_ string, explicit string) error {
+		return daemon.LoadEnvFiles(managedEnv, explicit)
+	}
+	t.Cleanup(func() {
+		doctorManagedEnvFile = oldManagedEnvFile
+		doctorLoadLayeredEnv = oldLoadLayeredEnv
+	})
 }
 
 func testDoctorGitRepo(t *testing.T, goMod string) string {

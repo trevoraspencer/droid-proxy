@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -128,6 +130,39 @@ func TestChat_NonStream_UpstreamErrorPassthrough(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "rate_limit_exceeded") {
 		t.Errorf("expected upstream body preserved, got %s", w.Body.String())
+	}
+}
+
+func TestChat_NonStream_ConfiguredAcceptEncodingDoesNotBreakDecompression(t *testing.T) {
+	expected := `{"id":"chatcmpl-gzip","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"decoded"}}]}`
+	api := newTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept-Encoding"); got == "br" {
+			t.Fatalf("profile-controlled Accept-Encoding reached upstream: %q", got)
+		}
+		var buf bytes.Buffer
+		gw := gzip.NewWriter(&buf)
+		_, _ = gw.Write([]byte(expected))
+		_ = gw.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = w.Write(buf.Bytes())
+	}, func(m *config.Model) {
+		m.ExtraHeaders = map[string]string{"Accept-Encoding": "br"}
+	})
+
+	reqBody := `{"model":"droid-test","messages":[{"role":"user","content":"hi"}]}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != expected {
+		t.Fatalf("expected decoded upstream body %q, got %q", expected, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("downstream response kept stripped Content-Encoding header: %q", got)
 	}
 }
 

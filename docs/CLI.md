@@ -21,7 +21,7 @@ droid-proxy logs    [-n LINES] [PATH]
 droid-proxy service install   [--config PATH]
 droid-proxy service uninstall
 
-droid-proxy doctor [--repo PATH]
+droid-proxy doctor [--config PATH] [--env-file PATH] [--repo PATH]
 droid-proxy update [--repo PATH] [--remote origin] [--branch main] [--binary PATH] [--no-restart] [--dry-run]
 
 droid-proxy auth codex|xai [--config PATH] [--no-browser] [--device]
@@ -199,20 +199,34 @@ secrets:
 
 ```bash
 ./droid-proxy doctor
+./droid-proxy doctor --config config.yaml
+./droid-proxy doctor --config config.yaml --env-file .env.local
 ./droid-proxy doctor --repo /path/to/droid-proxy
 ```
 
 The doctor reports the executable path, resolved symlink target, CLI version and
-commit, source checkout status when one is available, updater dry-run status for
-source installs, daemon status, and launchd/systemd service issues. Installed
-services are also checked for runnable configs using the env-file paths encoded
-in the service. Missing source checkouts are normal for release installs; pass
-`--repo` when you want a source checkout audited.
+commit, config/env load status, model count and `agent_ready` summary, source
+checkout status when one is available, updater dry-run status for source
+installs, daemon status, launchd/systemd service issues, and runnable service
+configs using the env-file paths encoded in the service. It names env files and
+env variable keys but never prints env file contents or secret values. Missing
+source checkouts are normal for release installs; pass `--repo` when you want a
+source checkout audited. A missing implicit config is reported as a setup hint,
+while an explicit `--config` path is treated as a hard diagnostic issue when it
+cannot be read.
 
 ## Update from GitHub
 
-Update a source checkout from the GitHub `origin/main` branch and rebuild the
-local binary:
+Release installs are upgraded by re-running the release installer. Pass
+`--restart` when a proxy is already running and should pick up the new binary
+immediately:
+
+```bash
+curl -fsSL https://github.com/trevoraspencer/droid-proxy/releases/latest/download/install.sh | sh -s -- --restart
+```
+
+`droid-proxy update` is for source checkouts. It updates from the GitHub
+`origin/main` branch and rebuilds the local binary:
 
 ```bash
 ./droid-proxy update --dry-run
@@ -270,7 +284,7 @@ Inspect and manage stored OAuth accounts without re-running a login:
 | Command | Description |
 |---------|-------------|
 | `auth status [provider]` | Lists stored accounts with email, subject, account ID, expiry, last refresh, `disabled` flag, and token file path. Omit the provider to show both `codex` and `xai`. |
-| `auth pool` | Shows Codex pool health (strategy, quota usage, affinity bindings, rate-limit/error cooldowns, unhealthy recovery times, and `removed` entries whose token file was deleted while a request was in flight). Uses `GET /v1/oauth/pool-health` when the proxy is running; otherwise prints an offline snapshot from token files. |
+| `auth pool` | Shows Codex pool health (strategy, quota usage, affinity bindings, eligibility reason codes, rate-limit/error cooldowns, unhealthy recovery times, and `removed` entries whose token file was deleted while a request was in flight). Uses `GET /v1/oauth/pool-health` when the proxy is running; otherwise prints an offline snapshot from token files. |
 | `auth disable <provider> <account>` | Marks an account disabled. The proxy skips disabled accounts when selecting a token for requests. |
 | `auth enable <provider> <account>` | Clears the disabled flag. |
 | `auth logout <provider> <account>` | Deletes the account's token file from `oauth.auth_dir`. |

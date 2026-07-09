@@ -13,6 +13,18 @@ if [[ "${1:-}" == "--dry-run" ]]; then
   DRY_RUN=1
 fi
 
+checksum_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1 "  " $2}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1 "  " $2}'
+  else
+    echo "release-assets: required command not found: sha256sum or shasum" >&2
+    return 1
+  fi
+}
+
 echo "release-assets: version=$VERSION commit=$COMMIT dist=$DIST_DIR"
 if [[ "$DRY_RUN" != "1" ]]; then
   mkdir -p "$DIST_DIR"
@@ -29,7 +41,7 @@ for platform in $PLATFORMS; do
   work="$DIST_DIR/.work-${os}-${arch}"
   rm -rf "$work"
   mkdir -p "$work"
-  CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
+  CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -buildvcs=false \
     -ldflags "-X ${VERSION_PKG}.Version=${VERSION} -X ${VERSION_PKG}.Commit=${COMMIT}" \
     -o "$work/droid-proxy" ./cmd/droid-proxy
   cp "$ROOT/LICENSE" "$work/LICENSE"
@@ -39,7 +51,7 @@ for platform in $PLATFORMS; do
   rm -rf "$work"
   (
     cd "$DIST_DIR"
-    shasum -a 256 "$asset" | awk '{print $1 "  " $2}' >> checksums.txt
+    checksum_file "$asset" >> checksums.txt
   )
 done
 
@@ -51,6 +63,6 @@ fi
 cp "$ROOT/scripts/install.sh" "$DIST_DIR/install.sh"
 (
   cd "$DIST_DIR"
-  shasum -a 256 install.sh | awk '{print $1 "  " $2}' >> checksums.txt
+  checksum_file install.sh >> checksums.txt
 )
 echo "release-assets: wrote assets and checksums.txt"

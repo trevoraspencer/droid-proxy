@@ -60,6 +60,9 @@ type AccountEntry struct {
 type AccountSnapshot struct {
 	Selector               string      `json:"selector"`
 	Provider               string      `json:"provider"`
+	Eligible               bool        `json:"eligible"`
+	EligibilityStatus      string      `json:"eligibility_status"`
+	EligibilityReasons     []string    `json:"eligibility_reasons,omitempty"`
 	Disabled               bool        `json:"disabled"`
 	TokenFilePresent       bool        `json:"token_file_present"`
 	Healthy                bool        `json:"healthy"`
@@ -645,41 +648,7 @@ func (p *AccountPool) selectStickyLocked(conversationID string, eligible []*Acco
 
 // isEligible checks if a single entry is eligible for selection.
 func (p *AccountPool) isEligible(entry *AccountEntry, exclude map[string]bool, now time.Time) bool {
-	// Must be Codex
-	if entry.Provider != ProviderCodex {
-		return false
-	}
-	// Backing token file still exists
-	if !entry.TokenFilePresent {
-		return false
-	}
-	// Not disabled
-	if entry.Disabled {
-		return false
-	}
-	// Not in exclusion set
-	if exclude[entry.Path] {
-		return false
-	}
-	// Not in active cooldown
-	if entry.CooldownUntil.After(now) {
-		return false
-	}
-	// Not actively rate-limited
-	if entry.RateLimitedUntil.After(now) {
-		return false
-	}
-	// Must be healthy, or have recovered after the unhealthy cooldown elapsed
-	if !entry.Healthy {
-		return !entry.UnhealthyUntil.After(now)
-	}
-	// Must have some form of usable token
-	// Expired tokens with refresh tokens are still eligible
-	// Expired tokens without refresh tokens are not eligible
-	if entry.TokenExpired && !entry.Refreshable {
-		return false
-	}
-	return true
+	return len(accountIneligibleReasons(entry, exclude, now)) == 0
 }
 
 // Snapshot returns a deep-copy snapshot of all Codex pool entries.
@@ -748,13 +717,21 @@ func (e *AccountEntry) MatchesAccount(account string) bool {
 // snapshotFromEntry creates a deep-copy AccountSnapshot from an AccountEntry.
 func snapshotFromEntry(entry *AccountEntry, affinity *AffinityStore, now time.Time) AccountSnapshot {
 	healthy := entry.Healthy || !entry.UnhealthyUntil.After(now)
+	reasons := accountIneligibleReasons(entry, nil, now)
+	status := "eligible"
+	if len(reasons) > 0 {
+		status = reasons[0]
+	}
 	snap := AccountSnapshot{
-		Selector:         entry.Selector,
-		Provider:         string(entry.Provider),
-		Disabled:         entry.Disabled,
-		TokenFilePresent: entry.TokenFilePresent,
-		Healthy:          healthy,
-		InFlight:         entry.InFlight,
+		Selector:           entry.Selector,
+		Provider:           string(entry.Provider),
+		Eligible:           len(reasons) == 0,
+		EligibilityStatus:  status,
+		EligibilityReasons: reasons,
+		Disabled:           entry.Disabled,
+		TokenFilePresent:   entry.TokenFilePresent,
+		Healthy:            healthy,
+		InFlight:           entry.InFlight,
 	}
 	if !entry.CooldownUntil.IsZero() {
 		t := entry.CooldownUntil.UTC()
@@ -785,6 +762,38 @@ func snapshotFromEntry(entry *AccountEntry, affinity *AffinityStore, now time.Ti
 		snap.BoundConversationCount = affinity.BoundCountForPath(entry.Path)
 	}
 	return snap
+}
+
+func accountIneligibleReasons(entry *AccountEntry, exclude map[string]bool, now time.Time) []string {
+	if entry == nil {
+		return []string{"missing"}
+	}
+	var reasons []string
+	if entry.Provider != ProviderCodex {
+		reasons = append(reasons, "wrong_provider")
+	}
+	if !entry.TokenFilePresent {
+		reasons = append(reasons, "removed")
+	}
+	if entry.Disabled {
+		reasons = append(reasons, "disabled")
+	}
+	if exclude != nil && exclude[entry.Path] {
+		reasons = append(reasons, "excluded")
+	}
+	if entry.CooldownUntil.After(now) {
+		reasons = append(reasons, "cooldown")
+	}
+	if entry.RateLimitedUntil.After(now) {
+		reasons = append(reasons, "rate_limited")
+	}
+	if !entry.Healthy && entry.UnhealthyUntil.After(now) {
+		reasons = append(reasons, "unhealthy")
+	}
+	if entry.TokenExpired && !entry.Refreshable {
+		reasons = append(reasons, "expired_no_refresh")
+	}
+	return reasons
 }
 
 // safeSelectorLabel returns a safe display label for the token.

@@ -34,6 +34,7 @@ make docs-audit
 make security-audit
 make legal-audit
 make ci-audit
+make release-audit
 ```
 
 Most OAuth and handler tests use local fakes and do not require real provider credentials:

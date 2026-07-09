@@ -1,4 +1,4 @@
-.PHONY: build install-user test test-race test-installer vet fmt clean run lint audit-secrets security-audit legal-audit docs-audit ci-audit release-dry-run
+.PHONY: build install-user test test-race test-installer vet fmt clean run lint audit-secrets security-audit legal-audit docs-audit ci-audit release-audit release-dry-run
 
 BIN := droid-proxy
 VERSION ?= 0.0.0-dev
@@ -64,6 +64,9 @@ docs-audit:
 
 ci-audit:
 	@bash scripts/ci-audit.sh
+
+release-audit:
+	@bash scripts/release-audit.sh
 
 release-dry-run:
 	bash scripts/release-assets.sh --dry-run
