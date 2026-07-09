@@ -125,7 +125,9 @@ and for xAI models the first valid account is used after refresh.
 Manage stored accounts with `droid-proxy auth status` (list), `auth disable` /
 `auth enable` (a disabled account is skipped during request-time selection), and
 `auth logout` (delete a token file). Per-model OAuth health is also surfaced in
-the `oauth_auth` object on `/v1/models`. See [OAUTH.md](OAUTH.md) for details.
+the `oauth_auth` object on `/v1/models`, and Codex pool readiness is available
+from `/v1/oauth/pool-health` / `droid-proxy auth pool` with per-account
+eligibility reason codes. See [OAUTH.md](OAUTH.md) for details.
 
 ## Factory provider × upstream protocol matrix
 

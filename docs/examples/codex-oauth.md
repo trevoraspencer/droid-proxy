@@ -107,6 +107,9 @@ curl -sS http://127.0.0.1:8787/v1/responses \
 Check the model is logged in: `curl -s http://127.0.0.1:8787/v1/models | jq
 '.data[] | select(.oauth_auth) | {id, oauth_auth}'`. See
 [OAUTH.md](../OAUTH.md#managing-accounts) for the full reference.
+For pool-level readiness, run `./droid-proxy auth pool --config config.yaml`;
+the `STATUS` column explains skips such as `disabled`, `rate_limited`, or
+`expired_no_refresh`.
 
 ## Notes
 

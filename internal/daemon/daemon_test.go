@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -114,6 +115,19 @@ func TestStopWithTimeoutSignalsVerifiedDaemonPID(t *testing.T) {
 	}
 	if _, err := os.Stat(RuntimeFile()); !os.IsNotExist(err) {
 		t.Fatalf("runtime metadata still exists or stat failed: %v", err)
+	}
+}
+
+func TestDeletedProcExecutableStillMatchesExpectedPath(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "droid-proxy")
+	if err := os.WriteFile(exe, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	actual := trimDeletedExecutableSuffix(exe + " (deleted)")
+	if got := compareExecutableIdentity(actual, exe); got != processIdentityMatch {
+		t.Fatalf("compareExecutableIdentity(deleted proc path) = %v, want match", got)
 	}
 }
 

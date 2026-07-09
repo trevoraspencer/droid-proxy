@@ -227,3 +227,32 @@ func TestFormatPoolHealthJSONShowsRemovedTokenFile(t *testing.T) {
 		t.Fatalf("pool health output should show removed token file:\n%s", out)
 	}
 }
+
+func TestFormatPoolHealthJSONShowsEligibilityReasons(t *testing.T) {
+	raw := []byte(`{
+		"strategy": "sticky",
+		"codex_account_count": 1,
+		"eligible_count": 0,
+		"accounts": [
+			{
+				"selector": "user@example.com",
+				"eligible": false,
+				"eligibility_status": "disabled",
+				"eligibility_reasons": ["disabled", "expired_no_refresh"],
+				"healthy": true,
+				"disabled": true,
+				"in_flight": 0,
+				"bound_conversation_count": 0
+			}
+		]
+	}`)
+	out, err := formatPoolHealthJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"STATUS", "disabled,expired_no_refresh"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("pool health output missing %q:\n%s", want, out)
+		}
+	}
+}

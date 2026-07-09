@@ -210,6 +210,9 @@ func TestPoolHealthEndpoint_SecretSafeResponse(t *testing.T) {
 			if acct["selector"] != "health-user@example.com" {
 				t.Errorf("expected safe selector, got %v", acct["selector"])
 			}
+			if acct["eligible"] != true || acct["eligibility_status"] != "eligible" {
+				t.Errorf("expected eligible account status, got eligible=%v status=%v", acct["eligible"], acct["eligibility_status"])
+			}
 		})
 	}
 

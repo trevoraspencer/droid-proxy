@@ -11,6 +11,18 @@ droid-proxy doctor
 
 The installer verifies `checksums.txt`, rejects archives with unsafe paths or link entries before extraction, replaces the binary at `~/.local/bin/droid-proxy`, and preserves existing config, OAuth tokens, logs, and managed secrets. It only creates a config when the target config file is missing.
 
+If the proxy is already running during an upgrade, restart it after the new
+binary is installed:
+
+```bash
+curl -fsSL https://github.com/trevoraspencer/droid-proxy/releases/latest/download/install.sh | sh -s -- --restart
+droid-proxy doctor
+```
+
+Interactive runs prompt before restarting a running proxy. Noninteractive runs
+only restart when `--restart` is passed; use `--no-restart` to suppress the
+prompt in scripted upgrades.
+
 ## Per-User Runtime Layout
 
 | Item | macOS | Linux |

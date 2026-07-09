@@ -204,6 +204,11 @@ specific upstream configuration.
 | `extra_args` | map[string]any |  | Top-level fields merged into every outgoing request body (e.g. `temperature`, `stream_options`). |
 | `capabilities` | object |  | Capability overrides. See below. |
 
+`extra_headers` ignores proxy-managed or security-sensitive names, including
+auth headers, `Host`, cookies, forwarded-client headers, hop-by-hop headers, and
+`Accept-Encoding`. The proxy manages response compression itself so body limits
+and downstream response headers stay consistent.
+
 ### `capabilities`
 
 All optional. Defaults are reasonable for most OpenAI-compatible providers.

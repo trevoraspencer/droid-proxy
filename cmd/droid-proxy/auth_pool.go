@@ -83,6 +83,23 @@ func clientAuthToken(cfg *config.Config) string {
 	return strings.TrimSpace(cfg.ClientAuth.APIKeys[0])
 }
 
+type poolHealthAccount struct {
+	Selector               string            `json:"selector"`
+	Eligible               bool              `json:"eligible"`
+	EligibilityStatus      string            `json:"eligibility_status"`
+	EligibilityReasons     []string          `json:"eligibility_reasons"`
+	Disabled               bool              `json:"disabled"`
+	TokenFilePresent       *bool             `json:"token_file_present"`
+	Healthy                bool              `json:"healthy"`
+	InFlight               int               `json:"in_flight"`
+	MaxUsedPercent         *float64          `json:"max_used_percent"`
+	BoundConversationCount int               `json:"bound_conversation_count"`
+	CooldownUntil          *time.Time        `json:"cooldown_until"`
+	UnhealthyUntil         *time.Time        `json:"unhealthy_until"`
+	RateLimitedUntil       *time.Time        `json:"rate_limit_until"`
+	Quota                  *oauth.CodexQuota `json:"quota"`
+}
+
 func formatPoolHealthJSON(raw []byte) (string, error) {
 	var payload struct {
 		Strategy          string `json:"strategy"`
@@ -92,19 +109,7 @@ func formatPoolHealthJSON(raw []byte) (string, error) {
 			BoundConversations int    `json:"bound_conversations"`
 			File               string `json:"file"`
 		} `json:"affinity"`
-		Accounts []struct {
-			Selector               string            `json:"selector"`
-			Disabled               bool              `json:"disabled"`
-			TokenFilePresent       *bool             `json:"token_file_present"`
-			Healthy                bool              `json:"healthy"`
-			InFlight               int               `json:"in_flight"`
-			MaxUsedPercent         *float64          `json:"max_used_percent"`
-			BoundConversationCount int               `json:"bound_conversation_count"`
-			CooldownUntil          *time.Time        `json:"cooldown_until"`
-			UnhealthyUntil         *time.Time        `json:"unhealthy_until"`
-			RateLimitedUntil       *time.Time        `json:"rate_limit_until"`
-			Quota                  *oauth.CodexQuota `json:"quota"`
-		} `json:"accounts"`
+		Accounts []poolHealthAccount `json:"accounts"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return "", err
@@ -117,7 +122,7 @@ func formatPoolHealthJSON(raw []byte) (string, error) {
 			payload.Affinity.BoundConversations, payload.Affinity.File)
 	}
 	w := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "ACCOUNT\tUSED%\tIN_FLIGHT\tBOUND\tHEALTH\tLIMITED_UNTIL")
+	_, _ = fmt.Fprintln(w, "ACCOUNT\tUSED%\tIN_FLIGHT\tBOUND\tSTATUS\tLIMITED_UNTIL")
 	for _, acct := range payload.Accounts {
 		used := "-"
 		if acct.MaxUsedPercent != nil {
@@ -131,21 +136,36 @@ func formatPoolHealthJSON(raw []byte) (string, error) {
 		} else if acct.UnhealthyUntil != nil {
 			limited = "unhealthy:" + acct.UnhealthyUntil.Format(time.RFC3339)
 		}
-		health := "ok"
-		if !acct.Healthy {
-			health = "unhealthy"
-		}
-		if acct.TokenFilePresent != nil && !*acct.TokenFilePresent {
-			health = "removed"
-		}
-		if acct.Disabled {
-			health = "disabled"
-		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%s\t%s\n",
-			acct.Selector, used, acct.InFlight, acct.BoundConversationCount, health, limited)
+			acct.Selector, used, acct.InFlight, acct.BoundConversationCount, poolAccountStatus(acct), limited)
 	}
 	_ = w.Flush()
 	return b.String(), nil
+}
+
+func poolAccountStatus(acct poolHealthAccount) string {
+	if len(acct.EligibilityReasons) > 0 {
+		return strings.Join(acct.EligibilityReasons, ",")
+	}
+	if status := strings.TrimSpace(acct.EligibilityStatus); status != "" {
+		return status
+	}
+	if acct.Disabled {
+		return "disabled"
+	}
+	if acct.TokenFilePresent != nil && !*acct.TokenFilePresent {
+		return "removed"
+	}
+	if acct.RateLimitedUntil != nil {
+		return "rate_limited"
+	}
+	if acct.CooldownUntil != nil {
+		return "cooldown"
+	}
+	if !acct.Healthy {
+		return "unhealthy"
+	}
+	return "eligible"
 }
 
 func formatOfflinePoolHealth(manager *oauth.Manager) (string, error) {

@@ -197,6 +197,18 @@ are not eligible for new requests, are shown as `removed` by
 `droid-proxy auth pool`, and any sticky conversation bindings to the deleted
 token path are pruned on reload.
 
+Each pool-health account includes secret-safe readiness fields:
+
+| Field | Meaning |
+|-------|---------|
+| `eligible` | `true` when the account can be selected right now. |
+| `eligibility_status` | `eligible`, or the primary reason selection skips the account. |
+| `eligibility_reasons` | All current skip reasons, such as `disabled`, `cooldown`, `rate_limited`, `unhealthy`, or `expired_no_refresh`. |
+
+`droid-proxy auth pool` shows these reason codes in its `STATUS` column so an
+offline release binary can explain why `eligible_count` is zero without
+exposing token secrets or raw token file paths.
+
 For **xAI OAuth**, the proxy uses the existing single-account path; xAI accounts
 are not pooled or load-balanced.
 

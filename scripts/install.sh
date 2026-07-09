@@ -7,16 +7,19 @@ VERSION=""
 YES=0
 NO_CONFIG=0
 NO_SERVICE=0
+RESTART=0
+NO_RESTART=0
 
 usage() {
   cat <<'USAGE'
 droid-proxy installer
 
 Usage:
-  install.sh [--version VERSION] [--prefix DIR] [--yes] [--no-config] [--no-service]
+  install.sh [--version VERSION] [--prefix DIR] [--yes] [--no-config] [--no-service] [--restart] [--no-restart]
 
 Installs droid-proxy as a per-user binary under ~/.local/bin by default.
 Re-run the same command to upgrade. Existing config and secrets are preserved.
+Use --restart to restart a running proxy after the new binary is installed.
 USAGE
 }
 
@@ -42,6 +45,14 @@ while [ "$#" -gt 0 ]; do
       ;;
     --no-service)
       NO_SERVICE=1
+      shift
+      ;;
+    --restart)
+      RESTART=1
+      shift
+      ;;
+    --no-restart)
+      NO_RESTART=1
       shift
       ;;
     --help|-h)
@@ -184,6 +195,10 @@ confirm() {
   esac
 }
 
+proxy_running() {
+  "$BINDIR/droid-proxy" status 2>/dev/null | grep -q "is running"
+}
+
 need_cmd curl
 need_cmd tar
 OS="$(detect_os)"
@@ -252,9 +267,26 @@ fi
 
 if [ "$NO_SERVICE" = "0" ]; then
   if confirm "Install and start the per-user service now?"; then
-    if ! "$BINDIR/droid-proxy" setup --service; then
+    if "$BINDIR/droid-proxy" setup --service; then
+      SERVICE_STARTED=1
+    else
       echo "install.sh: service setup did not complete; run droid-proxy config, then droid-proxy setup --service" >&2
     fi
+  fi
+fi
+
+if [ "$NO_RESTART" = "0" ] && [ "${SERVICE_STARTED:-0}" != "1" ] && proxy_running; then
+  if [ "$RESTART" = "1" ] || confirm "Restart the running droid-proxy process now?"; then
+    if "$BINDIR/droid-proxy" restart; then
+      echo "restarted running droid-proxy"
+    else
+      echo "install.sh: restart did not complete; run droid-proxy restart, then droid-proxy doctor" >&2
+      if [ "$RESTART" = "1" ]; then
+        exit 1
+      fi
+    fi
+  else
+    echo "running droid-proxy was not restarted; run droid-proxy restart to use the new binary"
   fi
 fi
 
@@ -269,4 +301,7 @@ Next steps:
   droid-proxy config
   droid-proxy setup --service
   droid-proxy doctor
+
+Upgrade tip:
+  rerun the installer with --restart when droid-proxy is already running
 EOF
