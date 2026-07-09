@@ -17,6 +17,9 @@ func TestValidateSetupServiceConfigRejectsSeedOnlyConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("validateSetupServiceConfig error = nil, want config-not-ready error")
 	}
+	if installErr := validateServiceInstallConfig(path); installErr == nil {
+		t.Fatal("validateServiceInstallConfig error = nil, want config-not-ready error")
+	}
 	msg := err.Error()
 	for _, want := range []string{"config is not ready to run", "at least one model", "droid-proxy config"} {
 		if !strings.Contains(msg, want) {

@@ -39,8 +39,8 @@ This release ships:
 ## Provider matrix
 
 `known_auth` is a short string you can set on a model to inherit defaults
-(base URL, env var, auth header, version headers). Anything you set explicitly
-in `config.yaml` always wins.
+(base URL, env var, auth header, version headers, and model-discovery metadata).
+Anything you set explicitly in `config.yaml` always wins.
 
 | known_auth | Default base URL | Env var | Default upstream | Tier | Example |
 |-----|-----|-----|-----|-----|-----|

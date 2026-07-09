@@ -363,8 +363,12 @@ func TestResponses_ChatUpstreamTranslatedStreamTextAndTool(t *testing.T) {
 	events := parseHandlerSSE(t, body)
 	assertNoRawChatSSE(t, events)
 	assertEventCount(t, events, "response.completed", 1)
+	assertEventCount(t, events, "response.output_text.done", 1)
+	assertEventCount(t, events, "response.function_call_arguments.done", 1)
+	assertEventCount(t, events, "response.output_item.done", 2)
 	assertEventCount(t, events, "error", 0)
 	var textIndex, toolIndex float64 = -1, -1
+	var completedOutput []any
 	for _, ev := range events {
 		switch ev.name {
 		case "response.output_text.delta":
@@ -374,10 +378,20 @@ func TestResponses_ChatUpstreamTranslatedStreamTextAndTool(t *testing.T) {
 			if item["type"] == "function_call" {
 				toolIndex = ev.payload["output_index"].(float64)
 			}
+		case "response.completed":
+			completedOutput = ev.payload["response"].(map[string]any)["output"].([]any)
 		}
 	}
 	if textIndex != 0 || toolIndex <= 0 || toolIndex == textIndex {
 		t.Fatalf("expected text output_index 0 and distinct tool output index, got text=%v tool=%v events=%#v", textIndex, toolIndex, events)
+	}
+	if len(completedOutput) != 2 {
+		t.Fatalf("expected completed output to include text and tool items, got %#v", completedOutput)
+	}
+	textPart := completedOutput[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	toolItem := completedOutput[1].(map[string]any)
+	if textPart["text"] != "Hello" || toolItem["call_id"] != "call_1" || toolItem["arguments"] != `{"q":"x"}` {
+		t.Fatalf("completed output lost translated content: %#v", completedOutput)
 	}
 }
 

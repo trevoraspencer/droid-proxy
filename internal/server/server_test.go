@@ -1003,7 +1003,7 @@ models:
 	acct := accounts[0].(map[string]any)
 
 	// Verify safe operational fields are present
-	for _, key := range []string{"selector", "provider", "disabled", "healthy", "in_flight"} {
+	for _, key := range []string{"selector", "provider", "disabled", "token_file_present", "healthy", "in_flight"} {
 		if _, exists := acct[key]; !exists {
 			t.Errorf("missing key %q in account: %v", key, acct)
 		}
@@ -1016,6 +1016,9 @@ models:
 	}
 	if acct["disabled"] != false {
 		t.Errorf("expected disabled=false, got %v", acct["disabled"])
+	}
+	if acct["token_file_present"] != true {
+		t.Errorf("expected token_file_present=true, got %v", acct["token_file_present"])
 	}
 	if acct["healthy"] != true {
 		t.Errorf("expected healthy=true, got %v", acct["healthy"])

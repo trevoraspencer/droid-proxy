@@ -585,17 +585,24 @@ func TestWatcher_InFlightDeleteSafe(t *testing.T) {
 
 	// Wait for watcher to reload
 	if !poolWithin(t, pool, 3*time.Second, func(s *PoolSnapshot) bool {
-		// Entry should still be present (in-flight preserved) or gone if
-		// the watcher already cleaned it up. The key test is that End doesn't panic.
-		return true
+		for _, a := range s.Accounts {
+			if a.Selector == "user@example.com" {
+				return !a.TokenFilePresent && a.InFlight == 1
+			}
+		}
+		return false
 	}) {
-		t.Fatal("watcher did not settle after deletion")
+		t.Fatalf("watcher did not mark in-flight deleted token as removed; snapshot: %+v", pool.Snapshot())
+	}
+
+	if eligible := pool.Eligible(nil); len(eligible) != 0 {
+		t.Fatalf("removed in-flight token should not be eligible, got %d eligible", len(eligible))
 	}
 
 	// Release should not panic or drive in-flight negative
 	pool.End(path)
 
-	// Verify in-flight is now 0 or the entry is gone
+	// Verify in-flight is now 0 or the tombstone was garbage-collected.
 	snap := pool.Snapshot()
 	for _, a := range snap.Accounts {
 		if a.InFlight < 0 {

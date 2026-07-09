@@ -51,8 +51,9 @@ It is a full-screen dashboard that, from one place:
 - prompts for the provider API key and stores it in `~/.droid-proxy/env`
   (chmod 600) — no manual `.env` editing; updates are line-oriented so your
   comments, blank lines, and unrelated keys in that file are preserved;
-- discovers available models from the provider's `/models` endpoint so you pick
-  from a list instead of pasting a slug (falls back to manual entry);
+- discovers available models from the provider profile's model-list endpoint
+  (OpenAI-compatible `/models`, Anthropic `/v1/models`, etc.) so you pick from
+  a list instead of pasting a slug (falls back to manual entry);
 - writes the model to your YAML config (comments preserved);
 - syncs the entry into Factory's `~/.factory/settings.json` (`s` for one, `S`
   for all), so you do not hand-edit `customModels`;
@@ -171,8 +172,11 @@ droid-proxy service uninstall
 
 `setup --service` creates the per-user config if missing, then writes and starts
 the right user service for the current OS. `service install` is the lower-level
-compatibility command. Durable service installs should run the binary from
-`~/.local/bin/droid-proxy` and should not point at a source checkout.
+compatibility command. Both commands validate that the selected config can load
+with the service env-file layers before writing the service; a seed-only or
+invalid config is rejected with a prompt to run `droid-proxy config` first.
+Durable service installs should run the binary from `~/.local/bin/droid-proxy`
+and should not point at a source checkout.
 
 | Detail | Value |
 |--------|-------|
@@ -200,9 +204,10 @@ secrets:
 
 The doctor reports the executable path, resolved symlink target, CLI version and
 commit, source checkout status when one is available, updater dry-run status for
-source installs, daemon status, and launchd/systemd service issues. Missing
-source checkouts are normal for release installs; pass `--repo` when you want a
-source checkout audited.
+source installs, daemon status, and launchd/systemd service issues. Installed
+services are also checked for runnable configs using the env-file paths encoded
+in the service. Missing source checkouts are normal for release installs; pass
+`--repo` when you want a source checkout audited.
 
 ## Update from GitHub
 
@@ -265,7 +270,7 @@ Inspect and manage stored OAuth accounts without re-running a login:
 | Command | Description |
 |---------|-------------|
 | `auth status [provider]` | Lists stored accounts with email, subject, account ID, expiry, last refresh, `disabled` flag, and token file path. Omit the provider to show both `codex` and `xai`. |
-| `auth pool` | Shows Codex pool health (strategy, quota usage, affinity bindings, rate-limit/error cooldowns, and unhealthy recovery times). Uses `GET /v1/oauth/pool-health` when the proxy is running; otherwise prints an offline snapshot from token files. |
+| `auth pool` | Shows Codex pool health (strategy, quota usage, affinity bindings, rate-limit/error cooldowns, unhealthy recovery times, and `removed` entries whose token file was deleted while a request was in flight). Uses `GET /v1/oauth/pool-health` when the proxy is running; otherwise prints an offline snapshot from token files. |
 | `auth disable <provider> <account>` | Marks an account disabled. The proxy skips disabled accounts when selecting a token for requests. |
 | `auth enable <provider> <account>` | Clears the disabled flag. |
 | `auth logout <provider> <account>` | Deletes the account's token file from `oauth.auth_dir`. |

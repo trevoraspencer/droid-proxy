@@ -28,6 +28,11 @@ type AccountEntry struct {
 	Selector string // safe display label: email > subject > accountID > filename stem
 	Provider config.OAuthProvider
 	Disabled bool
+	// TokenFilePresent is false only for a token path removed from disk while
+	// an active request still holds a lease. Such entries remain visible for
+	// balanced End accounting and diagnostics, but are not eligible for new
+	// selections.
+	TokenFilePresent bool
 
 	// Runtime state (preserved across reloads for same path)
 	Healthy          bool
@@ -56,6 +61,7 @@ type AccountSnapshot struct {
 	Selector               string      `json:"selector"`
 	Provider               string      `json:"provider"`
 	Disabled               bool        `json:"disabled"`
+	TokenFilePresent       bool        `json:"token_file_present"`
 	Healthy                bool        `json:"healthy"`
 	CooldownUntil          *time.Time  `json:"cooldown_until,omitempty"`
 	UnhealthyUntil         *time.Time  `json:"unhealthy_until,omitempty"`
@@ -153,14 +159,15 @@ func (p *AccountPool) seed(tokens []*Token) {
 func (p *AccountPool) entryFromToken(tok *Token) *AccountEntry {
 	now := p.nowFunc()
 	entry := &AccountEntry{
-		Path:      tok.Path(),
-		Selector:  safeSelectorLabel(tok),
-		Provider:  tok.Provider(),
-		Disabled:  tok.Disabled,
-		Healthy:   true,
-		Email:     tok.Email,
-		Subject:   tok.Subject,
-		AccountID: tok.AccountID,
+		Path:             tok.Path(),
+		Selector:         safeSelectorLabel(tok),
+		Provider:         tok.Provider(),
+		Disabled:         tok.Disabled,
+		TokenFilePresent: true,
+		Healthy:          true,
+		Email:            tok.Email,
+		Subject:          tok.Subject,
+		AccountID:        tok.AccountID,
 	}
 
 	// Quota deep copy
@@ -262,23 +269,14 @@ func (p *AccountPool) Reload(tokens []*Token) {
 
 	// Remove entries no longer present.
 	//
-	// In-flight entries whose path disappeared from the token set are
-	// intentionally preserved with stale metadata. This is safe because:
-	//   - The active request still holds a valid lease (Begin was called)
-	//     and will call End to release it, decrementing InFlight.
-	//   - Keeping the entry ensures End does not panic on a missing path
-	//     and InFlight never goes negative.
-	//   - A stale entry can still be selected for a new request while it
-	//     remains in flight (isEligible has no staleness filter), but the
-	//     handler's subsequent LoadTokenAtPath fails for the missing file
-	//     and the failover loop marks the entry unhealthy and moves on to
-	//     another account, so no request is served with stale credentials.
-	//   - Once InFlight reaches zero via End, the next Reload will
-	//     garbage-collect the entry.
+	// In-flight entries whose path disappeared from the token set are preserved
+	// only as lease-accounting tombstones. They remain visible in snapshots
+	// with token_file_present=false, but are not eligible for new requests and
+	// are removed as soon as the final in-flight lease ends.
 	for path := range p.entries {
 		if _, ok := newTokens[path]; !ok {
 			if p.entries[path].InFlight > 0 {
-				// Keep the entry but update its state
+				p.entries[path].TokenFilePresent = false
 				continue
 			}
 			delete(p.entries, path)
@@ -309,8 +307,10 @@ func (p *AccountPool) pruneAffinityLocked() {
 		return
 	}
 	valid := make(map[string]bool, len(p.entries))
-	for path := range p.entries {
-		valid[path] = true
+	for path, entry := range p.entries {
+		if entry.Provider == ProviderCodex && entry.TokenFilePresent {
+			valid[path] = true
+		}
 	}
 	_ = p.affinity.Prune(valid)
 }
@@ -318,6 +318,12 @@ func (p *AccountPool) pruneAffinityLocked() {
 // BindConversation persists conversation→account affinity when sticky is enabled.
 func (p *AccountPool) BindConversation(conversationID, accountPath string) {
 	if p == nil || p.strategy != config.LoadBalancingSticky || p.affinity == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	entry, ok := p.entries[accountPath]
+	if !ok || entry.Provider != ProviderCodex || !entry.TokenFilePresent {
 		return
 	}
 	_ = p.affinity.Bind(conversationID, accountPath)
@@ -338,6 +344,7 @@ func (p *AccountPool) updateEntry(entry *AccountEntry, tok *Token, now time.Time
 	entry.Selector = safeSelectorLabel(tok)
 	entry.Provider = tok.Provider()
 	entry.Disabled = tok.Disabled
+	entry.TokenFilePresent = true
 	entry.Email = tok.Email
 	entry.Subject = tok.Subject
 	entry.AccountID = tok.AccountID
@@ -387,7 +394,7 @@ func (p *AccountPool) updateEntry(entry *AccountEntry, tok *Token, now time.Time
 
 // Begin acquires a lease on the account at the given path.
 // It increments in-flight and updates last_used. Returns an error if the
-// account is not found in the pool.
+// account is not found in the pool or its backing token file was removed.
 func (p *AccountPool) Begin(path string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -395,6 +402,9 @@ func (p *AccountPool) Begin(path string) error {
 	entry, ok := p.entries[path]
 	if !ok {
 		return fmt.Errorf("account not found for path %q", filepath.Base(path))
+	}
+	if !entry.TokenFilePresent {
+		return fmt.Errorf("account token file removed for path %q", filepath.Base(path))
 	}
 	entry.InFlight++
 	entry.LastUsed = p.nowFunc()
@@ -414,6 +424,9 @@ func (p *AccountPool) End(path string) {
 	entry.InFlight--
 	if entry.InFlight < 0 {
 		entry.InFlight = 0
+	}
+	if entry.InFlight == 0 && !entry.TokenFilePresent {
+		delete(p.entries, path)
 	}
 }
 
@@ -488,7 +501,7 @@ func (p *AccountPool) EnabledCodexCount() int {
 	defer p.mu.Unlock()
 	count := 0
 	for _, entry := range p.entries {
-		if entry.Provider == ProviderCodex && !entry.Disabled {
+		if entry.Provider == ProviderCodex && entry.TokenFilePresent && !entry.Disabled {
 			count++
 		}
 	}
@@ -498,6 +511,7 @@ func (p *AccountPool) EnabledCodexCount() int {
 // Eligible returns entries eligible for selection, excluding those in the
 // provided exclusion set. Eligibility criteria:
 //   - Provider is Codex
+//   - Backed by a currently present token file
 //   - Not disabled
 //   - Not in exclusion set
 //   - Not in active cooldown (cooldownUntil > now)
@@ -635,6 +649,10 @@ func (p *AccountPool) isEligible(entry *AccountEntry, exclude map[string]bool, n
 	if entry.Provider != ProviderCodex {
 		return false
 	}
+	// Backing token file still exists
+	if !entry.TokenFilePresent {
+		return false
+	}
 	// Not disabled
 	if entry.Disabled {
 		return false
@@ -731,11 +749,12 @@ func (e *AccountEntry) MatchesAccount(account string) bool {
 func snapshotFromEntry(entry *AccountEntry, affinity *AffinityStore, now time.Time) AccountSnapshot {
 	healthy := entry.Healthy || !entry.UnhealthyUntil.After(now)
 	snap := AccountSnapshot{
-		Selector: entry.Selector,
-		Provider: string(entry.Provider),
-		Disabled: entry.Disabled,
-		Healthy:  healthy,
-		InFlight: entry.InFlight,
+		Selector:         entry.Selector,
+		Provider:         string(entry.Provider),
+		Disabled:         entry.Disabled,
+		TokenFilePresent: entry.TokenFilePresent,
+		Healthy:          healthy,
+		InFlight:         entry.InFlight,
 	}
 	if !entry.CooldownUntil.IsZero() {
 		t := entry.CooldownUntil.UTC()

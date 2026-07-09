@@ -158,6 +158,10 @@ func runService(args []string) {
 		fs := flag.NewFlagSet("service install", flag.ExitOnError)
 		configPath := fs.String("config", defaultConfigPath(), "path to config.yaml")
 		_ = fs.Parse(args[1:])
+		if err := validateServiceInstallConfig(*configPath); err != nil {
+			fmt.Fprintf(os.Stderr, "droid-proxy service install error: %v\n", err)
+			os.Exit(1)
+		}
 		if err := daemon.InstallService(*configPath); err != nil {
 			fmt.Fprintf(os.Stderr, "droid-proxy service install error: %v\n", err)
 			os.Exit(1)

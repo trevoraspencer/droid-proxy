@@ -109,6 +109,53 @@ sha256_verify() {
   fi
 }
 
+validate_archive_manifest() {
+  file="$1"
+  entries="$WORKDIR/archive-entries.txt"
+  verbose="$WORKDIR/archive-entries.verbose.txt"
+  found_binary=0
+
+  if ! tar -tzf "$file" > "$entries"; then
+    echo "install.sh: could not list archive entries for $(basename "$file")" >&2
+    exit 1
+  fi
+
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    normalized="$entry"
+    while [ "${normalized#./}" != "$normalized" ]; do
+      normalized="${normalized#./}"
+    done
+    if [ -z "$normalized" ]; then
+      echo "install.sh: unsafe empty archive entry in $(basename "$file")" >&2
+      exit 1
+    fi
+    case "$normalized" in
+      /*|../*|*/../*|*/..|..|*//*)
+        echo "install.sh: unsafe archive entry: $entry" >&2
+        exit 1
+        ;;
+    esac
+    if [ "$normalized" = "droid-proxy" ]; then
+      found_binary=1
+    fi
+  done < "$entries"
+
+  if [ "$found_binary" != "1" ]; then
+    echo "install.sh: archive did not contain droid-proxy" >&2
+    exit 1
+  fi
+
+  if ! tar -tvzf "$file" > "$verbose"; then
+    echo "install.sh: could not inspect archive entry types for $(basename "$file")" >&2
+    exit 1
+  fi
+  if ! awk 'substr($1, 1, 1) == "l" || substr($1, 1, 1) == "h" { exit 1 }' "$verbose"; then
+    echo "install.sh: archive contains link entries" >&2
+    exit 1
+  fi
+}
+
 download() {
   url="$1"
   out="$2"
@@ -173,12 +220,13 @@ checksums="$WORKDIR/checksums.txt"
 download "${BASE_URL}/${ASSET}" "$archive"
 download "${BASE_URL}/checksums.txt" "$checksums"
 sha256_verify "$archive" "$checksums"
+validate_archive_manifest "$archive"
 
 extract="$WORKDIR/extract"
 mkdir -p "$extract"
 tar -xzf "$archive" -C "$extract"
-if [ ! -x "$extract/droid-proxy" ]; then
-  echo "install.sh: archive did not contain executable droid-proxy" >&2
+if [ -L "$extract/droid-proxy" ] || [ ! -f "$extract/droid-proxy" ] || [ ! -x "$extract/droid-proxy" ]; then
+  echo "install.sh: archive did not contain a regular executable droid-proxy" >&2
   exit 1
 fi
 

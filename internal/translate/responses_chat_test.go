@@ -287,21 +287,50 @@ func TestChatStreamToResponsesSSETextAndFirstToolUseDistinctOutputIndexes(t *tes
 	events := parseTranslateSSE(t, string(got))
 	var textIndexes, toolIndexes []float64
 	completed := 0
+	doneItems := 0
+	var completedOutput []any
 	for _, ev := range events {
 		switch ev.name {
 		case "response.output_text.delta":
 			textIndexes = append(textIndexes, ev.payload["output_index"].(float64))
+		case "response.output_text.done":
+			if ev.payload["output_index"].(float64) != 0 || ev.payload["text"] != "Hi" {
+				t.Fatalf("bad output_text.done event: %#v", ev.payload)
+			}
 		case "response.output_item.added":
 			item := ev.payload["item"].(map[string]any)
 			if item["type"] == "function_call" {
 				toolIndexes = append(toolIndexes, ev.payload["output_index"].(float64))
 			}
+		case "response.function_call_arguments.done":
+			if ev.payload["output_index"].(float64) <= 0 || ev.payload["arguments"] != `{"q":"x"}` {
+				t.Fatalf("bad function_call_arguments.done event: %#v", ev.payload)
+			}
+		case "response.output_item.done":
+			doneItems++
 		case "response.completed":
 			completed++
+			resp := ev.payload["response"].(map[string]any)
+			completedOutput = resp["output"].([]any)
 		}
 	}
 	if completed != 1 || len(textIndexes) != 1 || textIndexes[0] != 0 || len(toolIndexes) != 1 || toolIndexes[0] == 0 {
 		t.Fatalf("expected text at output_index 0 and tool at distinct index with one completion; events=%#v\n%s", events, got)
+	}
+	if doneItems != 2 || len(completedOutput) != 2 {
+		t.Fatalf("expected done events and completed output for text+tool, done=%d output=%#v events=%#v", doneItems, completedOutput, events)
+	}
+	textItem := completedOutput[0].(map[string]any)
+	if textItem["type"] != "message" || textItem["status"] != "completed" {
+		t.Fatalf("bad completed text item: %#v", textItem)
+	}
+	textPart := textItem["content"].([]any)[0].(map[string]any)
+	if textPart["type"] != "output_text" || textPart["text"] != "Hi" {
+		t.Fatalf("bad completed text content: %#v", textItem)
+	}
+	toolItem := completedOutput[1].(map[string]any)
+	if toolItem["type"] != "function_call" || toolItem["call_id"] != "call_1" || toolItem["name"] != "lookup" || toolItem["arguments"] != `{"q":"x"}` {
+		t.Fatalf("bad completed tool item: %#v", toolItem)
 	}
 }
 

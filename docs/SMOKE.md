@@ -125,6 +125,23 @@ curl -sS http://127.0.0.1:8787/v1/responses \
   }' | jq '.output'
 ```
 
+Streaming aliases that translate `/v1/responses` to an OpenAI Chat-compatible
+upstream should emit incremental delta events and close each item before
+`response.completed`:
+
+```bash
+curl -sS -N http://127.0.0.1:8787/v1/responses \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "<openai-chat-backed-responses-alias>",
+    "stream": true,
+    "input": "count to three"
+  }'
+```
+
+You should see `response.output_item.done` before `response.completed`, and the
+completed response should include a non-empty `response.output` array.
+
 ## 7. OAuth Responses (optional)
 
 Requires prior login (`droid-proxy auth codex` or `auth xai`) and a matching

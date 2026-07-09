@@ -95,6 +95,7 @@ func formatPoolHealthJSON(raw []byte) (string, error) {
 		Accounts []struct {
 			Selector               string            `json:"selector"`
 			Disabled               bool              `json:"disabled"`
+			TokenFilePresent       *bool             `json:"token_file_present"`
 			Healthy                bool              `json:"healthy"`
 			InFlight               int               `json:"in_flight"`
 			MaxUsedPercent         *float64          `json:"max_used_percent"`
@@ -133,6 +134,9 @@ func formatPoolHealthJSON(raw []byte) (string, error) {
 		health := "ok"
 		if !acct.Healthy {
 			health = "unhealthy"
+		}
+		if acct.TokenFilePresent != nil && !*acct.TokenFilePresent {
+			health = "removed"
 		}
 		if acct.Disabled {
 			health = "disabled"

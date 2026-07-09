@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 // fakeTime returns a fixed time for deterministic tests.
@@ -569,6 +571,147 @@ func TestPoolReload_RemovesDeletedEntry(t *testing.T) {
 	if pool.Snapshot().Accounts[0].Selector != "user1@example.com" {
 		t.Fatalf("expected user1 to survive, got %q", pool.Snapshot().Accounts[0].Selector)
 	}
+}
+
+func TestPoolReload_DeletedInFlightEntryIsNotSelectable(t *testing.T) {
+	dir := t.TempDir()
+	removedTok := makeToken("removed@example.com", "access-removed", "refresh-removed", false)
+	removedPath := saveTokenFile(t, dir, removedTok)
+	liveTok := makeToken("live@example.com", "access-live", "refresh-live", false)
+	saveTokenFile(t, dir, liveTok)
+
+	pool := NewAccountPool([]*Token{removedTok, liveTok}, fakeTime, TestPoolLB(), nil)
+	if err := pool.Begin(removedPath); err != nil {
+		t.Fatal(err)
+	}
+
+	pool.Reload([]*Token{liveTok})
+
+	snap := pool.Snapshot()
+	if snap.CodexAccounts != 2 {
+		t.Fatalf("expected 2 visible accounts while removed account is in flight, got %d", snap.CodexAccounts)
+	}
+	if snap.EligibleCount != 1 {
+		t.Fatalf("expected only the live account to be eligible, got %d", snap.EligibleCount)
+	}
+	var sawRemoved bool
+	for _, acct := range snap.Accounts {
+		if acct.Selector == "removed@example.com" {
+			sawRemoved = true
+			if acct.TokenFilePresent {
+				t.Fatal("expected removed account token_file_present=false")
+			}
+			if acct.InFlight != 1 {
+				t.Fatalf("expected removed account in_flight=1, got %d", acct.InFlight)
+			}
+		}
+	}
+	if !sawRemoved {
+		t.Fatal("expected removed in-flight account to remain visible in snapshot")
+	}
+
+	eligible := pool.Eligible(nil)
+	if len(eligible) != 1 || eligible[0].Selector != "live@example.com" {
+		t.Fatalf("expected only live account eligible, got %+v", eligible)
+	}
+	for i := 0; i < 5; i++ {
+		got, err := pool.Select("", nil, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Path == removedPath {
+			t.Fatal("deleted in-flight account was selected for a new request")
+		}
+	}
+	if err := pool.Begin(removedPath); err == nil {
+		t.Fatal("expected Begin to reject a removed token file")
+	}
+
+	pool.End(removedPath)
+	snap = pool.Snapshot()
+	if snap.CodexAccounts != 1 {
+		t.Fatalf("expected removed account to be garbage-collected after End, got %d accounts", snap.CodexAccounts)
+	}
+	if snap.Accounts[0].Selector != "live@example.com" {
+		t.Fatalf("expected live account to remain, got %q", snap.Accounts[0].Selector)
+	}
+}
+
+func TestPoolReload_RecreatedInFlightEntryBecomesSelectable(t *testing.T) {
+	dir := t.TempDir()
+	tok := makeToken("user@example.com", "access-old", "refresh-old", false)
+	path := saveTokenFile(t, dir, tok)
+
+	pool := NewAccountPool([]*Token{tok}, fakeTime, TestPoolLB(), nil)
+	if err := pool.Begin(path); err != nil {
+		t.Fatal(err)
+	}
+	pool.Reload(nil)
+	if len(pool.Eligible(nil)) != 0 {
+		t.Fatal("expected removed in-flight account to be ineligible")
+	}
+
+	recreated := makeToken("user@example.com", "access-new", "refresh-new", false)
+	recreated.path = path
+	pool.Reload([]*Token{recreated})
+
+	snap := pool.Snapshot()
+	if len(snap.Accounts) != 1 {
+		t.Fatalf("expected recreated account in snapshot, got %d", len(snap.Accounts))
+	}
+	if !snap.Accounts[0].TokenFilePresent {
+		t.Fatal("expected recreated account token_file_present=true")
+	}
+	if len(pool.Eligible(nil)) != 1 {
+		t.Fatalf("expected recreated account eligible, got %d", len(pool.Eligible(nil)))
+	}
+	pool.End(path)
+}
+
+func TestPoolReload_PrunesAffinityForDeletedInFlightEntry(t *testing.T) {
+	dir := t.TempDir()
+	removedTok := makeToken("removed@example.com", "access-removed", "refresh-removed", false)
+	removedPath := saveTokenFile(t, dir, removedTok)
+	liveTok := makeToken("live@example.com", "access-live", "refresh-live", false)
+	livePath := saveTokenFile(t, dir, liveTok)
+
+	affinity, err := NewAffinityStore(AffinityOptions{Path: filepath.Join(dir, "affinity.json"), NowFunc: fakeTime})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := affinity.Bind("conversation-1", removedPath); err != nil {
+		t.Fatal(err)
+	}
+
+	lb := TestPoolLB()
+	lb.Strategy = config.LoadBalancingSticky
+	pool := NewAccountPool([]*Token{removedTok, liveTok}, fakeTime, lb, affinity)
+	if err := pool.Begin(removedPath); err != nil {
+		t.Fatal(err)
+	}
+
+	pool.Reload([]*Token{liveTok})
+
+	if got := affinity.Lookup("conversation-1"); got != "" {
+		t.Fatalf("expected affinity for deleted token path to be pruned, got %q", got)
+	}
+	snap := pool.Snapshot()
+	if snap.Affinity == nil {
+		t.Fatal("expected affinity stats in snapshot")
+	}
+	if snap.Affinity.BoundConversations != 0 {
+		t.Fatalf("expected 0 affinity bindings after prune, got %d", snap.Affinity.BoundConversations)
+	}
+
+	pool.BindConversation("conversation-2", removedPath)
+	if got := affinity.Lookup("conversation-2"); got != "" {
+		t.Fatalf("expected removed token path not to be rebound, got %q", got)
+	}
+	pool.BindConversation("conversation-3", livePath)
+	if got := affinity.Lookup("conversation-3"); got != livePath {
+		t.Fatalf("expected live token path to bind, got %q", got)
+	}
+	pool.End(removedPath)
 }
 
 func TestPoolReload_SamePathIdentityChange_UpdatesImmediately(t *testing.T) {

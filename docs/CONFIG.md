@@ -195,7 +195,7 @@ specific upstream configuration.
 | `oauth_provider` | enum | for OAuth upstreams | `codex` for `codex-responses`, or `xai` for `xai-responses`. |
 | `oauth_account` | string |  | Optional stored OAuth account selector. Matches saved email, subject, account id, or token filename stem. |
 | `base_url` | string | one of `base_url`, `known_auth`, or OAuth upstream required | Upstream root URL. e.g. `https://api.deepseek.com/v1`. OAuth upstreams use their provider default when omitted. |
-| `known_auth` | string |  | Shortcut: looks up base_url, env var, auth header, version headers from a built-in registry. See PROVIDERS.md. Use `zai-coding-api` for Z.AI GLM Coding Plan keys and `zai-main-api` for normal Z.AI API keys. |
+| `known_auth` | string |  | Shortcut: looks up base_url, env var, auth header, version headers, and model-discovery metadata from a built-in registry. See PROVIDERS.md. Use `zai-coding-api` for Z.AI GLM Coding Plan keys and `zai-main-api` for normal Z.AI API keys. |
 | `upstream_model` | string |  | Forwarded `model` field on the upstream call. If unset, the alias itself is sent. |
 | `api_key_env` | string |  | Env var holding the API key. If unset, the env var declared by `known_auth` is used. Not required for OAuth upstreams. |
 | `max_output_tokens` | int |  | Factory-facing output-token setting; surfaced in `/v1/models`. When omitted, Factory sync writes `128000`. Set an explicit lower value for upstreams with lower hard caps. |

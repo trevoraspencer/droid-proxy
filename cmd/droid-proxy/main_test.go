@@ -203,3 +203,27 @@ func TestFormatPoolHealthJSONShowsUnhealthyUntil(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatPoolHealthJSONShowsRemovedTokenFile(t *testing.T) {
+	raw := []byte(`{
+		"strategy": "round_robin",
+		"codex_account_count": 1,
+		"eligible_count": 0,
+		"accounts": [
+			{
+				"selector": "removed@example.com",
+				"token_file_present": false,
+				"healthy": true,
+				"in_flight": 1,
+				"bound_conversation_count": 0
+			}
+		]
+	}`)
+	out, err := formatPoolHealthJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "removed@example.com") || !strings.Contains(out, "removed") {
+		t.Fatalf("pool health output should show removed token file:\n%s", out)
+	}
+}

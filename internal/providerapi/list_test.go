@@ -137,3 +137,61 @@ func TestListModelsCustomAuthHeader(t *testing.T) {
 		t.Errorf("x-api-key = %q, want abc (no scheme)", gotKey)
 	}
 }
+
+func TestListModelsWithOptionsProfilePathAndHeaders(t *testing.T) {
+	var gotPath, gotVersion, gotKey, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotVersion = r.Header.Get("anthropic-version")
+		gotKey = r.Header.Get("x-api-key")
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"data":[{"id":"claude-sonnet"}]}`))
+	}))
+	defer srv.Close()
+
+	ids, err := ListModelsWithOptions(context.Background(), ListOptions{
+		BaseURL:    srv.URL,
+		ModelsPath: "/v1/models",
+		APIKey:     "sk-ant-test",
+		AuthHeader: "x-api-key",
+		ExtraHeaders: map[string]string{
+			"anthropic-version": "2023-06-01",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ListModelsWithOptions: %v", err)
+	}
+	if gotPath != "/v1/models" {
+		t.Fatalf("path = %q, want /v1/models", gotPath)
+	}
+	if gotVersion != "2023-06-01" {
+		t.Fatalf("anthropic-version = %q, want 2023-06-01", gotVersion)
+	}
+	if gotKey != "sk-ant-test" {
+		t.Fatalf("x-api-key = %q, want raw API key", gotKey)
+	}
+	if gotAuth != "" {
+		t.Fatalf("Authorization should be empty for x-api-key auth, got %q", gotAuth)
+	}
+	if want := []string{"claude-sonnet"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
+	}
+}
+
+func TestListModelsWithOptionsDefaultPathPreservesBasePath(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"data":[{"id":"m"}]}`))
+	}))
+	defer srv.Close()
+
+	if _, err := ListModelsWithOptions(context.Background(), ListOptions{
+		BaseURL: strings.TrimRight(srv.URL, "/") + "/proxy/v1/",
+	}); err != nil {
+		t.Fatalf("ListModelsWithOptions: %v", err)
+	}
+	if gotPath != "/proxy/v1/models" {
+		t.Fatalf("path = %q, want /proxy/v1/models", gotPath)
+	}
+}
