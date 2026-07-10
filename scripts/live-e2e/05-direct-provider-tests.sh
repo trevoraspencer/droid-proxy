@@ -183,12 +183,44 @@ run_responses_model() {
   fi
 }
 
+run_codex_gpt56_advanced() {
+  local model="gpt-5.6"
+  local provider="ChatGPT/Codex OAuth (GPT-5.6 Sol)"
+  local check="max reasoning and cache sanitization"
+  local artifact_id body out http_status
+
+  if [[ "${LIVE_E2E_CODEX_GPT56_ADVANCED:-0}" != "1" ]]; then
+    append_result "$provider" "$model" "$check" "SKIP" "set LIVE_E2E_CODEX_GPT56_ADVANCED=1 to run credentialed gate"
+    return
+  fi
+
+  artifact_id="$(model_artifact_id "$model")"
+  body="$LIVE_E2E_RUN_DIR/$artifact_id.responses.max-cache-sanitization.request.json"
+  out="$LIVE_E2E_RUN_DIR/$artifact_id.responses.max-cache-sanitization.json"
+  jq -n --arg model "$model" '{
+    model:$model,
+    stream:false,
+    input:"Reply exactly: droid-proxy-ok",
+    reasoning:{effort:"max"},
+    prompt_cache_options:{mode:"explicit"}
+  }' > "$body"
+
+  if http_status="$(post_json "$API_BASE/v1/responses" "$body" "$out")" && http_ok "$http_status" \
+      && jq -e '(.id // "") | length > 0' "$out" >/dev/null; then
+    append_result "$provider" "$model" "$check" "PASS" "HTTP $http_status"
+  else
+    append_result "$provider" "$model" "$check" "FAIL" "HTTP ${http_status:-000}; private OAuth compatibility gate did not validate"
+  fi
+}
+
 run_chat_model "deepseek-v4-flash" "DeepSeek"
 run_chat_model "glm-5.1" "Z.AI GLM coding"
 run_chat_model "mimo-v2.5-pro" "Xiaomi MiMo"
 run_chat_model "${FIREWORKS_MODEL}" "Fireworks"
 
-run_responses_model "gpt-5.2-codex" "ChatGPT/Codex OAuth"
+run_responses_model "gpt-5.6" "ChatGPT/Codex OAuth (GPT-5.6 Sol)"
+run_responses_model "gpt-5.6-fast" "ChatGPT/Codex OAuth (GPT-5.6 Sol Fast)"
+run_codex_gpt56_advanced
 run_responses_model "grok-build-0.1" "xAI OAuth (Grok Build)"
 run_responses_model "grok-composer-2.5-fast" "xAI OAuth (Composer 2.5 Fast)"
 run_responses_model "grok-4.3" "xAI Grok 4.3 OAuth"

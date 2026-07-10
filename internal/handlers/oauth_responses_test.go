@@ -102,12 +102,15 @@ func TestDoPreparedUpstreamStreamAndNonStream(t *testing.T) {
 func TestResponses_OAuthCodexNonStreamReconstructsResponsesAndPreservesTools(t *testing.T) {
 	var capturedAuth, capturedAccount, capturedOriginator, capturedPath string
 	var capturedBeta, capturedResidency, capturedInstallation, capturedClientRequest, capturedSession, capturedWindow string
+	var capturedUserAgent, capturedVersion string
 	var captured map[string]any
 	api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
 		capturedPath = r.URL.Path
 		capturedAuth = r.Header.Get("Authorization")
 		capturedAccount = r.Header.Get("Chatgpt-Account-Id")
 		capturedOriginator = r.Header.Get("Originator")
+		capturedUserAgent = r.Header.Get("User-Agent")
+		capturedVersion = r.Header.Get("Version")
 		capturedBeta = r.Header.Get("OpenAI-Beta")
 		capturedResidency = r.Header.Get("x-openai-internal-codex-residency")
 		capturedInstallation = r.Header.Get("x-codex-installation-id")
@@ -146,6 +149,15 @@ func TestResponses_OAuthCodexNonStreamReconstructsResponsesAndPreservesTools(t *
 	}
 	if capturedAccount != "acct_123" || capturedOriginator == "" {
 		t.Fatalf("missing codex oauth headers account=%q originator=%q", capturedAccount, capturedOriginator)
+	}
+	if codexClientVersion != "0.144.0" {
+		t.Fatalf("Codex client version constant = %q, want documented minimum 0.144.0", codexClientVersion)
+	}
+	if capturedVersion != codexClientVersion {
+		t.Fatalf("Codex Version fallback = %q, want documented minimum %q", capturedVersion, codexClientVersion)
+	}
+	if capturedUserAgent != codexUserAgent || !strings.Contains(capturedUserAgent, "codex_cli_rs/"+codexClientVersion) {
+		t.Fatalf("Codex User-Agent fallback = %q, want client version %q", capturedUserAgent, codexClientVersion)
 	}
 	if capturedBeta != "responses_websockets=2026-02-06" || capturedResidency != "us" || capturedInstallation == "" {
 		t.Fatalf("missing codex identity headers beta=%q residency=%q installation=%q", capturedBeta, capturedResidency, capturedInstallation)
@@ -193,6 +205,36 @@ func TestResponses_OAuthCodexNonStreamReconstructsResponsesAndPreservesTools(t *
 	}
 	if output[0].(map[string]any)["type"] != "message" || output[1].(map[string]any)["type"] != "function_call" {
 		t.Fatalf("bad reconstructed output: %#v", output)
+	}
+}
+
+func TestApplyOAuthResponsesHeadersCodexPreservesClientVersionOverrides(t *testing.T) {
+	const (
+		callerUserAgent = "caller-codex/9.8.7 custom-suffix"
+		callerVersion   = "9.8.7-caller"
+		callerBeta      = "caller-beta"
+		callerTurnState = "caller-turn-state"
+	)
+	downstream := make(http.Header)
+	downstream.Set("User-Agent", callerUserAgent)
+	downstream.Set("Version", callerVersion)
+	downstream.Set("OpenAI-Beta", callerBeta)
+	downstream.Set("X-Codex-Turn-State", callerTurnState)
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.com/responses", nil)
+	model := &config.Model{OAuthProvider: config.OAuthProviderCodex}
+	token := &oauth.Token{AccessToken: "oauth-access-token", AccountID: "acct_123"}
+	applyOAuthResponsesHeaders(req, downstream, model, token, []byte(`{"model":"gpt-5.6-luna"}`), "installation-1", "conversation-1")
+
+	for name, want := range map[string]string{
+		"User-Agent":         callerUserAgent,
+		"Version":            callerVersion,
+		"OpenAI-Beta":        callerBeta,
+		"X-Codex-Turn-State": callerTurnState,
+	} {
+		if got := req.Header.Get(name); got != want {
+			t.Fatalf("%s override = %q, want exact caller value %q", name, got, want)
+		}
 	}
 }
 
@@ -260,14 +302,17 @@ func TestResponses_OAuthCodexClientMetadataDoesNotOverwriteCallerValues(t *testi
 	}
 }
 
-func TestResponses_OAuthCodexNormalizesFastServiceTier(t *testing.T) {
+func TestResponses_OAuthCodexGPT56ModelAndServiceTierForwarding(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
+		upstream   string
 		configured string
-		want       string
+		wantTier   string
 	}{
-		{name: "fast alias value", configured: "fast", want: "priority"},
-		{name: "verified priority value", configured: "priority", want: "priority"},
+		{name: "native Sol preset standard", upstream: "gpt-5.6-sol"},
+		{name: "native Sol preset fast", upstream: "gpt-5.6-sol", configured: "priority", wantTier: "priority"},
+		{name: "Terra fast", upstream: "gpt-5.6-terra", configured: "priority", wantTier: "priority"},
+		{name: "Luna fast normalization", upstream: "gpt-5.6-luna", configured: "fast", wantTier: "priority"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var captured map[string]any
@@ -281,7 +326,10 @@ func TestResponses_OAuthCodexNormalizesFastServiceTier(t *testing.T) {
 				_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[]}}`)
 				_, _ = fmt.Fprintln(w)
 			}, nil)
-			api.api.Cfg.Models[0].ExtraArgs = map[string]any{"service_tier": tc.configured}
+			api.api.Cfg.Models[0].UpstreamModel = tc.upstream
+			if tc.configured != "" {
+				api.api.Cfg.Models[0].ExtraArgs = map[string]any{"service_tier": tc.configured}
+			}
 
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
@@ -289,10 +337,63 @@ func TestResponses_OAuthCodexNormalizesFastServiceTier(t *testing.T) {
 			if w.Code != http.StatusOK {
 				t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 			}
-			if captured["service_tier"] != tc.want {
-				t.Fatalf("service_tier = %#v, want %q in captured payload %#v", captured["service_tier"], tc.want, captured)
+			if captured["model"] != tc.upstream {
+				t.Fatalf("model = %#v, want exact upstream %q in payload %#v", captured["model"], tc.upstream, captured)
+			}
+			gotTier, hasTier := captured["service_tier"]
+			if tc.wantTier == "" && hasTier {
+				t.Fatalf("standard request unexpectedly has service_tier %#v", gotTier)
+			}
+			if tc.wantTier != "" && gotTier != tc.wantTier {
+				t.Fatalf("service_tier = %#v, want %q in captured payload %#v", gotTier, tc.wantTier, captured)
 			}
 		})
+	}
+}
+
+func TestResponses_OAuthCodexPreservesGPT56ReasoningAndStripsPromptCacheOptions(t *testing.T) {
+	var captured map[string]any
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("captured request JSON: %v body=%s", err, body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(w, `event: response.completed`)
+		_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[]}}`)
+		_, _ = fmt.Fprintln(w)
+	}, nil)
+	api.api.Cfg.Models[0].UpstreamModel = "gpt-5.6-sol"
+
+	body := `{
+		"model":"droid-oauth",
+		"input":"review this",
+		"reasoning":{"effort":"max","mode":"pro"},
+		"prompt_cache_key":"cache-session",
+		"prompt_cache_options":{"mode":"explicit","ttl":"30m"},
+		"max_output_tokens":128000
+	}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	api.engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if captured["model"] != "gpt-5.6-sol" {
+		t.Fatalf("model was not forwarded exactly: %#v", captured)
+	}
+	reasoning, ok := captured["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "max" || reasoning["mode"] != "pro" {
+		t.Fatalf("reasoning effort/mode was altered instead of preserved: %#v", captured["reasoning"])
+	}
+	if _, exists := captured["prompt_cache_options"]; exists {
+		t.Fatalf("prompt_cache_options must be stripped for Codex OAuth: %#v", captured)
+	}
+	if captured["prompt_cache_key"] != "cache-session" {
+		t.Fatalf("prompt_cache_key must remain available for Codex caching: %#v", captured)
+	}
+	if _, exists := captured["max_output_tokens"]; exists {
+		t.Fatalf("max_output_tokens must still be stripped for Codex OAuth: %#v", captured)
 	}
 }
 

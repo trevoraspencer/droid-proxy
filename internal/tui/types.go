@@ -50,6 +50,8 @@ type oauthModelPreset struct {
 	BaseURL          string
 	MaxOutputTokens  int
 	MaxContextTokens int
+	ExtraArgs        map[string]any
+	Capabilities     config.Capabilities
 }
 
 type formField struct {
@@ -84,8 +86,9 @@ type model struct {
 
 	spin spinner.Model
 
-	form       []formField
-	formCursor int
+	form        []formField
+	formCursor  int
+	oauthPreset *oauthModelPreset
 
 	oauthProvider config.OAuthProvider
 	oauthCursor   int

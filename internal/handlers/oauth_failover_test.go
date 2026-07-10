@@ -40,6 +40,9 @@ type failoverTestOptions struct {
 	accounts             []failoverTestAccount
 	upstreamHandler      http.HandlerFunc
 	pinnedAccount        string
+	modelAlias           string
+	upstreamModel        string
+	extraArgs            map[string]any
 	responseBodyMaxBytes int64 // if > 0, override default response body limit
 }
 
@@ -64,6 +67,14 @@ func newCodexFailoverTestAPI(t *testing.T, opts failoverTestOptions) *testAPI {
 	if ec == 0 {
 		ec = 30 * time.Second
 	}
+	modelAlias := opts.modelAlias
+	if modelAlias == "" {
+		modelAlias = "droid-oauth"
+	}
+	upstreamModel := opts.upstreamModel
+	if upstreamModel == "" {
+		upstreamModel = "codex-upstream"
+	}
 
 	cfg := &config.Config{
 		OAuth: config.OAuth{
@@ -81,13 +92,14 @@ func newCodexFailoverTestAPI(t *testing.T, opts failoverTestOptions) *testAPI {
 			ResponseBodyMaxBytes: opts.responseBodyMaxBytes,
 		},
 		Models: []*config.Model{{
-			Alias:            "droid-oauth",
+			Alias:            modelAlias,
 			DisplayName:      "OAuth Test",
 			FactoryProvider:  config.FactoryProviderOpenAI,
 			UpstreamProtocol: config.UpstreamCodexResponses,
 			OAuthProvider:    config.OAuthProviderCodex,
 			BaseURL:          srv.URL,
-			UpstreamModel:    "codex-upstream",
+			UpstreamModel:    upstreamModel,
+			ExtraArgs:        opts.extraArgs,
 			OAuthAccount:     opts.pinnedAccount,
 		}},
 	}
@@ -485,6 +497,46 @@ func TestResponsesCodexFailoverNonRetryable4xxDoesNotFailover(t *testing.T) {
 	}
 	if atomic.LoadInt32(&attemptCount) != 1 {
 		t.Fatalf("non-retryable 4xx should not fail over, got %d attempts", attemptCount)
+	}
+}
+
+func TestResponsesCodexGPT56UnavailableDoesNotDowngradeOrFailOver(t *testing.T) {
+	var attemptCount int32
+	var capturedModel string
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers:  2,
+		modelAlias:    "gpt-5.6",
+		upstreamModel: "gpt-5.6-sol",
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+			{email: "c@test.com", accountID: "acct_c"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attemptCount, 1)
+			body, _ := io.ReadAll(r.Body)
+			var payload map[string]any
+			_ = json.Unmarshal(body, &payload)
+			capturedModel, _ = payload["model"].(string)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":{"message":"gpt-5.6-sol is unavailable for this account","type":"model_not_found"}}`))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6","input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "gpt-5.6-sol is unavailable") {
+		t.Fatalf("GPT-5.6 availability error was not surfaced: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if capturedModel != "gpt-5.6-sol" {
+		t.Fatalf("forwarded model = %q, want gpt-5.6-sol", capturedModel)
+	}
+	if atomic.LoadInt32(&attemptCount) != 1 {
+		t.Fatalf("GPT-5.6 4xx must not fail over or downgrade, got %d attempts", attemptCount)
 	}
 }
 
@@ -1050,7 +1102,10 @@ func TestResponsesCodexFailoverPayloadReplayStable(t *testing.T) {
 	var capturedPayloads []map[string]any
 
 	api := newCodexFailoverTestAPI(t, failoverTestOptions{
-		maxFailovers: 2,
+		maxFailovers:  2,
+		modelAlias:    "gpt-5.6-fast",
+		upstreamModel: "gpt-5.6-sol",
+		extraArgs:     map[string]any{"service_tier": "priority"},
 		accounts: []failoverTestAccount{
 			{email: "a@test.com", accountID: "acct_a"},
 			{email: "b@test.com", accountID: "acct_b"},
@@ -1076,7 +1131,7 @@ func TestResponsesCodexFailoverPayloadReplayStable(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-fast","input":"hi"}`))
 	api.engine.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -1085,11 +1140,20 @@ func TestResponsesCodexFailoverPayloadReplayStable(t *testing.T) {
 	if len(capturedPayloads) != 3 {
 		t.Fatalf("expected 3 captured payloads, got %d", len(capturedPayloads))
 	}
+	if capturedPayloads[0]["model"] != "gpt-5.6-sol" {
+		t.Fatalf("failover changed the requested model instead of only the account: %#v", capturedPayloads[0])
+	}
+	if capturedPayloads[0]["service_tier"] != "priority" {
+		t.Fatalf("fast preset lost priority service tier before failover replay: %#v", capturedPayloads[0])
+	}
 
-	// Verify model, stream, instructions, store are identical across attempts.
+	// Verify model, service tier, stream, instructions, and store are identical across attempts.
 	for i := 1; i < len(capturedPayloads); i++ {
 		if capturedPayloads[i]["model"] != capturedPayloads[0]["model"] {
 			t.Fatalf("model mismatch attempt 0 vs %d: %v vs %v", i, capturedPayloads[0]["model"], capturedPayloads[i]["model"])
+		}
+		if capturedPayloads[i]["service_tier"] != capturedPayloads[0]["service_tier"] {
+			t.Fatalf("service_tier mismatch attempt 0 vs %d: %v vs %v", i, capturedPayloads[0]["service_tier"], capturedPayloads[i]["service_tier"])
 		}
 		if capturedPayloads[i]["stream"] != capturedPayloads[0]["stream"] {
 			t.Fatalf("stream mismatch attempt 0 vs %d", i)

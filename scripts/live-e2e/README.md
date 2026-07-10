@@ -55,6 +55,21 @@ scripts/live-e2e/run-all-after-secrets.sh
 
 Results land in `~/.droid-proxy/live-e2e/<run-id>/results.ndjson`.
 
+The default Codex checks exercise both `gpt-5.6` and the local
+`gpt-5.6-fast` alias. Both map to the credential-validated explicit
+`gpt-5.6-sol` upstream; only the fast alias requests the priority service tier.
+The effective tier is account/backend dependent and appears in the response.
+Model access depends on the authenticated account, plan, workspace policy, and
+current usage limits; a 4xx is reported as a failure rather than silently
+testing another model. To run the
+higher-cost compatibility gate as well, set
+`LIVE_E2E_CODEX_GPT56_ADVANCED=1` in the external secrets env file.
+That probe sends `reasoning: {effort: "max"}` plus
+`prompt_cache_options: {mode: "explicit"}`; success verifies that max effort
+works and the proxy strips the unsupported cache options. It omits `mode: pro`,
+which returned upstream 400 on the credentialed test accounts; mode
+availability remains account/plan dependent.
+
 ## Notes
 
 - `LIVE_E2E_ENV_FILE` must stay outside the repository.

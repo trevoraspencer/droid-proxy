@@ -109,6 +109,19 @@ Run `droid-proxy auth codex --config config.yaml` or
 
 See [OAUTH.md](OAUTH.md) for the full OAuth walkthrough.
 
+For Codex OAuth, the dashboard's primary family is GPT-5.6: the recommended
+`gpt-5.6` Sol alias plus `gpt-5.6-terra` and `gpt-5.6-luna`, each with a local
+standard/fast pair. The public API aliases `gpt-5.6` to Sol, while the
+credential-validated private OAuth path requires explicit `gpt-5.6-sol`; both
+local Sol aliases therefore map to that explicit ID. Fast aliases keep their
+standard entry's upstream model and request `service_tier: priority`; the
+effective response tier is account/backend dependent and may remain `default`.
+The public API represents Pro as `reasoning.mode: pro`, not a model slug, but
+credentialed tests returned upstream 400 for that mode on the tested accounts.
+`effort: max` succeeds, reasoning is preserved unchanged, and all such 4xx
+responses are surfaced without model fallback. Mode and model availability
+remain account/plan dependent.
+
 For xAI OAuth, use `grok-build-0.1` for Grok Build coding behavior,
 `grok-composer-2.5-fast` for Composer 2.5 Fast via the Grok CLI OAuth endpoint,
 and `grok-4.3` for the broader xAI reasoning model. Configure

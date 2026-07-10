@@ -5,7 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // mergeFilterPath resolves scripts/live-e2e/merge-custom-models.jq relative to
@@ -54,6 +57,53 @@ func modelIDs(models []map[string]any) map[string]int {
 	return counts
 }
 
+func TestCodexGPT56LiveE2EDefaultsUseExplicitSol(t *testing.T) {
+	configPath, err := filepath.Abs(filepath.Join("..", "..", "docs", "live-e2e", "config.local.yaml.template"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type liveE2EModel struct {
+		Alias         string         `yaml:"alias"`
+		UpstreamModel string         `yaml:"upstream_model"`
+		ExtraArgs     map[string]any `yaml:"extra_args"`
+	}
+	var template struct {
+		Models []liveE2EModel `yaml:"models"`
+	}
+	if err := yaml.Unmarshal(configBytes, &template); err != nil {
+		t.Fatalf("parse live-E2E config template: %v", err)
+	}
+
+	models := make(map[string]liveE2EModel, len(template.Models))
+	for _, model := range template.Models {
+		models[model.Alias] = model
+	}
+	const wantUpstream = "${CODEX_UPSTREAM_MODEL:-gpt-5.6-sol}"
+	if got := models["gpt-5.6"]; got.UpstreamModel != wantUpstream || got.ExtraArgs["service_tier"] != nil {
+		t.Fatalf("standard Codex live-E2E default = %#v, want upstream %q with no service tier", got, wantUpstream)
+	}
+	if got := models["gpt-5.6-fast"]; got.UpstreamModel != wantUpstream || got.ExtraArgs["service_tier"] != "priority" {
+		t.Fatalf("fast Codex live-E2E default = %#v, want upstream %q with priority tier", got, wantUpstream)
+	}
+
+	envPath, err := filepath.Abs(filepath.Join("..", "..", "docs", "live-e2e", "env.live-e2e.example"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	envBytes, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(envBytes), `export CODEX_UPSTREAM_MODEL="gpt-5.6-sol"`) {
+		t.Fatalf("live-E2E env example must default CODEX_UPSTREAM_MODEL to gpt-5.6-sol")
+	}
+}
+
 // TestMergeCustomModelsPreservesUnrelatedAndUpserts verifies the safe-by-default
 // settings merge: an unrelated pre-existing model is preserved, an e2e model id
 // that already exists is upserted (replaced, not duplicated, with the e2e
@@ -68,12 +118,12 @@ func TestMergeCustomModelsPreservesUnrelatedAndUpserts(t *testing.T) {
 	dir := t.TempDir()
 
 	// Existing settings: one unrelated model (keep-me) and a stale copy of an
-	// e2e model id (gpt-5.2-codex) with an outdated displayName.
+	// e2e model id (gpt-5.6) with an outdated displayName.
 	existing := `{
       "someOtherKey": "preserved",
       "customModels": [
         {"model":"keep-me","displayName":"Keep","provider":"x","baseUrl":"https://k","maxOutputTokens":1},
-        {"model":"gpt-5.2-codex","displayName":"OLD codex","provider":"openai","baseUrl":"https://old","maxOutputTokens":42}
+        {"model":"gpt-5.6","displayName":"OLD codex","provider":"openai","baseUrl":"https://old","maxOutputTokens":42}
       ]
     }`
 	settingsPath := filepath.Join(dir, "settings.json")
@@ -82,7 +132,7 @@ func TestMergeCustomModelsPreservesUnrelatedAndUpserts(t *testing.T) {
 	}
 
 	e2e := `[
-      {"model":"gpt-5.2-codex","displayName":"GPT-5.2 Codex (ChatGPT OAuth)","provider":"openai","baseUrl":"http://127.0.0.1:8787","apiKey":"not-required-when-client-auth-disabled","maxOutputTokens":128000},
+      {"model":"gpt-5.6","displayName":"GPT-5.6 Sol (Codex OAuth)","provider":"openai","baseUrl":"http://127.0.0.1:8787","apiKey":"not-required-when-client-auth-disabled","maxOutputTokens":128000},
       {"model":"fireworks-live","displayName":"Fireworks Live","provider":"generic-chat-completion-api","baseUrl":"http://127.0.0.1:8787","apiKey":"not-required-when-client-auth-disabled","maxOutputTokens":8192}
     ]`
 
@@ -92,8 +142,8 @@ func TestMergeCustomModelsPreservesUnrelatedAndUpserts(t *testing.T) {
 	if counts["keep-me"] != 1 {
 		t.Fatalf("unrelated model keep-me not preserved exactly once: counts=%v", counts)
 	}
-	if counts["gpt-5.2-codex"] != 1 {
-		t.Fatalf("e2e model gpt-5.2-codex not upserted exactly once (dup or missing): counts=%v", counts)
+	if counts["gpt-5.6"] != 1 {
+		t.Fatalf("e2e model gpt-5.6 not upserted exactly once (dup or missing): counts=%v", counts)
 	}
 	if counts["fireworks-live"] != 1 {
 		t.Fatalf("new e2e model fireworks-live not added: counts=%v", counts)
@@ -103,12 +153,12 @@ func TestMergeCustomModelsPreservesUnrelatedAndUpserts(t *testing.T) {
 	}
 	// The upserted entry must carry the e2e definition, not the stale one.
 	for _, m := range models {
-		if m["model"] == "gpt-5.2-codex" {
-			if m["displayName"] != "GPT-5.2 Codex (ChatGPT OAuth)" {
-				t.Fatalf("gpt-5.2-codex not replaced with e2e definition: displayName=%v", m["displayName"])
+		if m["model"] == "gpt-5.6" {
+			if m["displayName"] != "GPT-5.6 Sol (Codex OAuth)" {
+				t.Fatalf("gpt-5.6 not replaced with e2e definition: displayName=%v", m["displayName"])
 			}
 			if m["baseUrl"] != "http://127.0.0.1:8787" {
-				t.Fatalf("gpt-5.2-codex baseUrl not from e2e set: %v", m["baseUrl"])
+				t.Fatalf("gpt-5.6 baseUrl not from e2e set: %v", m["baseUrl"])
 			}
 		}
 	}

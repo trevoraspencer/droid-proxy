@@ -159,6 +159,54 @@ func TestModels_AgentReadyFlag(t *testing.T) {
 	}
 }
 
+func TestModels_GPT56Metadata(t *testing.T) {
+	engine := newModelsTestAPI(t, []*config.Model{{
+		Alias:            "gpt-5.6",
+		DisplayName:      "GPT-5.6 Sol (Codex OAuth)",
+		FactoryProvider:  config.FactoryProviderOpenAI,
+		UpstreamProtocol: config.UpstreamCodexResponses,
+		OAuthProvider:    config.OAuthProviderCodex,
+		UpstreamModel:    "gpt-5.6-sol",
+		MaxOutputTokens:  128000,
+		MaxContextTokens: 1050000,
+		Capabilities: config.Capabilities{
+			Streaming:        boolPtr(true),
+			Tools:            boolPtr(true),
+			ToolResultSafe:   boolPtr(true),
+			Images:           boolPtr(true),
+			JSONMode:         boolPtr(true),
+			StructuredOutput: boolPtr(true),
+			FactoryReasoning: config.FactoryReasoningPassthrough,
+			PromptCaching:    boolPtr(true),
+		},
+	}})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	got := resp.Data[0]
+	if got["upstream_model"] != "gpt-5.6-sol" || got["max_output_tokens"] != float64(128000) || got["max_context_tokens"] != float64(1050000) || got["agent_ready"] != true {
+		t.Fatalf("bad GPT-5.6 metadata: %#v", got)
+	}
+	caps := got["capabilities"].(map[string]any)
+	for _, key := range []string{"streaming", "tools", "tool_result_safe", "images", "json_mode", "structured_output", "prompt_caching"} {
+		if caps[key] != true {
+			t.Fatalf("capability %s = %#v, want true: %#v", key, caps[key], caps)
+		}
+	}
+	if caps["factory_reasoning"] != string(config.FactoryReasoningPassthrough) {
+		t.Fatalf("factory_reasoning = %#v", caps["factory_reasoning"])
+	}
+}
+
 func TestModels_EmptyList(t *testing.T) {
 	engine := newModelsTestAPI(t, nil)
 	w := httptest.NewRecorder()

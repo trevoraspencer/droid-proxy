@@ -112,7 +112,7 @@ run_missing_oauth_token_check() {
 
 run_invalid_alias_check
 run_missing_env_check
-run_missing_oauth_token_check "codex" "gpt-5.2-codex" "ChatGPT/Codex OAuth"
+run_missing_oauth_token_check "codex" "gpt-5.6" "ChatGPT/Codex OAuth (GPT-5.6 Sol)"
 run_missing_oauth_token_check "xai" "grok-build-0.1" "xAI OAuth"
 run_missing_oauth_token_check "xai" "grok-composer-2.5-fast" "xAI OAuth (Composer 2.5 Fast)"
 

@@ -70,7 +70,7 @@ func TestResponses_NonStream_NativePassthrough(t *testing.T) {
 		_, _ = w.Write([]byte(upstreamBody))
 	}, nil)
 
-	reqBody := `{"model":"droid-gpt","input":"hi"}`
+	reqBody := `{"model":"droid-gpt","input":"hi","prompt_cache_options":{"mode":"explicit","ttl":"30m"}}`
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
 	api.engine.ServeHTTP(w, req)
@@ -82,6 +82,14 @@ func TestResponses_NonStream_NativePassthrough(t *testing.T) {
 	}
 	if !strings.Contains(seenModel, "gpt-test") {
 		t.Errorf("expected upstream model rewritten, got body=%s", seenModel)
+	}
+	var seenPayload map[string]any
+	if err := json.Unmarshal([]byte(seenModel), &seenPayload); err != nil {
+		t.Fatalf("decode native upstream payload: %v", err)
+	}
+	cache, ok := seenPayload["prompt_cache_options"].(map[string]any)
+	if !ok || cache["mode"] != "explicit" || cache["ttl"] != "30m" {
+		t.Fatalf("public non-OAuth prompt_cache_options changed: %#v", seenPayload)
 	}
 	if w.Body.String() != upstreamBody {
 		t.Errorf("body mismatch:\nwant=%s\ngot =%s", upstreamBody, w.Body.String())

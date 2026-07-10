@@ -18,7 +18,11 @@ Full example pages:
 
 ## Prerequisites
 
-- **Codex:** ChatGPT account with Codex access (typically ChatGPT Plus or Pro).
+- **Codex:** ChatGPT account with Codex access to the configured model. Current
+  published availability includes GPT-5.6 Terra for Free/Go and Sol, Terra,
+  and Luna for eligible Plus, Pro, Business, and Enterprise accounts; managed
+  workspace policy and usage limits also apply. See OpenAI's
+  [availability article](https://help.openai.com/en/articles/20001354).
 - **xAI:** subscription access for the xAI OAuth model you configure.
 - A working `config.yaml` with OAuth callback settings (defaults in
   `config.example.yaml` are usually fine).
@@ -63,13 +67,52 @@ then polls until the browser approval completes.
 
 ```yaml
 models:
-  - alias: gpt-5.2-codex
-    display_name: "GPT-5.2 Codex (ChatGPT OAuth)"
+  - alias: gpt-5.6
+    display_name: "GPT-5.6 Sol (Codex OAuth)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: gpt-5.2-codex
+    upstream_model: gpt-5.6-sol
+    max_output_tokens: 128000
+    max_context_tokens: 1050000
+    capabilities:
+      streaming: true
+      tools: true
+      tool_result_safe: true
+      images: true
+      json_mode: true
+      structured_output: true
+      factory_reasoning: passthrough
+      prompt_caching: true
+
+  - alias: gpt-5.6-fast # local alias; private OAuth uses explicit Sol ID
+    display_name: "GPT-5.6 Sol Fast (Codex OAuth)"
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: gpt-5.6-sol
+    max_output_tokens: 128000
+    max_context_tokens: 1050000
+    extra_args:
+      service_tier: priority
+    capabilities:
+      streaming: true
+      tools: true
+      tool_result_safe: true
+      images: true
+      json_mode: true
+      structured_output: true
+      factory_reasoning: passthrough
+      prompt_caching: true
 ```
+
+The dashboard also provides standard and fast presets for `gpt-5.6-terra`
+and `gpt-5.6-luna`. The public API documents `gpt-5.6` as the recommended Sol
+alias, but credentialed validation shows that the private Codex OAuth backend
+requires the explicit `gpt-5.6-sol` ID. The dashboard therefore keeps the
+user-facing local aliases `gpt-5.6` and `gpt-5.6-fast` while mapping both to
+`gpt-5.6-sol`; only the fast entry requests
+`extra_args.service_tier: priority`.
 
 ### xAI
 
@@ -125,8 +168,8 @@ Use `provider: "openai"` and point `baseUrl` at the proxy:
 {
   "customModels": [
     {
-      "model": "gpt-5.2-codex",
-      "displayName": "GPT-5.2 Codex (ChatGPT OAuth)",
+      "model": "gpt-5.6",
+      "displayName": "GPT-5.6 Sol (Codex OAuth)",
       "provider": "openai",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
@@ -328,17 +371,46 @@ Codex clients, including `x-codex-installation-id`, `x-client-request-id`,
 window identifiers are merged into `client_metadata` without overwriting caller
 provided metadata keys.
 
+OpenAI's
+[GPT-5.6 availability article](https://help.openai.com/en/articles/20001354)
+lists Codex CLI `0.144.0` as the minimum version for GPT-5.6. When the
+downstream request omits them, the proxy therefore supplies `Version: 0.144.0`
+and a `codex_cli_rs/0.144.0` User-Agent fallback. Caller-supplied `Version` and
+`User-Agent` values are forwarded unchanged.
+
 The proxy also applies small Codex compatibility fixes automatically:
 
-- Rewrites the Factory-facing model alias to `upstream_model`.
-- Accepts `extra_args.service_tier: fast` in config and normalizes it to the
-  verified Codex value `priority`.
+- Rewrites the Factory-facing model alias to `upstream_model`. For the local
+  `gpt-5.6` Sol aliases, that means forwarding `gpt-5.6-sol`: credentialed
+  private-OAuth validation rejects the public API's unsuffixed alias.
+- Accepts `extra_args.service_tier: fast` in config and normalizes the outgoing
+  request to `priority`. The effective tier is account/backend dependent and
+  appears in the response.
 - Forces `store: false` and adds default Codex instructions only when the
   caller did not provide instructions.
-- Preserves Factory's `reasoning` object, so the reasoning level selected in
-  Droid can flow through on the same custom model.
+- Preserves Factory's `reasoning` object exactly. Credentialed validation
+  confirms GPT-5.6 `effort: max` succeeds, while the tested accounts returned
+  an upstream 400 for `mode: pro` on Sol, Terra, and Luna. The proxy does not
+  strip or downgrade Pro; it surfaces that response. Mode availability remains
+  account/plan dependent.
+- Strips public `prompt_cache_options`, which the private endpoint rejects,
+  while preserving `prompt_cache_key` for private prompt caching. The legacy
+  `prompt_cache_retention` field remains stripped.
 - Drops `max_output_tokens`, which Factory may send from custom-model settings
   but the Codex OAuth endpoint rejects.
+- Continues to strip `previous_response_id`, `safety_identifier`, and
+  `stream_options`. Public API guidance for those fields does not establish
+  support on the private ChatGPT/Codex OAuth backend.
+
+The public OpenAI API documents GPT-5.6 IDs and capabilities, but it does not
+document this private OAuth backend contract. Credentialed validation
+establishes the explicit Sol mapping above and confirms standard Luna with
+current Codex client-version metadata. The fallback uses OpenAI's documented
+minimum client version; it is not a claim that the private header contract is
+public. Model and mode availability beyond those observations remains account-
+and plan-dependent. Run the credentialed live-E2E gate before relying on a path
+in production. A non-retryable 4xx is returned as-is; Codex failover switches
+accounts only and never changes `upstream_model`.
 
 ## xAI request handling
 
@@ -368,26 +440,32 @@ For streamed responses the proxy also repairs `response.completed` events whose
 ## Reasoning and fast mode
 
 Use Factory Droid's reasoning selector when the upstream supports it. Codex
-OAuth accepts the top-level `reasoning` object, so one custom model can cover
-multiple reasoning levels. xAI OAuth is model-specific: `grok-build-0.1`
-currently rejects that top-level effort parameter, and
+OAuth preserves the top-level `reasoning` object exactly; credentialed
+validation confirms `effort: max` works. The public API represents Pro as
+`reasoning.mode: pro`, not a `*-pro` model ID, but the private Codex OAuth
+tests returned HTTP 400 for that mode on Sol, Terra, and Luna with the tested
+accounts. The proxy forwards it unchanged and surfaces the error instead of
+silently downgrading; mode availability remains account/plan dependent. xAI
+OAuth is model-specific: `grok-build-0.1` currently rejects
+that top-level effort parameter, and
 `grok-composer-2.5-fast` does not support reasoning effort on the Grok CLI OAuth
 endpoint, so configure both with `capabilities.factory_reasoning: drop`;
 `grok-4.3` supports configurable reasoning, so configure
 `capabilities.factory_reasoning: passthrough`.
 Encrypted reasoning round-trip fields are still preserved where needed.
 
-Use a separate alias for provider fast/speed modes once the provider-specific
-request field is verified. For example, keep `gpt-5.5-chatgpt` and
-`gpt-5.5-chatgpt-fast` as separate custom models, with the fast alias carrying
-only the additional `extra_args` needed by that upstream.
+Use the GPT-5.6 preset pairs for fast mode. For example, `gpt-5.6` and the
+local alias `gpt-5.6-fast` both forward `model: gpt-5.6-sol`; only the fast
+entry requests `service_tier: priority`. Terra and Luna use their explicit
+family IDs with the same standard/fast pattern. The response reports the
+effective tier, which may remain `default` depending on the account/backend.
 
 ## Verify
 
 ```bash
 curl -sS http://127.0.0.1:8787/v1/responses \
   -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-5.2-codex","input":"hello"}' | jq '.output'
+  -d '{"model":"gpt-5.6","input":"hello"}' | jq '.output'
 ```
 
 See [SMOKE.md](SMOKE.md) for more checks.

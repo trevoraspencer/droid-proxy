@@ -153,10 +153,28 @@ Codex example:
 curl -sS http://127.0.0.1:8787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "gpt-5.2-codex",
+    "model": "gpt-5.6",
     "input": "hello"
   }' | jq '.output'
 ```
+
+`gpt-5.6` is the recommended local Sol alias. The public API documents that
+unsuffixed ID as a Sol alias, but the credential-validated private OAuth path
+requires the proxy config to map it to explicit `gpt-5.6-sol`. The dashboard
+also provides local standard/fast pairs for Sol, Terra, and Luna; each fast
+alias keeps the standard entry's upstream model and requests
+`service_tier: priority`. The effective tier is account/backend dependent and
+is visible in the response. Availability depends on the logged-in account,
+plan, and workspace policy. An
+unavailable-model 4xx is a real validation failure and is surfaced without
+model downgrade.
+
+Credentialed maintainers can additionally set
+`LIVE_E2E_CODEX_GPT56_ADVANCED=1` for the max-reasoning and cache-options
+sanitization gate described in `scripts/live-e2e/README.md`. The probe omits
+`mode: pro`: the credentialed test accounts returned upstream 400 for that
+public API mode, and the proxy intentionally does not downgrade it. Mode
+availability remains account/plan dependent.
 
 xAI examples:
 
