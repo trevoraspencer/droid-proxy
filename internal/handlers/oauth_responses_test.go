@@ -614,8 +614,85 @@ func TestApplyOAuthResponsesHeaders_XAICLIChatProxyHeaders(t *testing.T) {
 	if got := req.Header.Get("x-grok-client-version"); got != xaiGrokClientVersion {
 		t.Fatalf("x-grok-client-version = %q, want %q", got, xaiGrokClientVersion)
 	}
+	if got := req.Header.Get("x-grok-client-identifier"); got != "grok-shell" {
+		t.Fatalf("x-grok-client-identifier = %q, want grok-shell", got)
+	}
+	if got := req.Header.Get("x-grok-client-surface"); got != "grok-build" {
+		t.Fatalf("x-grok-client-surface = %q, want grok-build", got)
+	}
+	if got := req.Header.Get("X-XAI-Token-Auth"); got != "xai-grok-cli" {
+		t.Fatalf("X-XAI-Token-Auth = %q, want xai-grok-cli", got)
+	}
 	if got := req.Header.Get("Authorization"); got != "Bearer oauth-access-token" {
 		t.Fatalf("authorization header = %q", got)
+	}
+}
+
+func TestApplyOAuthResponsesHeaders_XAIGrok45ExactOverrideAndCacheConversation(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "https://cli-chat-proxy.grok.com/v1/responses", nil)
+	model := &config.Model{
+		Alias:         "grok-4.5",
+		BaseURL:       "https://cli-chat-proxy.grok.com/v1",
+		OAuthProvider: config.OAuthProviderXAI,
+		UpstreamModel: "grok-4.5",
+	}
+	token := &oauth.Token{Type: string(config.OAuthProviderXAI), AccessToken: "oauth-access-token"}
+	applyOAuthResponsesHeaders(req, http.Header{}, model, token, []byte(`{"model":"grok-4.5","prompt_cache_key":"cache-45"}`), "", "")
+
+	if got := req.Header.Get("x-grok-model-override"); got != "grok-4.5" {
+		t.Fatalf("x-grok-model-override = %q, want grok-4.5", got)
+	}
+	if got := req.Header.Get("x-grok-conv-id"); got != "cache-45" {
+		t.Fatalf("x-grok-conv-id = %q, want cache-45", got)
+	}
+	url, err := oauthResponsesURL(model, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if url != "https://cli-chat-proxy.grok.com/v1/responses" {
+		t.Fatalf("Grok 4.5 OAuth URL = %q", url)
+	}
+}
+
+func TestResponses_OAuthXAIGrok45PreservesReasoningCacheAndOverride(t *testing.T) {
+	var captured map[string]any
+	var override, convID string
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
+		override = r.Header.Get("x-grok-model-override")
+		convID = r.Header.Get("x-grok-conv-id")
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("captured request JSON: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(w, `event: response.completed`)
+		_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp_45","object":"response","status":"completed","output":[]}}`)
+		_, _ = fmt.Fprintln(w)
+	}, nil)
+	model := api.api.Cfg.Models[0]
+	model.BaseURL = api.upstream.URL + "/v1"
+	model.UpstreamModel = "grok-4.5"
+	model.Capabilities.FactoryReasoning = config.FactoryReasoningPassthrough
+	promptCaching := true
+	model.Capabilities.PromptCaching = &promptCaching
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi","reasoning":{"effort":"medium"},"prompt_cache_key":"cache-45"}`))
+	api.engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if captured["model"] != "grok-4.5" || captured["prompt_cache_key"] != "cache-45" {
+		t.Fatalf("Grok 4.5 mapping/cache lost: %#v", captured)
+	}
+	reasoning, _ := captured["reasoning"].(map[string]any)
+	if reasoning["effort"] != "medium" {
+		t.Fatalf("Grok 4.5 reasoning lost: %#v", captured)
+	}
+	// The local fake host is intentionally not recognized as the CLI proxy, so
+	// header behavior is covered separately with the canonical host.
+	if override != "" || convID != "cache-45" {
+		t.Fatalf("unexpected local-route headers override=%q conv=%q", override, convID)
 	}
 }
 

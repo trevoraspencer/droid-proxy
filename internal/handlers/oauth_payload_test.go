@@ -2,9 +2,36 @@ package handlers
 
 import (
 	"encoding/json"
+	"net/http"
 	"reflect"
 	"testing"
+
+	"github.com/tidwall/gjson"
+
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
+
+func TestPrepareOAuthResponsesPayload_XAIPrivateEndpointForcesUpstreamStreaming(t *testing.T) {
+	cliModel := &config.Model{
+		OAuthProvider: config.OAuthProviderXAI,
+		BaseURL:       "https://cli-chat-proxy.grok.com/v1",
+		UpstreamModel: "grok-4.5",
+	}
+	got := prepareOAuthResponsesPayload([]byte(`{"model":"grok-4.5","input":"hi","stream":false}`), cliModel, false, http.Header{})
+	if !gjson.GetBytes(got, "stream").Bool() {
+		t.Fatalf("CLI proxy upstream stream was not forced true: %s", got)
+	}
+
+	publicModel := &config.Model{
+		OAuthProvider: config.OAuthProviderXAI,
+		BaseURL:       "https://api.x.ai/v1",
+		UpstreamModel: "grok-4.3",
+	}
+	got = prepareOAuthResponsesPayload([]byte(`{"model":"grok-4.3","input":"hi","stream":false}`), publicModel, false, http.Header{})
+	if gjson.GetBytes(got, "stream").Bool() {
+		t.Fatalf("public xAI upstream stream unexpectedly changed: %s", got)
+	}
+}
 
 // TestSanitizeXAIToolSchema_KeywordPositionsOnly pins that the xAI schema
 // sanitizer strips unsupported JSON-Schema keywords only at keyword positions.

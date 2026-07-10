@@ -7,7 +7,7 @@
 | **Tier** | T1 OAuth - native xAI Responses passthrough |
 | **Factory mode** | `openai` |
 | **Upstream protocol** | `xai-responses` |
-| **When to use** | xAI subscription-backed models such as Grok Build, Composer 2.5 Fast, and Grok 4.3 |
+| **When to use** | xAI subscription-backed models such as Grok 4.5, Composer 2.5 Fast, Grok Build 0.1, and Grok 4.3 |
 
 For pay-per-use API-key access, see [xai.md](xai.md).
 
@@ -23,6 +23,30 @@ Uses browser PKCE login. See [OAUTH.md](../OAUTH.md) for the full walkthrough.
 > [CLI.md](../CLI.md#interactive-config-dashboard).
 
 ## config.yaml
+
+Grok 4.5 is the recommended xAI OAuth preset and the current Grok Build
+default. The private Grok Build route is a separate contract from the public
+xAI API, so this preset explicitly uses the Grok CLI proxy and model-override
+headers. It preserves `prompt_cache_key` and passes through Factory's supported
+low, medium, and high reasoning levels. The 500,000-token context window is
+publicly documented; the example intentionally makes no upstream maximum-output
+claim. Factory's JSON entry below uses droid-proxy's standard local 128,000-token
+client cap.
+
+```yaml
+models:
+  - alias: grok-4.5
+    display_name: "Grok 4.5 (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    base_url: https://cli-chat-proxy.grok.com/v1
+    upstream_model: grok-4.5
+    max_context_tokens: 500000
+    capabilities:
+      factory_reasoning: passthrough
+      prompt_caching: true
+```
 
 Grok Build is the Grok Build coding model. Factory's top-level reasoning effort
 is dropped because Grok Build currently rejects that parameter.
@@ -89,6 +113,14 @@ Optional: pin any xAI OAuth model to a specific logged-in account:
 {
   "customModels": [
     {
+      "model": "grok-4.5",
+      "displayName": "Grok 4.5 (xAI OAuth)",
+      "provider": "openai",
+      "baseUrl": "http://127.0.0.1:8787",
+      "apiKey": "x",
+      "maxOutputTokens": 128000
+    },
+    {
       "model": "grok-build-0.1",
       "displayName": "Grok Build 0.1 (xAI OAuth)",
       "provider": "openai",
@@ -125,6 +157,17 @@ droid-proxy status
 ```
 
 ## Verify
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/responses \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "grok-4.5",
+    "input": "hello",
+    "prompt_cache_key": "example-conversation",
+    "reasoning": {"effort": "high"}
+  }' | jq '.output'
+```
 
 ```bash
 curl -sS http://127.0.0.1:8787/v1/responses \
@@ -170,6 +213,12 @@ Check the model is logged in: `curl -s http://127.0.0.1:8787/v1/models | jq
 
 ## Notes
 
+- `grok-4.5` is the recommended xAI OAuth alias and uses the private Grok CLI
+  proxy because Grok 4.5 is Grok Build's current default. Public API success is
+  not evidence that an account can use this private OAuth route.
+- Grok 4.5 access depends on account plan and region. At launch, xAI documents
+  Grok 4.5 as unavailable in the EU, with EU availability expected in mid-July
+  2026; verify the current xAI documentation for later changes.
 - `grok-build-0.1` is documented by xAI as the API model that powers Grok Build.
 - `grok-composer-2.5-fast` is the Grok Build / Grok CLI OAuth model key for
   Composer 2.5 Fast and uses `https://cli-chat-proxy.grok.com/v1`.
@@ -181,10 +230,12 @@ Check the model is logged in: `curl -s http://127.0.0.1:8787/v1/models | jq
   `reasoning` object for models that support configurable reasoning.
 - Callback defaults: `127.0.0.1:56121/callback` (configurable under `oauth:`).
 - The proxy automatically sanitizes the outbound request for xAI Responses
-  compatibility (tool normalization, encrypted reasoning, completed-output
-  repair) - see [xAI request handling](../OAUTH.md#xai-request-handling).
+  compatibility (private CLI auth/model headers, forced upstream streaming,
+  tool normalization, encrypted reasoning, completed-output repair) - see
+  [xAI request handling](../OAUTH.md#xai-request-handling).
 - Ready-to-paste Factory snippet: [xai-oauth.json](../factory-settings/xai-oauth.json).
 - xAI references: [Composer 2.5](https://x.ai/news/composer-2-5),
   [Grok Build 0.1](https://docs.x.ai/developers/models/grok-build-0.1),
+  [Grok 4.5](https://docs.x.ai/developers/grok-4-5),
   [Grok 4.3](https://docs.x.ai/developers/models/grok-4.3), and
   [reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning).

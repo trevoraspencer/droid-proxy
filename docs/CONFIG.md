@@ -327,6 +327,18 @@ models:
       factory_reasoning: passthrough
       prompt_caching: true
 
+  - alias: grok-4.5
+    display_name: "Grok 4.5 (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    base_url: https://cli-chat-proxy.grok.com/v1
+    upstream_model: grok-4.5
+    max_context_tokens: 500000
+    capabilities:
+      factory_reasoning: passthrough
+      prompt_caching: true
+
   - alias: grok-build-0.1
     display_name: "Grok Build 0.1 (xAI OAuth)"
     factory_provider: openai

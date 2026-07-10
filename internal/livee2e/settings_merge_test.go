@@ -153,6 +153,47 @@ func TestCodexGPT56LiveE2EDefaultsUseExplicitSol(t *testing.T) {
 	}
 }
 
+func TestXAIOAuthLiveE2EMappingsIgnoreRetiredOverrides(t *testing.T) {
+	configPath, err := filepath.Abs(filepath.Join("..", "..", "docs", "live-e2e", "config.local.yaml.template"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{
+		"XAI_GROK_BUILD_MODEL": "wrong-build",
+		"XAI_COMPOSER_MODEL":   "wrong-composer",
+		"XAI_GROK_MODEL":       "wrong-grok",
+		"DEEPSEEK_API_KEY":     "test-deepseek",
+		"ZAI_CODING_API_KEY":   "test-zai",
+		"FIREWORKS_API_KEY":    "test-fireworks",
+		"FIREWORKS_MODEL":      "accounts/test/models/test",
+		"MIMO_API_KEY":         "test-mimo",
+		"MIMO_KNOWN_AUTH":      "mimo",
+	} {
+		t.Setenv(key, value)
+	}
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"grok-4.5":               "grok-4.5",
+		"grok-build-0.1":         "grok-build-0.1",
+		"grok-composer-2.5-fast": "grok-composer-2.5-fast",
+		"grok-4.3":               "grok-4.3",
+	}
+	for _, model := range loaded.Models {
+		if upstream, ok := want[model.Alias]; ok {
+			if model.UpstreamModel != upstream {
+				t.Errorf("retired env changed %s to %q, want %q", model.Alias, model.UpstreamModel, upstream)
+			}
+			delete(want, model.Alias)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing fixed xAI aliases: %#v", want)
+	}
+}
+
 func TestCodexOAuthWalkthroughAndFactorySnippetAliasesMatch(t *testing.T) {
 	walkthroughPath, err := filepath.Abs(filepath.Join("..", "..", "docs", "examples", "codex-oauth.md"))
 	if err != nil {

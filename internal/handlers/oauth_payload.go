@@ -18,7 +18,14 @@ const (
 
 func prepareOAuthResponsesPayload(body []byte, m *config.Model, stream bool, downstream http.Header) []byte {
 	out := applyUpstreamPayloadOverrides(body, m)
-	if next, err := sjson.SetBytes(out, "stream", stream); err == nil {
+	upstreamStream := stream
+	// Grok Build's private inference clusters are stream-only. Keep the
+	// downstream contract independent: non-streaming callers still receive a
+	// reconstructed JSON response after the upstream SSE stream completes.
+	if m != nil && m.OAuthProvider == config.OAuthProviderXAI && xaiUsesCLIChatProxy(m, nil) {
+		upstreamStream = true
+	}
+	if next, err := sjson.SetBytes(out, "stream", upstreamStream); err == nil {
 		out = next
 	}
 	if m.OAuthProvider == config.OAuthProviderCodex {

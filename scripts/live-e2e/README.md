@@ -62,6 +62,11 @@ The harness verifies those loaded mappings before sending provider requests.
 The GPT-5.6 mappings are fixed in the harness config and have no environment
 override; the previous `CODEX_UPSTREAM_MODEL` name is retired and ignored so a
 preserved GPT-5.2 env file cannot produce a false GPT-5.6 pass.
+The xAI OAuth mappings are fixed for the same reason: `grok-4.5`,
+`grok-build-0.1`, `grok-composer-2.5-fast`, and `grok-4.3` cannot be replaced
+by stale `XAI_*_MODEL` environment overrides. Before any provider request, the
+harness checks every loaded alias-to-upstream mapping. Grok 4.5 additionally
+probes low, medium, and high reasoning with a stable `prompt_cache_key`.
 The effective tier is account/backend dependent and appears in the response.
 Model access depends on the authenticated account, plan, workspace policy, and
 current usage limits; a 4xx is reported as a failure rather than silently

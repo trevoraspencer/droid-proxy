@@ -182,6 +182,17 @@ xAI examples:
 curl -sS http://127.0.0.1:8787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
+    "model": "grok-4.5",
+    "input": "hello",
+    "prompt_cache_key": "smoke-conversation",
+    "reasoning": {"effort": "high"}
+  }' | jq '.output'
+```
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/responses \
+  -H 'Content-Type: application/json' \
+  -d '{
     "model": "grok-build-0.1",
     "input": "hello"
   }' | jq '.output'

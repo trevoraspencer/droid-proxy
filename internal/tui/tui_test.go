@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/trevoraspencer/droid-proxy/internal/config"
 	"github.com/trevoraspencer/droid-proxy/internal/configedit"
 	"github.com/trevoraspencer/droid-proxy/internal/factory"
+	"gopkg.in/yaml.v3"
 )
 
 func TestDefaultAlias(t *testing.T) {
@@ -425,17 +427,34 @@ func TestBackendAddModelRejectsAliasCollisionWithoutChangingConfig(t *testing.T)
 
 func TestXAIOAuthPresets(t *testing.T) {
 	items := oauthPickItems(config.OAuthProviderXAI)
-	if len(items) != 4 || items[0] != manualEntryLabel || items[1] != "Grok Build 0.1" || items[2] != "Composer 2.5 Fast" || items[3] != "Grok 4.3" {
+	if len(items) != 5 || items[0] != manualEntryLabel || items[1] != "Grok 4.5 (Recommended)" || items[2] != "Grok Build 0.1" || items[3] != "Composer 2.5 Fast" || items[4] != "Grok 4.3" {
 		t.Fatalf("xaiOAuthPickItems = %#v", items)
+	}
+
+	grok45, ok := oauthPresetByLabel(config.OAuthProviderXAI, "Grok 4.5 (Recommended)")
+	if !ok {
+		t.Fatal("missing Grok 4.5 preset")
+	}
+	m := newFormModel(t, providerChoice{kind: pkOAuth, oauth: config.OAuthProviderXAI, label: "xAI OAuth"}, nil)
+	m.applyOAuthPreset(grok45)
+	built, err := m.buildModelFromForm()
+	if err != nil {
+		t.Fatalf("build Grok 4.5 preset: %v", err)
+	}
+	if built.Alias != "grok-4.5" || built.UpstreamModel != "grok-4.5" || built.BaseURL != "https://cli-chat-proxy.grok.com/v1" {
+		t.Fatalf("bad Grok 4.5 preset model: %#v", built)
+	}
+	if built.MaxContextTokens != 500000 || built.Capabilities.FactoryReasoning != config.FactoryReasoningPassthrough || built.Capabilities.PromptCaching == nil || !*built.Capabilities.PromptCaching {
+		t.Fatalf("bad Grok 4.5 metadata: %#v", built)
 	}
 
 	build, ok := oauthPresetByLabel(config.OAuthProviderXAI, "Grok Build 0.1")
 	if !ok {
 		t.Fatal("missing Grok Build preset")
 	}
-	m := newFormModel(t, providerChoice{kind: pkOAuth, oauth: config.OAuthProviderXAI, label: "xAI OAuth"}, nil)
+	m = newFormModel(t, providerChoice{kind: pkOAuth, oauth: config.OAuthProviderXAI, label: "xAI OAuth"}, nil)
 	m.applyOAuthPreset(build)
-	built, err := m.buildModelFromForm()
+	built, err = m.buildModelFromForm()
 	if err != nil {
 		t.Fatalf("build Grok Build preset: %v", err)
 	}
@@ -505,6 +524,135 @@ func TestXAIOAuthPresets(t *testing.T) {
 	}
 	if built.Capabilities.FactoryReasoning != config.FactoryReasoningPassthrough {
 		t.Fatalf("Grok 4.3 factory_reasoning = %q", built.Capabilities.FactoryReasoning)
+	}
+}
+
+func TestXAIOAuthPresetArtifactParity(t *testing.T) {
+	want := map[string]string{}
+	for _, preset := range xaiOAuthPresets() {
+		if want[preset.Alias] != "" {
+			t.Fatalf("duplicate TUI xAI alias %q", preset.Alias)
+		}
+		want[preset.Alias] = preset.UpstreamModel
+	}
+
+	root := filepath.Join("..", "..")
+	liveBytes, err := os.ReadFile(filepath.Join(root, "docs", "live-e2e", "config.local.yaml.template"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var live struct {
+		Models []struct {
+			Alias         string `yaml:"alias"`
+			UpstreamModel string `yaml:"upstream_model"`
+		} `yaml:"models"`
+	}
+	if err := yaml.Unmarshal(liveBytes, &live); err != nil {
+		t.Fatal(err)
+	}
+	liveMappings := map[string]string{}
+	for _, model := range live.Models {
+		if _, tracked := want[model.Alias]; tracked {
+			liveMappings[model.Alias] = model.UpstreamModel
+		}
+	}
+	if !reflect.DeepEqual(liveMappings, want) {
+		t.Fatalf("live mappings = %#v, want TUI mappings %#v", liveMappings, want)
+	}
+
+	factoryBytes, err := os.ReadFile(filepath.Join(root, "docs", "factory-settings", "xai-oauth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snippet struct {
+		CustomModels []struct {
+			Model string `json:"model"`
+		} `json:"customModels"`
+	}
+	if err := json.Unmarshal(factoryBytes, &snippet); err != nil {
+		t.Fatal(err)
+	}
+	factoryAliases := map[string]bool{}
+	for _, model := range snippet.CustomModels {
+		factoryAliases[model.Model] = true
+	}
+	for alias := range want {
+		if !factoryAliases[alias] {
+			t.Errorf("Factory snippet missing TUI alias %q", alias)
+		}
+	}
+	if len(factoryAliases) != len(want) {
+		t.Errorf("Factory aliases = %#v, want exactly %#v", factoryAliases, want)
+	}
+
+	docBytes, err := os.ReadFile(filepath.Join(root, "docs", "examples", "xai-oauth.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(docBytes)
+	for alias, upstream := range want {
+		if !strings.Contains(doc, "  - alias: "+alias) || !strings.Contains(doc, "    upstream_model: "+upstream) {
+			t.Errorf("xAI walkthrough missing mapping %s -> %s", alias, upstream)
+		}
+	}
+
+	directBytes, err := os.ReadFile(filepath.Join(root, "scripts", "live-e2e", "05-direct-provider-tests.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for alias, upstream := range want {
+		needle := `assert_model_mapping "` + alias + `" "` + upstream + `"`
+		if !strings.Contains(string(directBytes), needle) {
+			t.Errorf("direct harness missing exact mapping check %s", needle)
+		}
+	}
+}
+
+func TestXAIGrok45PresetMetadataDoesNotFollowEditedUpstream(t *testing.T) {
+	preset, ok := oauthPresetByLabel(config.OAuthProviderXAI, "Grok 4.5 (Recommended)")
+	if !ok {
+		t.Fatal("missing Grok 4.5 preset")
+	}
+	m := newFormModel(t, providerChoice{kind: pkOAuth, oauth: config.OAuthProviderXAI, label: "xAI OAuth"}, nil)
+	m.applyOAuthPreset(preset)
+	m.setFormValue("upstream_model", "different-xai-model")
+	built, err := m.buildModelFromForm()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if built.UpstreamModel != "different-xai-model" {
+		t.Fatalf("upstream model = %q", built.UpstreamModel)
+	}
+	if want := (config.Capabilities{FactoryReasoning: config.FactoryReasoningDrop}); !reflect.DeepEqual(built.Capabilities, want) {
+		t.Fatalf("edited upstream retained Grok 4.5 preset capabilities: %#v", built.Capabilities)
+	}
+}
+
+func TestBackendAddModelRejectsGrok45AliasCollision(t *testing.T) {
+	original := []byte(`models:
+  - alias: grok-4.5
+    display_name: Existing user model
+    factory_provider: openai
+    upstream_protocol: openai-responses
+    base_url: https://api.x.ai/v1
+    api_key_env: XAI_API_KEY
+    upstream_model: grok-4.5
+`)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	be := &backend{configPath: path}
+	err := be.addModel(&config.Model{Alias: "grok-4.5", UpstreamModel: "grok-4.5"})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("collision error = %v", err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !reflect.DeepEqual(after, original) {
+		t.Fatalf("config changed after rejected Grok 4.5 collision:\n%s", after)
 	}
 }
 
