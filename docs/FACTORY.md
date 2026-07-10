@@ -61,6 +61,10 @@ Ready-to-paste snippets for common providers:
 - [Codex OAuth](factory-settings/codex-oauth.json)
 - [xAI OAuth](factory-settings/xai-oauth.json)
 
+The xAI snippet includes recommended `grok-4.5`, Composer 2.5 Fast, Grok Build
+0.1, and backward-compatible Grok 4.3 aliases. Its `maxOutputTokens` values are
+Factory client-side caps, not claims about private OAuth upstream output limits.
+
 The Codex OAuth snippet uses GPT-5.6 as the primary example and includes the
 dashboard's Sol, Terra, and Luna standard/fast aliases. Fast names are local
 Factory model IDs. The local Sol aliases map to the credential-validated

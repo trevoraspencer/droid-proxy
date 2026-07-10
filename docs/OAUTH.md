@@ -118,6 +118,18 @@ user-facing local aliases `gpt-5.6` and `gpt-5.6-fast` while mapping both to
 
 ```yaml
 models:
+  - alias: grok-4.5
+    display_name: "Grok 4.5 (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    base_url: https://cli-chat-proxy.grok.com/v1
+    upstream_model: grok-4.5
+    max_context_tokens: 500000
+    capabilities:
+      factory_reasoning: passthrough
+      prompt_caching: true
+
   - alias: grok-build-0.1
     display_name: "Grok Build 0.1 (xAI OAuth)"
     factory_provider: openai
@@ -151,12 +163,16 @@ models:
       factory_reasoning: passthrough
 ```
 
+`grok-4.5` is the recommended xAI OAuth alias and Grok Build's current default;
+it uses the private Grok CLI proxy and passes through low, medium, and high
+reasoning. Public API and private OAuth access are separate contracts.
 `grok-build-0.1` is the Grok Build coding API model.
 `grok-composer-2.5-fast` is Composer 2.5 Fast via the Grok Build / Grok CLI
 OAuth endpoint. `grok-4.3` is broader xAI OAuth model support and is not
 described as Grok Build CLI parity. See xAI's docs for
 [Composer 2.5](https://x.ai/news/composer-2-5),
 [Grok Build 0.1](https://docs.x.ai/developers/models/grok-build-0.1),
+[Grok 4.5](https://docs.x.ai/developers/grok-4-5),
 [Grok 4.3](https://docs.x.ai/developers/models/grok-4.3), and
 [reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning).
 
@@ -418,11 +434,17 @@ For xAI OAuth requests, the proxy adjusts the outbound `/v1/responses` payload
 so it stays compatible with xAI's Responses endpoint. These changes are applied
 automatically:
 
+- On the private Grok CLI proxy, sends the CLI token-auth, client identity,
+  client surface/version, and exact `x-grok-model-override` headers.
+- Forces the private Grok CLI upstream request to stream because its inference
+  clusters are stream-only; non-streaming callers still receive reconstructed
+  JSON after the upstream SSE response completes.
 - Drops `service_tier` (not accepted on the OAuth endpoint).
 - Drops Factory's top-level `reasoning` object when
   `capabilities.factory_reasoning: drop` is set or implied.
 - Preserves Factory's top-level `reasoning` object when
-  `capabilities.factory_reasoning: passthrough` is set, as with `grok-4.3`.
+  `capabilities.factory_reasoning: passthrough` is set, as with `grok-4.5` and
+  `grok-4.3`.
 - Sets `prompt_cache_key` from the downstream session header (`X-Session-ID`,
   `Session_id`, or `X-Client-Request-Id`) when the caller did not provide one.
 - Normalizes `tools` for agent compatibility: flattens namespace/grouped tools,
@@ -450,7 +472,7 @@ OAuth is model-specific: `grok-build-0.1` currently rejects
 that top-level effort parameter, and
 `grok-composer-2.5-fast` does not support reasoning effort on the Grok CLI OAuth
 endpoint, so configure both with `capabilities.factory_reasoning: drop`;
-`grok-4.3` supports configurable reasoning, so configure
+`grok-4.5` and `grok-4.3` support configurable reasoning, so configure
 `capabilities.factory_reasoning: passthrough`.
 Encrypted reasoning round-trip fields are still preserved where needed.
 

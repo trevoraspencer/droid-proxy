@@ -21,7 +21,7 @@ import (
 const (
 	codexClientVersion   = "0.144.0"
 	codexUserAgent       = "codex_cli_rs/" + codexClientVersion + " (Mac OS 26.3.1; arm64) droid-proxy"
-	xaiGrokClientVersion = "0.2.22"
+	xaiGrokClientVersion = "0.2.93"
 )
 
 func oauthResponsesURL(m *config.Model, token *oauth.Token) (string, error) {
@@ -85,6 +85,9 @@ func applyOAuthResponsesHeaders(req *http.Request, downstream http.Header, m *co
 				req.Header.Set("x-grok-model-override", modelOverride)
 			}
 			req.Header.Set("x-grok-client-version", xaiGrokClientVersion)
+			req.Header.Set("x-grok-client-identifier", "grok-shell")
+			req.Header.Set("x-grok-client-surface", "grok-build")
+			req.Header.Set("X-XAI-Token-Auth", "xai-grok-cli")
 		}
 		if sessionID := oauthSessionID(downstream, payload); sessionID != "" {
 			req.Header.Set("x-grok-conv-id", sessionID)

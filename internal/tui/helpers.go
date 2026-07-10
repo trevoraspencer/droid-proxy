@@ -69,6 +69,19 @@ func codexGPT56Preset(label, alias, displayName, upstreamModel string, fast bool
 func xaiOAuthPresets() []oauthModelPreset {
 	return []oauthModelPreset{
 		{
+			Label:            "Grok 4.5 (Recommended)",
+			Alias:            "grok-4.5",
+			DisplayName:      "Grok 4.5 (xAI OAuth)",
+			UpstreamModel:    "grok-4.5",
+			BaseURL:          "https://cli-chat-proxy.grok.com/v1",
+			MaxOutputTokens:  factory.DefaultMaxOutputTokens,
+			MaxContextTokens: 500000,
+			Capabilities: config.Capabilities{
+				FactoryReasoning: config.FactoryReasoningPassthrough,
+				PromptCaching:    boolValue(true),
+			},
+		},
+		{
 			Label:            "Grok Build 0.1",
 			Alias:            "grok-build-0.1",
 			DisplayName:      "Grok Build 0.1 (xAI OAuth)",
@@ -167,7 +180,8 @@ func factoryReasoningForOAuthModel(provider config.OAuthProvider, upstreamModel 
 	if provider != config.OAuthProviderXAI {
 		return ""
 	}
-	if strings.EqualFold(strings.TrimSpace(upstreamModel), "grok-4.3") {
+	switch strings.ToLower(strings.TrimSpace(upstreamModel)) {
+	case "grok-4.3", "grok-4.5":
 		return config.FactoryReasoningPassthrough
 	}
 	return config.FactoryReasoningDrop

@@ -122,11 +122,13 @@ credentialed tests returned upstream 400 for that mode on the tested accounts.
 responses are surfaced without model fallback. Mode and model availability
 remain account/plan dependent.
 
-For xAI OAuth, use `grok-build-0.1` for Grok Build coding behavior,
+For xAI OAuth, use the recommended `grok-4.5` alias for Grok Build's current
+default through the private Grok CLI OAuth endpoint, `grok-build-0.1` for the
+older Grok Build coding behavior,
 `grok-composer-2.5-fast` for Composer 2.5 Fast via the Grok CLI OAuth endpoint,
 and `grok-4.3` for the broader xAI reasoning model. Configure
 `capabilities.factory_reasoning: drop` for Grok Build and Composer, and
-`capabilities.factory_reasoning: passthrough` for Grok 4.3.
+`capabilities.factory_reasoning: passthrough` for Grok 4.5 and Grok 4.3.
 
 OAuth token files live under `oauth.auth_dir` (default
 `~/.droid-proxy/auth`) with `0700` directory and `0600` file permissions. If a

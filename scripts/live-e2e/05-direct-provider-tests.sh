@@ -27,7 +27,7 @@ assert_model_mapping() {
 
   if ! configured_upstream="$(jq -r --arg alias "$alias" '[.data[]? | select(.id == $alias) | .upstream_model] | first // empty' "$MODELS_OUT")"; then
     append_result "$provider" "$alias" "configured upstream model" "FAIL" "could not parse /v1/models"
-    fail "could not parse configured model mappings before GPT-5.6 live checks"
+    fail "could not parse configured model mappings before live checks"
   fi
   if [[ "$configured_upstream" == "$expected_upstream" ]]; then
     append_result "$provider" "$alias" "configured upstream model" "PASS" "$expected_upstream"
@@ -35,11 +35,15 @@ assert_model_mapping() {
   fi
 
   append_result "$provider" "$alias" "configured upstream model" "FAIL" "expected $expected_upstream; got ${configured_upstream:-missing}"
-  fail "$alias must map to $expected_upstream before GPT-5.6 live checks (got ${configured_upstream:-missing})"
+  fail "$alias must map to $expected_upstream before live checks (got ${configured_upstream:-missing})"
 }
 
 assert_model_mapping "gpt-5.6" "gpt-5.6-sol" "ChatGPT/Codex OAuth (GPT-5.6 Sol)"
 assert_model_mapping "gpt-5.6-fast" "gpt-5.6-sol" "ChatGPT/Codex OAuth (GPT-5.6 Sol Fast)"
+assert_model_mapping "grok-4.5" "grok-4.5" "xAI OAuth (Grok 4.5)"
+assert_model_mapping "grok-build-0.1" "grok-build-0.1" "xAI OAuth (Grok Build)"
+assert_model_mapping "grok-composer-2.5-fast" "grok-composer-2.5-fast" "xAI OAuth (Composer 2.5 Fast)"
+assert_model_mapping "grok-4.3" "grok-4.3" "xAI Grok 4.3 OAuth"
 
 require_env_names DEEPSEEK_API_KEY ZAI_CODING_API_KEY FIREWORKS_API_KEY FIREWORKS_MODEL
 check_mimo_env_matches_profile
@@ -243,6 +247,32 @@ run_codex_gpt56_advanced() {
   fi
 }
 
+run_xai_reasoning_levels() {
+  local model="grok-4.5"
+  local provider="xAI OAuth (Grok 4.5)"
+  local effort artifact_id body out http_status
+
+  for effort in low medium high; do
+    artifact_id="$(model_artifact_id "$model")"
+    body="$LIVE_E2E_RUN_DIR/$artifact_id.responses.reasoning-$effort.request.json"
+    out="$LIVE_E2E_RUN_DIR/$artifact_id.responses.reasoning-$effort.json"
+    jq -n --arg model "$model" --arg effort "$effort" '{
+      model:$model,
+      stream:false,
+      input:"Reply exactly: droid-proxy-ok",
+      reasoning:{effort:$effort},
+      prompt_cache_key:"droid-proxy-grok-4-5-live-e2e"
+    }' > "$body"
+
+    if http_status="$(post_json "$API_BASE/v1/responses" "$body" "$out")" && http_ok "$http_status" \
+        && jq -e '(.id // "") | length > 0' "$out" >/dev/null; then
+      append_result "$provider" "$model" "reasoning $effort" "PASS" "HTTP $http_status"
+    else
+      append_result "$provider" "$model" "reasoning $effort" "FAIL" "HTTP ${http_status:-000}"
+    fi
+  done
+}
+
 run_chat_model "deepseek-v4-flash" "DeepSeek"
 run_chat_model "glm-5.1" "Z.AI GLM coding"
 run_chat_model "mimo-v2.5-pro" "Xiaomi MiMo"
@@ -251,6 +281,8 @@ run_chat_model "${FIREWORKS_MODEL}" "Fireworks"
 run_responses_model "gpt-5.6" "ChatGPT/Codex OAuth (GPT-5.6 Sol)"
 run_responses_model "gpt-5.6-fast" "ChatGPT/Codex OAuth (GPT-5.6 Sol Fast)"
 run_codex_gpt56_advanced
+run_responses_model "grok-4.5" "xAI OAuth (Grok 4.5)"
+run_xai_reasoning_levels
 run_responses_model "grok-build-0.1" "xAI OAuth (Grok Build)"
 run_responses_model "grok-composer-2.5-fast" "xAI OAuth (Composer 2.5 Fast)"
 run_responses_model "grok-4.3" "xAI Grok 4.3 OAuth"

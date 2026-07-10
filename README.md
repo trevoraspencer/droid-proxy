@@ -36,6 +36,8 @@ Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 - Health, model listing, Chat Completions, Responses, Anthropic Messages, and token-count endpoints.
 - Curated provider profiles for Anthropic, OpenAI, DeepSeek, Xiaomi MiMo, xAI, Kimi, Z.AI, Groq, Fireworks, Ollama, and vLLM.
 - OAuth login for Codex/ChatGPT and xAI accounts.
+- Recommended Grok 4.5 and Composer 2.5 Fast presets through the private Grok
+  Build OAuth inference proxy, while preserving Grok 4.3 compatibility.
 - First-class GPT-5.6 Codex OAuth presets for Sol, Terra, and Luna, including
   standard and priority-tier local aliases.
 - Codex OAuth multi-account load balancing with sticky, round-robin, fill-first, least-connections, and random strategies.
