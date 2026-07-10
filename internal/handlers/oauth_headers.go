@@ -17,8 +17,10 @@ import (
 	"github.com/trevoraspencer/droid-proxy/internal/oauth"
 )
 
+// codexClientVersion is OpenAI's documented minimum Codex CLI version for GPT-5.6.
 const (
-	codexUserAgent       = "codex_cli_rs/0.118.0 (Mac OS 26.3.1; arm64) droid-proxy"
+	codexClientVersion   = "0.144.0"
+	codexUserAgent       = "codex_cli_rs/" + codexClientVersion + " (Mac OS 26.3.1; arm64) droid-proxy"
 	xaiGrokClientVersion = "0.2.22"
 )
 
@@ -53,6 +55,7 @@ func applyOAuthResponsesHeaders(req *http.Request, downstream http.Header, m *co
 	switch m.OAuthProvider {
 	case config.OAuthProviderCodex:
 		req.Header.Set("User-Agent", firstHeader(downstream, "User-Agent", codexUserAgent))
+		req.Header.Set("Version", firstHeader(downstream, "Version", codexClientVersion))
 		req.Header.Set("Originator", firstHeader(downstream, "Originator", "codex_cli_rs"))
 		req.Header.Set("OpenAI-Beta", firstHeader(downstream, "OpenAI-Beta", "responses_websockets=2026-02-06"))
 		req.Header.Set("x-openai-internal-codex-residency", firstHeader(downstream, "x-openai-internal-codex-residency", "us"))
@@ -71,7 +74,7 @@ func applyOAuthResponsesHeaders(req *http.Request, downstream http.Header, m *co
 		req.Header.Set("x-client-request-id", firstHeader(downstream, "X-Client-Request-Id", conversationID))
 		req.Header.Set("session_id", firstHeader(downstream, "session_id", conversationID))
 		req.Header.Set("x-codex-window-id", firstHeader(downstream, "x-codex-window-id", conversationID+":0"))
-		for _, name := range []string{"Version", "X-Codex-Beta-Features", "X-Codex-Turn-Metadata", "X-Codex-Turn-State", "X-Codex-Parent-Thread-Id", "X-ResponsesAPI-Include-Timing-Metrics"} {
+		for _, name := range []string{"X-Codex-Beta-Features", "X-Codex-Turn-Metadata", "X-Codex-Turn-State", "X-Codex-Parent-Thread-Id", "X-ResponsesAPI-Include-Timing-Metrics"} {
 			if v := strings.TrimSpace(downstream.Get(name)); v != "" {
 				req.Header.Set(name, v)
 			}
@@ -152,7 +155,7 @@ func randomHex(n int) string {
 }
 
 func firstHeader(h http.Header, name, fallback string) string {
-	if v := strings.TrimSpace(h.Get(name)); v != "" {
+	if v := h.Get(name); strings.TrimSpace(v) != "" {
 		return v
 	}
 	return fallback

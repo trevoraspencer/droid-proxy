@@ -84,7 +84,7 @@ run_refresh_check() {
   append_result "$label" "$model" "oauth refresh" "FAIL" "HTTP ${http_status:-000}; restored token backup"
 }
 
-run_refresh_check "codex" "gpt-5.2-codex" "ChatGPT/Codex OAuth"
+run_refresh_check "codex" "gpt-5.6" "ChatGPT/Codex OAuth (GPT-5.6 Sol)"
 run_refresh_check "xai" "grok-build-0.1" "xAI OAuth"
 run_refresh_check "xai" "grok-composer-2.5-fast" "xAI OAuth (Composer 2.5 Fast)"
 

@@ -61,6 +61,13 @@ Ready-to-paste snippets for common providers:
 - [Codex OAuth](factory-settings/codex-oauth.json)
 - [xAI OAuth](factory-settings/xai-oauth.json)
 
+The Codex OAuth snippet uses GPT-5.6 as the primary example and includes the
+dashboard's Sol, Terra, and Luna standard/fast aliases. Fast names are local
+Factory model IDs. The local Sol aliases map to the credential-validated
+explicit `gpt-5.6-sol` upstream; each fast entry keeps its standard entry's
+upstream model and requests `extra_args.service_tier: priority`. The effective
+tier is account/backend dependent and appears in the response.
+
 Per-provider walkthroughs with full config blocks are in
 [examples/](examples/).
 

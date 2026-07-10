@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- First-class GPT-5.6 Codex OAuth presets for the recommended `gpt-5.6` Sol
+  alias plus Terra and Luna, with standard/priority-request variants, 1.05M
+  context, 128K output metadata, capability metadata, credential-validated
+  explicit `gpt-5.6-sol` routing for the local Sol aliases, and
+  caller-preserving Codex CLI `0.144.0` Version/User-Agent fallbacks that
+  provide current client metadata for Luna. Includes focused
+  forwarding/failover tests and credential-gated live-E2E coverage.
 - Release asset audit for packaged archives, checksums, installer upload artifacts, and release build identity.
 - Release installer `--restart` / `--no-restart` flags so upgrades can restart a running proxy after the binary is replaced.
 

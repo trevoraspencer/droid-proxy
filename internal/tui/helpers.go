@@ -30,6 +30,42 @@ func buildProviderChoices() []providerChoice {
 	return out
 }
 
+func codexOAuthPresets() []oauthModelPreset {
+	return []oauthModelPreset{
+		codexGPT56Preset("GPT-5.6 Sol (Recommended)", "gpt-5.6", "GPT-5.6 Sol (Codex OAuth)", "gpt-5.6-sol", false),
+		codexGPT56Preset("GPT-5.6 Sol Fast", "gpt-5.6-fast", "GPT-5.6 Sol Fast (Codex OAuth)", "gpt-5.6-sol", true),
+		codexGPT56Preset("GPT-5.6 Terra", "gpt-5.6-terra", "GPT-5.6 Terra (Codex OAuth)", "gpt-5.6-terra", false),
+		codexGPT56Preset("GPT-5.6 Terra Fast", "gpt-5.6-terra-fast", "GPT-5.6 Terra Fast (Codex OAuth)", "gpt-5.6-terra", true),
+		codexGPT56Preset("GPT-5.6 Luna", "gpt-5.6-luna", "GPT-5.6 Luna (Codex OAuth)", "gpt-5.6-luna", false),
+		codexGPT56Preset("GPT-5.6 Luna Fast", "gpt-5.6-luna-fast", "GPT-5.6 Luna Fast (Codex OAuth)", "gpt-5.6-luna", true),
+	}
+}
+
+func codexGPT56Preset(label, alias, displayName, upstreamModel string, fast bool) oauthModelPreset {
+	preset := oauthModelPreset{
+		Label:            label,
+		Alias:            alias,
+		DisplayName:      displayName,
+		UpstreamModel:    upstreamModel,
+		MaxOutputTokens:  128000,
+		MaxContextTokens: 1050000,
+		Capabilities: config.Capabilities{
+			Streaming:        boolValue(true),
+			Tools:            boolValue(true),
+			ToolResultSafe:   boolValue(true),
+			Images:           boolValue(true),
+			JSONMode:         boolValue(true),
+			StructuredOutput: boolValue(true),
+			FactoryReasoning: config.FactoryReasoningPassthrough,
+			PromptCaching:    boolValue(true),
+		},
+	}
+	if fast {
+		preset.ExtraArgs = map[string]any{"service_tier": "priority"}
+	}
+	return preset
+}
+
 func xaiOAuthPresets() []oauthModelPreset {
 	return []oauthModelPreset{
 		{
@@ -60,8 +96,19 @@ func xaiOAuthPresets() []oauthModelPreset {
 	}
 }
 
-func xaiOAuthPickItems() []string {
-	presets := xaiOAuthPresets()
+func oauthModelPresets(provider config.OAuthProvider) []oauthModelPreset {
+	switch provider {
+	case config.OAuthProviderCodex:
+		return codexOAuthPresets()
+	case config.OAuthProviderXAI:
+		return xaiOAuthPresets()
+	default:
+		return nil
+	}
+}
+
+func oauthPickItems(provider config.OAuthProvider) []string {
+	presets := oauthModelPresets(provider)
 	out := make([]string, 0, len(presets)+1)
 	out = append(out, manualEntryLabel)
 	for _, preset := range presets {
@@ -70,14 +117,51 @@ func xaiOAuthPickItems() []string {
 	return out
 }
 
-func xaiOAuthPresetByLabel(label string) (oauthModelPreset, bool) {
-	for _, preset := range xaiOAuthPresets() {
+func oauthPresetByLabel(provider config.OAuthProvider, label string) (oauthModelPreset, bool) {
+	for _, preset := range oauthModelPresets(provider) {
 		if preset.Label == label {
 			return preset, true
 		}
 	}
 	return oauthModelPreset{}, false
 }
+
+func cloneOAuthPreset(p oauthModelPreset) oauthModelPreset {
+	p.ExtraArgs = cloneAnyMap(p.ExtraArgs)
+	p.Capabilities = cloneCapabilities(p.Capabilities)
+	return p
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneCapabilities(in config.Capabilities) config.Capabilities {
+	in.Streaming = cloneBool(in.Streaming)
+	in.Tools = cloneBool(in.Tools)
+	in.ToolResultSafe = cloneBool(in.ToolResultSafe)
+	in.Images = cloneBool(in.Images)
+	in.JSONMode = cloneBool(in.JSONMode)
+	in.StructuredOutput = cloneBool(in.StructuredOutput)
+	in.PromptCaching = cloneBool(in.PromptCaching)
+	return in
+}
+
+func cloneBool(in *bool) *bool {
+	if in == nil {
+		return nil
+	}
+	return boolValue(*in)
+}
+
+func boolValue(value bool) *bool { return &value }
 
 func factoryReasoningForOAuthModel(provider config.OAuthProvider, upstreamModel string) config.FactoryReasoningMode {
 	if provider != config.OAuthProviderXAI {

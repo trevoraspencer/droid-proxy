@@ -48,6 +48,9 @@ It is a full-screen dashboard that, from one place:
 - adds a model by picking a provider from the built-in registry (DeepSeek,
   Fireworks, Groq, Kimi, Z.AI, MiMo, xAI, OpenAI, Anthropic, Ollama, vLLM, …),
   a custom OpenAI-compatible endpoint, or Codex/xAI OAuth;
+- offers first-class Codex OAuth presets for GPT-5.6 Sol, Terra, and Luna,
+  with standard and priority-tier local aliases that preserve the exact
+  upstream model ID;
 - prompts for the provider API key and stores it in `~/.droid-proxy/env`
   (chmod 600) — no manual `.env` editing; updates are line-oriented so your
   comments, blank lines, and unrelated keys in that file are preserved;

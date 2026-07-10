@@ -36,6 +36,8 @@ Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 - Health, model listing, Chat Completions, Responses, Anthropic Messages, and token-count endpoints.
 - Curated provider profiles for Anthropic, OpenAI, DeepSeek, Xiaomi MiMo, xAI, Kimi, Z.AI, Groq, Fireworks, Ollama, and vLLM.
 - OAuth login for Codex/ChatGPT and xAI accounts.
+- First-class GPT-5.6 Codex OAuth presets for Sol, Terra, and Luna, including
+  standard and priority-tier local aliases.
 - Codex OAuth multi-account load balancing with sticky, round-robin, fill-first, least-connections, and random strategies.
 - `agent_ready` model metadata so tool-using workflows are marked only when the proxy path is validated.
 - DeepSeek-style reasoning replay across tool turns.
@@ -216,7 +218,14 @@ Provider walkthroughs: [DeepSeek](docs/examples/deepseek.md), [OpenAI](docs/exam
 - `oauth.load_balancing` controls Codex account selection: `sticky`, `round-robin`, `fill-first`, `least-connections`, or `random`.
 - Per-model `capabilities` drive the `agent_ready` flag.
 
-For `codex-responses`, the proxy passes Factory's `reasoning` object through to the upstream. For DeepSeek-style OpenAI Chat providers, `capabilities.reasoning: deepseek` enables reasoning replay across tool turns.
+For `codex-responses`, the proxy preserves Factory's `reasoning` object
+unchanged. Credentialed private-OAuth checks confirm `effort: max`; the tested
+accounts returned an upstream 400 for `mode: pro`, which the proxy surfaced
+without downgrade. The proxy strips public `prompt_cache_options` on that
+private path but preserves `prompt_cache_key`; public non-OAuth Responses
+forwarding is unchanged. See [OAUTH.md](docs/OAUTH.md). For DeepSeek-style
+OpenAI Chat providers, `capabilities.reasoning: deepseek` enables reasoning
+replay across tool turns.
 
 ## Troubleshooting
 

@@ -201,7 +201,7 @@ specific upstream configuration.
 | `max_output_tokens` | int |  | Factory-facing output-token setting; surfaced in `/v1/models`. When omitted, Factory sync writes `128000`. Set an explicit lower value for upstreams with lower hard caps. |
 | `max_context_tokens` | int |  | Informational; surfaced in `/v1/models`. |
 | `extra_headers` | map[string]string |  | Headers appended to every upstream request for this model. |
-| `extra_args` | map[string]any |  | Top-level fields merged into every outgoing request body (e.g. `temperature`, `stream_options`). |
+| `extra_args` | map[string]any |  | Top-level fields merged into every outgoing request body (e.g. `temperature`, `stream_options`, or `service_tier: priority` for a local GPT-5.6 fast alias). |
 | `capabilities` | object |  | Capability overrides. See below. |
 
 `extra_headers` ignores proxy-managed or security-sensitive names, including
@@ -223,7 +223,7 @@ All optional. Defaults are reasonable for most OpenAI-compatible providers.
 | `structured_output` | bool | `false` | Whether JSON-Schema-constrained output (`response_format: {"type":"json_schema"}`) works. |
 | `reasoning` | enum | `none` | `none`, `deepseek`, or `anthropic-thinking`. `deepseek` enables reasoning replay. |
 | `factory_reasoning` | enum | protocol default | `drop` removes Factory's top-level `reasoning` object before upstream; `passthrough` preserves it. Defaults to `drop` for `xai-responses` and `passthrough` elsewhere. |
-| `prompt_caching` | bool | `false` | Whether the model supports cache_control breakpoints. |
+| `prompt_caching` | bool | `false` | Whether the model supports provider prompt-caching controls, such as `cache_control` or `prompt_cache_options`. |
 
 A model is reported as `agent_ready: true` in `/v1/models` iff
 `streaming && tools && tool_result_safe` are all true.
@@ -231,15 +231,23 @@ A model is reported as `agent_ready: true` in `/v1/models` iff
 ### Model slug and display name convention
 
 Use the **exact model ID the upstream provider expects** as the slug (`alias` /
-Factory `customModels[].model`). Put provider context in the display name only:
+Factory `customModels[].model`) unless a documented local alias deliberately
+maps to a different `upstream_model`. Put provider context in the display name
+only:
 
-- **Slug**: provider-native ID — `glm-5.1`, `deepseek-v4-flash`, `gpt-5.2-codex`,
+- **Slug**: provider-native ID — `glm-5.1`, `deepseek-v4-flash`, `gpt-5.6`,
   Fireworks paths like `accounts/fireworks/models/deepseek-v4-pro`
 - **Display name**: `{Readable model name} ({Provider label})` — e.g.
   `GLM 5.1 (Z.AI GLM Coding Plan)`, `DeepSeek V4 Flash (DeepSeek)`
 
 Do not use `droid-` prefixes or `(via droid-proxy)` suffixes in documented
 defaults. Set `upstream_model` to the same value as `alias` (or omit it).
+The deliberate Codex OAuth exceptions are local mode/family aliases. In
+particular, `gpt-5.6` and `gpt-5.6-fast` both map to `gpt-5.6-sol` because the
+credential-validated private backend requires the explicit Sol ID; the fast
+entry differs only by requesting `extra_args.service_tier: priority`. The
+effective tier remains account/backend dependent and is reported in the
+response.
 
 #### Multi-provider example
 
@@ -281,12 +289,43 @@ oauth:
   auth_dir: "~/.droid-proxy/auth"
 
 models:
-  - alias: gpt-5.2-codex
-    display_name: "GPT-5.2 Codex (ChatGPT OAuth)"
+  - alias: gpt-5.6
+    display_name: "GPT-5.6 Sol (Codex OAuth)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: gpt-5.2-codex
+    upstream_model: gpt-5.6-sol
+    max_output_tokens: 128000
+    max_context_tokens: 1050000
+    capabilities:
+      streaming: true
+      tools: true
+      tool_result_safe: true
+      images: true
+      json_mode: true
+      structured_output: true
+      factory_reasoning: passthrough
+      prompt_caching: true
+
+  - alias: gpt-5.6-fast # local Factory alias, not an upstream model ID
+    display_name: "GPT-5.6 Sol Fast (Codex OAuth)"
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: gpt-5.6-sol
+    max_output_tokens: 128000
+    max_context_tokens: 1050000
+    extra_args:
+      service_tier: priority
+    capabilities:
+      streaming: true
+      tools: true
+      tool_result_safe: true
+      images: true
+      json_mode: true
+      structured_output: true
+      factory_reasoning: passthrough
+      prompt_caching: true
 
   - alias: grok-build-0.1
     display_name: "Grok Build 0.1 (xAI OAuth)"
@@ -320,6 +359,30 @@ models:
     capabilities:
       factory_reasoning: passthrough
 ```
+
+The Codex preset picker also offers standard/fast pairs for
+`gpt-5.6-terra` and `gpt-5.6-luna`, all with 1,050,000 context and 128,000
+output metadata. The public API documents `gpt-5.6` as the recommended alias
+for `gpt-5.6-sol`, but the credential-validated private OAuth path requires the
+explicit Sol ID. The preset therefore exposes local alias `gpt-5.6` while
+setting `upstream_model: gpt-5.6-sol`; a duplicate explicit-Sol preset would be
+misleading. On the public API, Pro is a reasoning mode
+(`reasoning.mode: pro`), not a separate model ID. Credentialed private-OAuth
+tests returned upstream 400 for that mode on the tested accounts; the proxy
+preserves it and surfaces the error without downgrade. Credentialed
+`effort: max` succeeds, while mode availability remains account/plan dependent.
+
+For these Codex presets, `prompt_caching: true` reflects preserved
+`prompt_cache_key` support. Public `prompt_cache_options` is stripped because
+the private OAuth endpoint rejects it.
+
+These IDs and capabilities are public
+[OpenAI API model metadata](https://developers.openai.com/api/docs/models).
+The explicit Sol mapping is credential-validated private-OAuth behavior;
+availability on that backend still depends on the logged-in account, plan, and
+workspace policy and should be validated with the credentialed live-E2E gate.
+The proxy surfaces unavailable-model 4xx responses and never downgrades the
+configured model.
 
 ## Environment variables
 

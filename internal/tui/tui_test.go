@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/configedit"
 	"github.com/trevoraspencer/droid-proxy/internal/factory"
 )
 
@@ -237,13 +239,197 @@ func TestBuildModelFromFormOAuth(t *testing.T) {
 	}
 }
 
+func TestCodexOAuthProviderOpensPresetPicker(t *testing.T) {
+	m := model{sel: providerChoice{kind: pkOAuth, oauth: config.OAuthProviderCodex, label: "Codex / ChatGPT (OAuth)"}}
+	next, _ := m.afterProviderChosen()
+	got := next.(model)
+	if got.screen != screenPickModel {
+		t.Fatalf("screen = %v, want preset picker", got.screen)
+	}
+	want := []string{
+		manualEntryLabel,
+		"GPT-5.6 Sol (Recommended)",
+		"GPT-5.6 Sol Fast",
+		"GPT-5.6 Terra",
+		"GPT-5.6 Terra Fast",
+		"GPT-5.6 Luna",
+		"GPT-5.6 Luna Fast",
+	}
+	if !reflect.DeepEqual(got.pickItems, want) {
+		t.Fatalf("Codex pick items = %#v, want %#v", got.pickItems, want)
+	}
+}
+
+func TestCodexOAuthGPT56PresetsBuildExpectedModels(t *testing.T) {
+	tests := []struct {
+		label    string
+		alias    string
+		upstream string
+		fast     bool
+	}{
+		{label: "GPT-5.6 Sol (Recommended)", alias: "gpt-5.6", upstream: "gpt-5.6-sol"},
+		{label: "GPT-5.6 Sol Fast", alias: "gpt-5.6-fast", upstream: "gpt-5.6-sol", fast: true},
+		{label: "GPT-5.6 Terra", alias: "gpt-5.6-terra", upstream: "gpt-5.6-terra"},
+		{label: "GPT-5.6 Terra Fast", alias: "gpt-5.6-terra-fast", upstream: "gpt-5.6-terra", fast: true},
+		{label: "GPT-5.6 Luna", alias: "gpt-5.6-luna", upstream: "gpt-5.6-luna"},
+		{label: "GPT-5.6 Luna Fast", alias: "gpt-5.6-luna-fast", upstream: "gpt-5.6-luna", fast: true},
+	}
+
+	seenAliases := map[string]bool{}
+	for _, tt := range tests {
+		t.Run(tt.label, func(t *testing.T) {
+			preset, ok := oauthPresetByLabel(config.OAuthProviderCodex, tt.label)
+			if !ok {
+				t.Fatalf("missing preset %q", tt.label)
+			}
+			m := newFormModel(t, providerChoice{kind: pkOAuth, oauth: config.OAuthProviderCodex, label: "Codex / ChatGPT (OAuth)"}, nil)
+			m.applyOAuthPreset(preset)
+			built, err := m.buildModelFromForm()
+			if err != nil {
+				t.Fatalf("build preset: %v", err)
+			}
+			if built.Alias != tt.alias || built.UpstreamModel != tt.upstream {
+				t.Fatalf("model identity = %q -> %q, want %q -> %q", built.Alias, built.UpstreamModel, tt.alias, tt.upstream)
+			}
+			if built.FactoryProvider != config.FactoryProviderOpenAI || built.UpstreamProtocol != config.UpstreamCodexResponses || built.OAuthProvider != config.OAuthProviderCodex {
+				t.Fatalf("bad Codex route: %#v", built)
+			}
+			if built.MaxContextTokens != 1050000 || built.MaxOutputTokens != 128000 {
+				t.Fatalf("limits = %d/%d, want 1050000/128000", built.MaxContextTokens, built.MaxOutputTokens)
+			}
+			caps := built.ResolvedCapabilities()
+			if !caps.Streaming || !caps.Tools || !caps.ToolResultSafe || !caps.Images || !caps.JSONMode || !caps.StructuredOutput || !caps.PromptCaching || caps.FactoryReasoning != config.FactoryReasoningPassthrough {
+				t.Fatalf("incomplete GPT-5.6 capabilities: %#v", caps)
+			}
+			if tt.fast {
+				if got := built.ExtraArgs["service_tier"]; got != "priority" {
+					t.Fatalf("fast service_tier = %#v, want priority", got)
+				}
+			} else if _, exists := built.ExtraArgs["service_tier"]; exists {
+				t.Fatalf("standard preset unexpectedly has service_tier: %#v", built.ExtraArgs)
+			}
+		})
+		if seenAliases[tt.alias] {
+			t.Fatalf("duplicate preset alias %q", tt.alias)
+		}
+		seenAliases[tt.alias] = true
+	}
+
+	if _, ok := oauthPresetByLabel(config.OAuthProviderCodex, "GPT-5.6 Sol"); ok {
+		t.Fatal("explicit Sol duplicate should not be a separate preset; gpt-5.6 is the recommended Sol alias")
+	}
+}
+
+func TestCodexOAuthGPT56FastPresetConfigRoundTrip(t *testing.T) {
+	preset, ok := oauthPresetByLabel(config.OAuthProviderCodex, "GPT-5.6 Sol Fast")
+	if !ok {
+		t.Fatal("missing GPT-5.6 Sol Fast preset")
+	}
+	m := newFormModel(t, providerChoice{kind: pkOAuth, oauth: config.OAuthProviderCodex, label: "Codex / ChatGPT (OAuth)"}, nil)
+	m.applyOAuthPreset(preset)
+	built, err := m.buildModelFromForm()
+	if err != nil {
+		t.Fatalf("build preset: %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("models: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	be := &backend{configPath: path}
+	if err := be.addModel(built); err != nil {
+		t.Fatalf("add preset model: %v", err)
+	}
+	models, err := configedit.LoadModels(path)
+	if err != nil {
+		t.Fatalf("load written config: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("written models = %d, want 1", len(models))
+	}
+	got := models[0]
+	if got.Alias != "gpt-5.6-fast" || got.UpstreamModel != "gpt-5.6-sol" {
+		t.Fatalf("round-trip model identity = %q -> %q, want gpt-5.6-fast -> gpt-5.6-sol", got.Alias, got.UpstreamModel)
+	}
+	if got.ExtraArgs["service_tier"] != "priority" {
+		t.Fatalf("round-trip service_tier = %#v", got.ExtraArgs["service_tier"])
+	}
+	caps := got.ResolvedCapabilities()
+	if !caps.Images || !caps.StructuredOutput || !caps.PromptCaching || caps.FactoryReasoning != config.FactoryReasoningPassthrough {
+		t.Fatalf("round-trip capabilities = %#v", caps)
+	}
+}
+
+func TestCodexOAuthPresetMetadataDoesNotFollowEditedUpstream(t *testing.T) {
+	preset, ok := oauthPresetByLabel(config.OAuthProviderCodex, "GPT-5.6 Sol Fast")
+	if !ok {
+		t.Fatal("missing GPT-5.6 Sol Fast preset")
+	}
+	m := newFormModel(t, providerChoice{kind: pkOAuth, oauth: config.OAuthProviderCodex, label: "Codex / ChatGPT (OAuth)"}, nil)
+	m.applyOAuthPreset(preset)
+	m.setFormValue("upstream_model", "different-codex-model")
+
+	built, err := m.buildModelFromForm()
+	if err != nil {
+		t.Fatalf("build edited preset: %v", err)
+	}
+	if built.UpstreamModel != "different-codex-model" {
+		t.Fatalf("upstream model = %q", built.UpstreamModel)
+	}
+	if len(built.ExtraArgs) != 0 {
+		t.Fatalf("edited upstream retained preset extra_args: %#v", built.ExtraArgs)
+	}
+	if !reflect.DeepEqual(built.Capabilities, config.Capabilities{}) {
+		t.Fatalf("edited upstream retained preset capabilities: %#v", built.Capabilities)
+	}
+}
+
+func TestBackendAddModelRejectsAliasCollisionWithoutChangingConfig(t *testing.T) {
+	original := []byte(`models:
+  - alias: gpt-5.6
+    display_name: Existing public API model
+    factory_provider: openai
+    upstream_protocol: openai-responses
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    upstream_model: gpt-5.6
+    extra_args:
+      preserve_me: true
+`)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	be := &backend{configPath: path}
+	candidate := &config.Model{
+		Alias:            "gpt-5.6",
+		DisplayName:      "GPT-5.6 Sol (Codex OAuth)",
+		FactoryProvider:  config.FactoryProviderOpenAI,
+		UpstreamProtocol: config.UpstreamCodexResponses,
+		OAuthProvider:    config.OAuthProviderCodex,
+		UpstreamModel:    "gpt-5.6-sol",
+	}
+
+	err := be.addModel(candidate)
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("collision error = %v, want already-exists refusal", err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !reflect.DeepEqual(after, original) {
+		t.Fatalf("config changed after rejected collision:\n%s", after)
+	}
+}
+
 func TestXAIOAuthPresets(t *testing.T) {
-	items := xaiOAuthPickItems()
+	items := oauthPickItems(config.OAuthProviderXAI)
 	if len(items) != 4 || items[0] != manualEntryLabel || items[1] != "Grok Build 0.1" || items[2] != "Composer 2.5 Fast" || items[3] != "Grok 4.3" {
 		t.Fatalf("xaiOAuthPickItems = %#v", items)
 	}
 
-	build, ok := xaiOAuthPresetByLabel("Grok Build 0.1")
+	build, ok := oauthPresetByLabel(config.OAuthProviderXAI, "Grok Build 0.1")
 	if !ok {
 		t.Fatal("missing Grok Build preset")
 	}
@@ -269,7 +455,7 @@ func TestXAIOAuthPresets(t *testing.T) {
 		t.Fatalf("Grok Build factory_reasoning = %q", built.Capabilities.FactoryReasoning)
 	}
 
-	composer, ok := xaiOAuthPresetByLabel("Composer 2.5 Fast")
+	composer, ok := oauthPresetByLabel(config.OAuthProviderXAI, "Composer 2.5 Fast")
 	if !ok {
 		t.Fatal("missing Composer preset")
 	}
@@ -295,7 +481,7 @@ func TestXAIOAuthPresets(t *testing.T) {
 		t.Fatalf("Composer factory_reasoning = %q", built.Capabilities.FactoryReasoning)
 	}
 
-	grok43, ok := xaiOAuthPresetByLabel("Grok 4.3")
+	grok43, ok := oauthPresetByLabel(config.OAuthProviderXAI, "Grok 4.3")
 	if !ok {
 		t.Fatal("missing Grok 4.3 preset")
 	}

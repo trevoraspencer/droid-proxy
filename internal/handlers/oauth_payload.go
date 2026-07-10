@@ -52,10 +52,13 @@ func prepareCodexResponsesPayload(body []byte) []byte {
 	if next, err := sjson.SetBytes(out, "store", false); err == nil {
 		out = next
 	}
-	// The Codex OAuth endpoint currently rejects this public Responses field.
-	// Factory may send it from custom-model settings, so drop it for Codex only.
-	if next, err := sjson.DeleteBytes(out, "max_output_tokens"); err == nil {
-		out = next
+	// The private Codex OAuth endpoint rejects these public Responses fields.
+	// Factory may send them, so drop them only on this path. Prompt caching can
+	// still use prompt_cache_key, which is intentionally preserved.
+	for _, field := range []string{"max_output_tokens", "prompt_cache_options"} {
+		if next, err := sjson.DeleteBytes(out, field); err == nil {
+			out = next
+		}
 	}
 	input := gjson.GetBytes(out, "input")
 	if input.Type == gjson.String {

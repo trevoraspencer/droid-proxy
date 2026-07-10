@@ -89,15 +89,10 @@ func (m model) afterProviderChosen() (tea.Model, tea.Cmd) {
 		m.beginKeyInput(m.sel.ka.APIKeyEnv, false)
 		return m, nil
 	case pkOAuth:
-		if m.sel.oauth == config.OAuthProviderXAI {
-			m.pickCursor = 0
-			m.pickItems = xaiOAuthPickItems()
-			m.screen = screenPickModel
-			return m, nil
-		}
-		m.buildForm()
-		m.screen = screenForm
-		return m, textinput.Blink
+		m.pickCursor = 0
+		m.pickItems = oauthPickItems(m.sel.oauth)
+		m.screen = screenPickModel
+		return m, nil
 	default:
 		m.buildForm()
 		m.screen = screenForm
@@ -170,8 +165,8 @@ func (m model) keyPickModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			chosen = m.pickItems[m.pickCursor]
 		}
 		m.buildForm()
-		if m.sel.kind == pkOAuth && m.sel.oauth == config.OAuthProviderXAI {
-			if preset, ok := xaiOAuthPresetByLabel(chosen); ok {
+		if m.sel.kind == pkOAuth {
+			if preset, ok := oauthPresetByLabel(m.sel.oauth, chosen); ok {
 				m.applyOAuthPreset(preset)
 			}
 			m.screen = screenForm
@@ -189,6 +184,7 @@ func (m model) keyPickModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) buildForm() {
+	m.oauthPreset = nil
 	var fields []formField
 	add := func(key, label, placeholder string, optional bool) {
 		ti := textinput.New()
@@ -216,6 +212,8 @@ func (m *model) buildForm() {
 }
 
 func (m *model) applyOAuthPreset(p oauthModelPreset) {
+	cloned := cloneOAuthPreset(p)
+	m.oauthPreset = &cloned
 	m.setFormValue("upstream_model", p.UpstreamModel)
 	m.setFormValue("base_url", p.BaseURL)
 	m.setFormValue("alias", p.Alias)
@@ -356,7 +354,14 @@ func (m model) buildModelFromForm() (*config.Model, error) {
 		built.BaseURL = m.formValue("base_url")
 		built.FactoryProvider = config.FactoryProviderOpenAI
 		built.UpstreamProtocol = upstreamForOAuth(m.sel.oauth)
-		if mode := factoryReasoningForOAuthModel(m.sel.oauth, upstreamModel); mode != "" {
+		// Preset-only metadata is valid only for the exact upstream model the
+		// preset describes. The upstream field stays editable, so never carry
+		// hidden capabilities or service_tier to a manually substituted model.
+		if m.oauthPreset != nil && upstreamModel == strings.TrimSpace(m.oauthPreset.UpstreamModel) {
+			built.ExtraArgs = cloneAnyMap(m.oauthPreset.ExtraArgs)
+			built.Capabilities = cloneCapabilities(m.oauthPreset.Capabilities)
+		}
+		if mode := factoryReasoningForOAuthModel(m.sel.oauth, upstreamModel); mode != "" && built.Capabilities.FactoryReasoning == "" {
 			built.Capabilities.FactoryReasoning = mode
 		}
 	}
