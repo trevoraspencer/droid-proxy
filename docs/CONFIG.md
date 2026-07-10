@@ -188,7 +188,7 @@ specific upstream configuration.
 
 | key | type | required | description |
 |---|---|---|---|
-| `alias` | string | ✅ | Provider-native model ID that Droid sends as `model` (e.g. `deepseek-v4-flash`, `glm-5.1`). |
+| `alias` | string | ✅ | Provider-native model ID that Droid sends as `model` (e.g. `deepseek-v4-flash`, `glm-5.2`). |
 | `display_name` | string |  | Human-readable name surfaced in `/v1/models`. Use `{Model name} ({Provider label})`. |
 | `factory_provider` | enum | ✅ | One of `anthropic`, `openai`, `generic-chat-completion-api`. Picks which Droid endpoint protocol the proxy serves. |
 | `upstream_protocol` | enum | ✅ | One of `anthropic-messages`, `openai-responses`, `openai-chat`, `codex-responses`, `xai-responses`. Picks how the proxy talks to the real provider. See the matrix in [PROVIDERS.md](PROVIDERS.md). |
@@ -235,10 +235,10 @@ Factory `customModels[].model`) unless a documented local alias deliberately
 maps to a different `upstream_model`. Put provider context in the display name
 only:
 
-- **Slug**: provider-native ID — `glm-5.1`, `deepseek-v4-flash`, `gpt-5.6`,
+- **Slug**: provider-native ID — `glm-5.2`, `deepseek-v4-flash`, `gpt-5.6`,
   Fireworks paths like `accounts/fireworks/models/deepseek-v4-pro`
 - **Display name**: `{Readable model name} ({Provider label})` — e.g.
-  `GLM 5.1 (Z.AI GLM Coding Plan)`, `DeepSeek V4 Flash (DeepSeek)`
+  `GLM 5.2 (Z.AI GLM Coding Plan)`, `DeepSeek V4 Flash (DeepSeek)`
 
 Do not use `droid-` prefixes or `(via droid-proxy)` suffixes in documented
 defaults. Set `upstream_model` to the same value as `alias` (or omit it).

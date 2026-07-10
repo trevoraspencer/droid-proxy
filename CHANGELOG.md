@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Z.AI GLM Coding Plan support for `glm-5.2`, including the sample
+  configuration, Factory settings, and credential-gated live-E2E coverage.
 - First-class GPT-5.6 Codex OAuth presets for the recommended `gpt-5.6` Sol
   alias plus Terra and Luna, with standard/priority-request variants, 1.05M
   context, 128K output metadata, capability metadata, credential-validated

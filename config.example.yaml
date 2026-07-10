@@ -240,9 +240,14 @@ models:
   #     reasoning: deepseek
 
   # Example: Z.AI GLM Coding Plan. See docs/examples/zai.md.
-  # - alias: glm-5.1
-  #   display_name: "GLM 5.1 (Z.AI)"
+  # - alias: glm-5.2
+  #   display_name: "GLM 5.2 (Z.AI GLM Coding Plan)"
   #   factory_provider: generic-chat-completion-api
   #   upstream_protocol: openai-chat
   #   known_auth: zai-coding-api
-  #   upstream_model: glm-5.1
+  #   upstream_model: glm-5.2
+  #   max_output_tokens: 131072
+  #   max_context_tokens: 200000
+  #   extra_args:
+  #     thinking:
+  #       type: enabled

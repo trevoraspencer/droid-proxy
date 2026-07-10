@@ -274,7 +274,7 @@ run_xai_reasoning_levels() {
 }
 
 run_chat_model "deepseek-v4-flash" "DeepSeek"
-run_chat_model "glm-5.1" "Z.AI GLM coding"
+run_chat_model "glm-5.2" "Z.AI GLM coding"
 run_chat_model "mimo-v2.5-pro" "Xiaomi MiMo"
 run_chat_model "${FIREWORKS_MODEL}" "Fireworks"
 

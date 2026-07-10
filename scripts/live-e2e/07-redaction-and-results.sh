@@ -108,7 +108,7 @@ matrix_row() {
   matrix_row "xAI OAuth (Composer 2.5 Fast)" "grok-composer-2.5-fast" ""
   matrix_row "xAI OAuth (Grok 4.5)" "grok-4.5" ""
   matrix_row "xAI Grok 4.3 OAuth" "grok-4.3" ""
-  matrix_row "Z.AI GLM coding" "glm-5.1" "N/A"
+  matrix_row "Z.AI GLM coding" "glm-5.2" "N/A"
   matrix_row "Xiaomi MiMo" "mimo-v2.5-pro" "N/A"
   matrix_row "Fireworks" "${FIREWORKS_MODEL}" "N/A"
   matrix_row "DeepSeek" "deepseek-v4-flash" "N/A"
