@@ -58,6 +58,10 @@ Results land in `~/.droid-proxy/live-e2e/<run-id>/results.ndjson`.
 The default Codex checks exercise both `gpt-5.6` and the local
 `gpt-5.6-fast` alias. Both map to the credential-validated explicit
 `gpt-5.6-sol` upstream; only the fast alias requests the priority service tier.
+The harness verifies those loaded mappings before sending provider requests.
+The GPT-5.6 mappings are fixed in the harness config and have no environment
+override; the previous `CODEX_UPSTREAM_MODEL` name is retired and ignored so a
+preserved GPT-5.2 env file cannot produce a false GPT-5.6 pass.
 The effective tier is account/backend dependent and appears in the response.
 Model access depends on the authenticated account, plan, workspace policy, and
 current usage limits; a 4xx is reported as a failure rather than silently

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
@@ -356,6 +357,69 @@ func TestCodexOAuthGPT56FastPresetConfigRoundTrip(t *testing.T) {
 	caps := got.ResolvedCapabilities()
 	if !caps.Images || !caps.StructuredOutput || !caps.PromptCaching || caps.FactoryReasoning != config.FactoryReasoningPassthrough {
 		t.Fatalf("round-trip capabilities = %#v", caps)
+	}
+}
+
+func TestCodexOAuthPresetMetadataDoesNotFollowEditedUpstream(t *testing.T) {
+	preset, ok := oauthPresetByLabel(config.OAuthProviderCodex, "GPT-5.6 Sol Fast")
+	if !ok {
+		t.Fatal("missing GPT-5.6 Sol Fast preset")
+	}
+	m := newFormModel(t, providerChoice{kind: pkOAuth, oauth: config.OAuthProviderCodex, label: "Codex / ChatGPT (OAuth)"}, nil)
+	m.applyOAuthPreset(preset)
+	m.setFormValue("upstream_model", "different-codex-model")
+
+	built, err := m.buildModelFromForm()
+	if err != nil {
+		t.Fatalf("build edited preset: %v", err)
+	}
+	if built.UpstreamModel != "different-codex-model" {
+		t.Fatalf("upstream model = %q", built.UpstreamModel)
+	}
+	if len(built.ExtraArgs) != 0 {
+		t.Fatalf("edited upstream retained preset extra_args: %#v", built.ExtraArgs)
+	}
+	if !reflect.DeepEqual(built.Capabilities, config.Capabilities{}) {
+		t.Fatalf("edited upstream retained preset capabilities: %#v", built.Capabilities)
+	}
+}
+
+func TestBackendAddModelRejectsAliasCollisionWithoutChangingConfig(t *testing.T) {
+	original := []byte(`models:
+  - alias: gpt-5.6
+    display_name: Existing public API model
+    factory_provider: openai
+    upstream_protocol: openai-responses
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    upstream_model: gpt-5.6
+    extra_args:
+      preserve_me: true
+`)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	be := &backend{configPath: path}
+	candidate := &config.Model{
+		Alias:            "gpt-5.6",
+		DisplayName:      "GPT-5.6 Sol (Codex OAuth)",
+		FactoryProvider:  config.FactoryProviderOpenAI,
+		UpstreamProtocol: config.UpstreamCodexResponses,
+		OAuthProvider:    config.OAuthProviderCodex,
+		UpstreamModel:    "gpt-5.6-sol",
+	}
+
+	err := be.addModel(candidate)
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("collision error = %v, want already-exists refusal", err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !reflect.DeepEqual(after, original) {
+		t.Fatalf("config changed after rejected collision:\n%s", after)
 	}
 }
 

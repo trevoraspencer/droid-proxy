@@ -43,7 +43,7 @@ models:
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: "${CODEX_UPSTREAM_MODEL:-gpt-5.6-sol}"
+    upstream_model: gpt-5.6-sol
     max_output_tokens: 128000
     max_context_tokens: 1050000
     capabilities:
@@ -61,7 +61,7 @@ models:
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: "${CODEX_UPSTREAM_MODEL:-gpt-5.6-sol}"
+    upstream_model: gpt-5.6-sol
     max_output_tokens: 128000
     max_context_tokens: 1050000
     extra_args:

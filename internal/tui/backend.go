@@ -84,11 +84,16 @@ func (b *backend) setKey(envVar, value string) error {
 	return os.Setenv(envVar, value)
 }
 
-// addModel writes (or replaces) the model in the config file.
+// addModel writes a new model to the config file. Existing aliases are never
+// replaced by the add flow: presets use public-looking aliases, so an implicit
+// upsert could otherwise destroy a user's unrelated model configuration.
 func (b *backend) addModel(m *config.Model) error {
 	doc, err := configedit.Load(b.configPath)
 	if err != nil {
 		return err
+	}
+	if m != nil && doc.HasModel(m.Alias) {
+		return fmt.Errorf("model alias %q already exists; choose a different alias or remove the existing model first", strings.TrimSpace(m.Alias))
 	}
 	if err := doc.Upsert(m); err != nil {
 		return err

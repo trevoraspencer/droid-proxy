@@ -354,7 +354,10 @@ func (m model) buildModelFromForm() (*config.Model, error) {
 		built.BaseURL = m.formValue("base_url")
 		built.FactoryProvider = config.FactoryProviderOpenAI
 		built.UpstreamProtocol = upstreamForOAuth(m.sel.oauth)
-		if m.oauthPreset != nil {
+		// Preset-only metadata is valid only for the exact upstream model the
+		// preset describes. The upstream field stays editable, so never carry
+		// hidden capabilities or service_tier to a manually substituted model.
+		if m.oauthPreset != nil && upstreamModel == strings.TrimSpace(m.oauthPreset.UpstreamModel) {
 			built.ExtraArgs = cloneAnyMap(m.oauthPreset.ExtraArgs)
 			built.Capabilities = cloneCapabilities(m.oauthPreset.Capabilities)
 		}

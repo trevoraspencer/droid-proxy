@@ -10,6 +10,36 @@ load_local_env
 ensure_proxy_health
 
 API_BASE="http://127.0.0.1:8787"
+MODELS_OUT="$LIVE_E2E_RUN_DIR/models.before-direct-tests.json"
+
+if ! curl -fsS \
+    --connect-timeout "$LIVE_E2E_CURL_CONNECT_TIMEOUT" \
+    --max-time "$LIVE_E2E_CURL_MAX_TIME" \
+    "$API_BASE/v1/models" > "$MODELS_OUT"; then
+  fail "could not inspect configured model mappings before direct tests"
+fi
+
+assert_model_mapping() {
+  local alias="$1"
+  local expected_upstream="$2"
+  local provider="$3"
+  local configured_upstream
+
+  if ! configured_upstream="$(jq -r --arg alias "$alias" '[.data[]? | select(.id == $alias) | .upstream_model] | first // empty' "$MODELS_OUT")"; then
+    append_result "$provider" "$alias" "configured upstream model" "FAIL" "could not parse /v1/models"
+    fail "could not parse configured model mappings before GPT-5.6 live checks"
+  fi
+  if [[ "$configured_upstream" == "$expected_upstream" ]]; then
+    append_result "$provider" "$alias" "configured upstream model" "PASS" "$expected_upstream"
+    return
+  fi
+
+  append_result "$provider" "$alias" "configured upstream model" "FAIL" "expected $expected_upstream; got ${configured_upstream:-missing}"
+  fail "$alias must map to $expected_upstream before GPT-5.6 live checks (got ${configured_upstream:-missing})"
+}
+
+assert_model_mapping "gpt-5.6" "gpt-5.6-sol" "ChatGPT/Codex OAuth (GPT-5.6 Sol)"
+assert_model_mapping "gpt-5.6-fast" "gpt-5.6-sol" "ChatGPT/Codex OAuth (GPT-5.6 Sol Fast)"
 
 require_env_names DEEPSEEK_API_KEY ZAI_CODING_API_KEY FIREWORKS_API_KEY FIREWORKS_MODEL
 check_mimo_env_matches_profile

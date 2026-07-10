@@ -68,6 +68,82 @@ models:
       structured_output: true
       factory_reasoning: passthrough
       prompt_caching: true
+
+  - alias: gpt-5.6-terra
+    display_name: "GPT-5.6 Terra (Codex OAuth)"
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: gpt-5.6-terra
+    max_output_tokens: 128000
+    max_context_tokens: 1050000
+    capabilities:
+      streaming: true
+      tools: true
+      tool_result_safe: true
+      images: true
+      json_mode: true
+      structured_output: true
+      factory_reasoning: passthrough
+      prompt_caching: true
+
+  - alias: gpt-5.6-terra-fast
+    display_name: "GPT-5.6 Terra Fast (Codex OAuth)"
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: gpt-5.6-terra
+    max_output_tokens: 128000
+    max_context_tokens: 1050000
+    extra_args:
+      service_tier: priority
+    capabilities:
+      streaming: true
+      tools: true
+      tool_result_safe: true
+      images: true
+      json_mode: true
+      structured_output: true
+      factory_reasoning: passthrough
+      prompt_caching: true
+
+  - alias: gpt-5.6-luna
+    display_name: "GPT-5.6 Luna (Codex OAuth)"
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: gpt-5.6-luna
+    max_output_tokens: 128000
+    max_context_tokens: 1050000
+    capabilities:
+      streaming: true
+      tools: true
+      tool_result_safe: true
+      images: true
+      json_mode: true
+      structured_output: true
+      factory_reasoning: passthrough
+      prompt_caching: true
+
+  - alias: gpt-5.6-luna-fast
+    display_name: "GPT-5.6 Luna Fast (Codex OAuth)"
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    upstream_model: gpt-5.6-luna
+    max_output_tokens: 128000
+    max_context_tokens: 1050000
+    extra_args:
+      service_tier: priority
+    capabilities:
+      streaming: true
+      tools: true
+      tool_result_safe: true
+      images: true
+      json_mode: true
+      structured_output: true
+      factory_reasoning: passthrough
+      prompt_caching: true
 ```
 
 The interactive dashboard offers the following presets. Fast names are local

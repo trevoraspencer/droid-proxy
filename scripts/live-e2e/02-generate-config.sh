@@ -25,6 +25,10 @@ else
   info "$LIVE_E2E_ENV_FILE already exists; leaving it unchanged"
 fi
 
+if rg -q '^[[:space:]]*(export[[:space:]]+)?CODEX_UPSTREAM_MODEL=' "$LIVE_E2E_ENV_FILE"; then
+  warn "CODEX_UPSTREAM_MODEL is a retired GPT-5.2 override and is ignored; GPT-5.6 Sol mappings are fixed in the generated config"
+fi
+
 if rg -n 'sk-[A-Za-z0-9_-]{12,}|Bearer [A-Za-z0-9._~+/=-]{12,}|refresh_token|access_token|id_token' "$LIVE_E2E_CONFIG" >/dev/null 2>&1; then
   fail "$LIVE_E2E_CONFIG appears to contain a literal secret"
 fi
