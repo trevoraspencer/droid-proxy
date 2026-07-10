@@ -19,7 +19,7 @@ rows=(
   "xAI OAuth (Grok Build)|grok-build-0.1"
   "xAI OAuth (Composer 2.5 Fast)|grok-composer-2.5-fast"
   "xAI Grok 4.3 OAuth|grok-4.3"
-  "Z.AI GLM coding|glm-5.1"
+  "Z.AI GLM coding|glm-5.2"
   "Xiaomi MiMo|mimo-v2.5-pro"
   "Fireworks|${FIREWORKS_MODEL}"
   "DeepSeek|deepseek-v4-flash"

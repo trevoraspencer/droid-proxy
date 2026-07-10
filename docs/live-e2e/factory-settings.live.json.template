@@ -49,8 +49,8 @@
       "maxOutputTokens": 128000
     },
     {
-      "model": "glm-5.1",
-      "displayName": "GLM 5.1 (Z.AI GLM Coding Plan)",
+      "model": "glm-5.2",
+      "displayName": "GLM 5.2 (Z.AI GLM Coding Plan)",
       "provider": "generic-chat-completion-api",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "not-required-when-client-auth-disabled",

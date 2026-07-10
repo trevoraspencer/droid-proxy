@@ -43,13 +43,17 @@ models:
 
 ```yaml
 models:
-  - alias: glm-5.1-coding
-    display_name: "GLM 5.1 Coding (Z.AI)"
+  - alias: glm-5.2
+    display_name: "GLM 5.2 (Z.AI GLM Coding Plan)"
     factory_provider: generic-chat-completion-api
     upstream_protocol: openai-chat
     known_auth: zai-coding-api
-    upstream_model: glm-5.1
+    upstream_model: glm-5.2
     max_output_tokens: 131072
+    max_context_tokens: 200000
+    extra_args:
+      thinking:
+        type: enabled
 ```
 
 ### Legacy alias
@@ -75,8 +79,8 @@ models:
 {
   "customModels": [
     {
-      "model": "glm-5.1",
-      "displayName": "GLM 5.1 (Z.AI)",
+      "model": "glm-5.2",
+      "displayName": "GLM 5.2 (Z.AI GLM Coding Plan)",
       "provider": "generic-chat-completion-api",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
@@ -109,7 +113,7 @@ export ZAI_CODING_API_KEY=...
 curl -sS http://127.0.0.1:8787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "glm-5.1",
+    "model": "glm-5.2",
     "messages": [{"role":"user","content":"hello"}],
     "stream": false
   }' | jq -r '.choices[0].message.content'
