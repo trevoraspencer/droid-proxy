@@ -130,6 +130,9 @@ func launchdRuntimeStateFromOutput(out string, err error) (pid int, running bool
 		}
 		return 0, false, "launchctl query failed: " + firstLine(msg)
 	}
+	// Only the first occurrence of each key counts: launchctl print nests
+	// sub-blocks (endpoints, XPC services) whose own "state = active" lines
+	// would otherwise override the service-level state.
 	state := ""
 	for _, line := range strings.Split(out, "\n") {
 		key, value, ok := splitStateLine(line)
@@ -138,11 +141,15 @@ func launchdRuntimeStateFromOutput(out string, err error) (pid int, running bool
 		}
 		switch key {
 		case "pid":
-			if n, convErr := strconv.Atoi(value); convErr == nil {
-				pid = n
+			if pid == 0 {
+				if n, convErr := strconv.Atoi(value); convErr == nil {
+					pid = n
+				}
 			}
 		case "state":
-			state = value
+			if state == "" {
+				state = value
+			}
 		}
 	}
 	switch {

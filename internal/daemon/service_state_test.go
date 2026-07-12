@@ -21,6 +21,20 @@ const launchctlPrintRunning = `gui/501/com.droid-proxy.agent = {
 
 	pid = 93000
 	working directory = /Users/trevor/Library/Application Support/droid-proxy
+
+	spawn type = daemon (3)
+	endpoints = {
+		"com.droid-proxy.agent" = {
+			port = 0x82f0b
+			active = 1
+			state = active
+		}
+	}
+	dynamic endpoints = {
+		"com.example.other" = {
+			state = active
+		}
+	}
 }`
 
 const launchctlPrintNotRunning = `gui/501/com.droid-proxy.agent = {
