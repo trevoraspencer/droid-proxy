@@ -165,6 +165,48 @@ func TestLaunchdRuntimeStateUsesSeam(t *testing.T) {
 	}
 }
 
+func TestRestartLaunchdBootstrapsWhenServiceNotLoaded(t *testing.T) {
+	origKickstart, origLoader := launchctlKickstart, launchAgentLoader
+	t.Cleanup(func() { launchctlKickstart, launchAgentLoader = origKickstart, origLoader })
+
+	kickstarts, loads := 0, 0
+	launchctlKickstart = func(target string) (string, error) {
+		kickstarts++
+		return "Could not find service \"com.droid-proxy.agent\" in domain for user gui: 501", errors.New("exit status 113")
+	}
+	launchAgentLoader = func(path string) error {
+		loads++
+		if !strings.HasSuffix(path, launchdLabel+".plist") {
+			t.Fatalf("loader path = %q, want the %s plist", path, launchdLabel)
+		}
+		return nil
+	}
+
+	if err := restartLaunchdService(); err != nil {
+		t.Fatalf("restart must fall back to bootstrapping an unloaded service: %v", err)
+	}
+	if kickstarts != 1 || loads != 1 {
+		t.Fatalf("kickstarts=%d loads=%d, want 1 kickstart then 1 bootstrap", kickstarts, loads)
+	}
+}
+
+func TestRestartLaunchdKickstartErrorsSurface(t *testing.T) {
+	origKickstart, origLoader := launchctlKickstart, launchAgentLoader
+	t.Cleanup(func() { launchctlKickstart, launchAgentLoader = origKickstart, origLoader })
+
+	launchctlKickstart = func(string) (string, error) {
+		return "Boot-out failed: 5: Input/output error", errors.New("exit status 5")
+	}
+	launchAgentLoader = func(string) error {
+		t.Fatal("loader must not run for non-not-found kickstart failures")
+		return nil
+	}
+
+	if err := restartLaunchdService(); err == nil || !strings.Contains(err.Error(), "kickstart") {
+		t.Fatalf("err = %v, want kickstart failure", err)
+	}
+}
+
 func TestStopLaunchdBootsOutWithoutRemovingPlist(t *testing.T) {
 	origBootout := launchctlBootout
 	t.Cleanup(func() { launchctlBootout = origBootout })
