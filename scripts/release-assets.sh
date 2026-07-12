@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST_DIR="${DIST_DIR:-$ROOT/dist}"
 VERSION="${VERSION:-$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)}"
-COMMIT="${COMMIT:-$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)}"
+COMMIT="${COMMIT:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
 VERSION_PKG="github.com/trevoraspencer/droid-proxy/internal/version"
 PLATFORMS="${PLATFORMS:-darwin/amd64 darwin/arm64 linux/amd64 linux/arm64}"
 DRY_RUN=0
@@ -41,7 +41,7 @@ for platform in $PLATFORMS; do
   work="$DIST_DIR/.work-${os}-${arch}"
   rm -rf "$work"
   mkdir -p "$work"
-  CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -buildvcs=false \
+  CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -buildvcs=false -trimpath \
     -ldflags "-X ${VERSION_PKG}.Version=${VERSION} -X ${VERSION_PKG}.Commit=${COMMIT}" \
     -o "$work/droid-proxy" ./cmd/droid-proxy
   cp "$ROOT/LICENSE" "$work/LICENSE"
@@ -64,5 +64,6 @@ cp "$ROOT/scripts/install.sh" "$DIST_DIR/install.sh"
 (
   cd "$DIST_DIR"
   checksum_file install.sh >> checksums.txt
+  LC_ALL=C sort -o checksums.txt checksums.txt
 )
 echo "release-assets: wrote assets and checksums.txt"

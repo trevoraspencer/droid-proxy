@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-12
+
 ### Added
 
 - Z.AI GLM Coding Plan support for `glm-5.2`, including the sample
@@ -27,6 +29,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Security
 
 - Hardened the release installer to reject archives with unsafe paths or link entries before extraction.
+- Release workflows now pin every third-party Action to an immutable commit,
+  isolate write permissions to the publishing job, generate and checksum an SPDX
+  SBOM, and publish GitHub build-provenance and SBOM attestations before uploading
+  release assets.
 
 ## [0.1.0] - 2026-07-04
 
@@ -60,5 +66,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - OAuth token, auth directory, installation ID, and refresh-lock permission hardening errors fail visibly.
 - Malformed OAuth ID-token identity handling is documented and tested.
 
-[Unreleased]: https://github.com/trevoraspencer/droid-proxy/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/trevoraspencer/droid-proxy/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/trevoraspencer/droid-proxy/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/trevoraspencer/droid-proxy/releases/tag/v0.1.0

@@ -4,55 +4,132 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version string to package"
-        required: false
-        default: ""
 
-permissions:
-  contents: write
+# Jobs opt into only the token capabilities they need.
+permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  # Do not interrupt a release after attestations or uploads have started.
+  cancel-in-progress: false
 
 jobs:
-  release:
+  build:
     name: Build release assets
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
           cache: true
       - name: Resolve version
         id: version
         shell: bash
-        env:
-          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          if [[ -n "${INPUT_VERSION:-}" ]]; then
-            version="$INPUT_VERSION"
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            version="${GITHUB_REF_NAME}"
-          else
-            version="$(git describe --tags --always)"
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "release workflow requires an existing tag ref" >&2
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME}"
+          bash scripts/validate-release-version.sh "$version"
+          tag_commit="$(git rev-list -n 1 "$version")"
+          head_commit="$(git rev-parse HEAD)"
+          if [[ "$tag_commit" != "$head_commit" || "$head_commit" != "$GITHUB_SHA" ]]; then
+            echo "release tag, checkout, and triggering commit do not match" >&2
+            exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
         timeout-minutes: 5
       - name: Build release assets
-        run: VERSION="${{ steps.version.outputs.version }}" bash scripts/release-assets.sh
+        env:
+          COMMIT: ${{ github.sha }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: bash scripts/release-assets.sh
         timeout-minutes: 15
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v3.0.1
+      - name: Install checksum-pinned Syft
+        shell: bash
+        env:
+          SYFT_VERSION: "1.46.0"
+          SYFT_SHA256: "d654f678b709eb53c393d38519d5ed7d2e57205529404018614cfefa0fb2b5ca"
+        run: |
+          archive="$RUNNER_TEMP/syft.tar.gz"
+          directory="$RUNNER_TEMP/syft-bin"
+          curl --fail --location --silent --show-error \
+            --output "$archive" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          echo "${SYFT_SHA256}  ${archive}" | sha256sum --check --strict
+          mkdir -p "$directory"
+          tar -xzf "$archive" -C "$directory" syft
+          chmod 0755 "$directory/syft"
+          echo "$directory" >> "$GITHUB_PATH"
+      - name: Generate SPDX SBOM
+        run: syft scan dir:dist --output spdx-json=dist/droid-proxy.spdx.json
+      - name: Add SBOM checksum
+        shell: bash
+        run: |
+          cd dist
+          sha256sum droid-proxy.spdx.json >> checksums.txt
+          LC_ALL=C sort -o checksums.txt checksums.txt
+      - name: Upload verified release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: droid-proxy ${{ steps.version.outputs.version }}
+          name: release-${{ steps.version.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Attest and publish release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ needs.build.outputs.version }}
+          path: dist
+      - name: Verify release bundle checksums
+        working-directory: dist
+        run: sha256sum --check checksums.txt
+      - name: Attest build provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: |
+            dist/droid-proxy_*.tar.gz
+            dist/install.sh
+            dist/checksums.txt
+            dist/droid-proxy.spdx.json
+      - name: Attest release SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: |
+            dist/droid-proxy_*.tar.gz
+            dist/install.sh
+            dist/checksums.txt
+            dist/droid-proxy.spdx.json
+          sbom-path: dist/droid-proxy.spdx.json
+      - name: Upload release assets
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          tag_name: ${{ needs.build.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: droid-proxy ${{ needs.build.outputs.version }}
+          overwrite_files: false
+          fail_on_unmatched_files: true
           files: |
             dist/droid-proxy_*.tar.gz
             dist/checksums.txt
             dist/install.sh
+            dist/droid-proxy.spdx.json
