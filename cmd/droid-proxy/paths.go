@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 )
@@ -111,12 +112,17 @@ func runtimeMetadata(configPath, envFile, workDir string) (daemon.RuntimeMetadat
 			envFile = absEnv
 		}
 	}
+	configModTime := ""
+	if info, statErr := os.Stat(absConfig); statErr == nil {
+		configModTime = info.ModTime().UTC().Format(time.RFC3339)
+	}
 	return daemon.RuntimeMetadata{
-		PID:        os.Getpid(),
-		Executable: exe,
-		ConfigPath: absConfig,
-		EnvFile:    envFile,
-		WorkDir:    workDir,
+		PID:           os.Getpid(),
+		Executable:    exe,
+		ConfigPath:    absConfig,
+		ConfigModTime: configModTime,
+		EnvFile:       envFile,
+		WorkDir:       workDir,
 	}, nil
 }
 

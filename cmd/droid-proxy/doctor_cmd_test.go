@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 )
@@ -373,6 +374,98 @@ func TestDoctorReportsServiceNotRunningAsSoftLine(t *testing.T) {
 			t.Fatalf("doctor output missing %q:\n%s", want, text)
 		}
 	}
+}
+
+func TestDoctorWarnsWhenConfigChangedSinceProxyStart(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	rawConfig := `
+models:
+  - alias: local-tools-off
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    upstream_model: llama
+    known_auth: ollama
+    capabilities:
+      tools: false
+`
+	if err := os.WriteFile(configPath, []byte(rawConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	withDoctorEnvHooks(t, filepath.Join(tmp, "managed-env"))
+	absConfig, err := filepath.Abs(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedAt := time.Now().Add(-time.Hour)
+	stubDoctorRuntimeMetadata(t, daemon.RuntimeMetadata{
+		PID:           123,
+		ConfigPath:    absConfig,
+		ConfigModTime: loadedAt.UTC().Format(time.RFC3339),
+	}, nil)
+
+	var out bytes.Buffer
+	res := writeDoctorWithOptions(&out, doctorOptions{ConfigPath: configPath, ConfigExplicit: true})
+	text := out.String()
+	if len(res.HardIssues) != 0 {
+		t.Fatalf("a stale config must be a soft warning, not a hard issue; HardIssues = %#v\noutput:\n%s", res.HardIssues, text)
+	}
+	if !strings.Contains(text, "config: changed since the proxy started — restart droid-proxy to apply") {
+		t.Fatalf("doctor output missing stale-config warning:\n%s", text)
+	}
+}
+
+func TestDoctorNoStaleWarningWhenConfigUnchanged(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	rawConfig := `
+models:
+  - alias: local-tools-off
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    upstream_model: llama
+    known_auth: ollama
+    capabilities:
+      tools: false
+`
+	if err := os.WriteFile(configPath, []byte(rawConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	withDoctorEnvHooks(t, filepath.Join(tmp, "managed-env"))
+	absConfig, err := filepath.Abs(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stubDoctorRuntimeMetadata(t, daemon.RuntimeMetadata{
+		PID:           123,
+		ConfigPath:    absConfig,
+		ConfigModTime: info.ModTime().UTC().Format(time.RFC3339),
+	}, nil)
+
+	var out bytes.Buffer
+	res := writeDoctorWithOptions(&out, doctorOptions{ConfigPath: configPath, ConfigExplicit: true})
+	text := out.String()
+	if len(res.HardIssues) != 0 {
+		t.Fatalf("HardIssues = %#v\noutput:\n%s", res.HardIssues, text)
+	}
+	if strings.Contains(text, "changed since the proxy started") {
+		t.Fatalf("unexpected stale-config warning:\n%s", text)
+	}
+}
+
+func stubDoctorRuntimeMetadata(t *testing.T, meta daemon.RuntimeMetadata, err error) {
+	t.Helper()
+	orig := doctorRuntimeMetadata
+	doctorRuntimeMetadata = func() (daemon.RuntimeMetadata, error) { return meta, err }
+	t.Cleanup(func() { doctorRuntimeMetadata = orig })
 }
 
 func stubDoctorServiceRunning(t *testing.T, st daemon.RuntimeState) {

@@ -208,14 +208,49 @@ func (b *backend) oauthLogout(provider config.OAuthProvider, account string) err
 	return err
 }
 
-// proxyRunning reports whether the daemon is up.
+// Seams for daemon/service state so tests never touch the real launchd or
+// pidfile (same pattern as launchAgentLoader in internal/daemon).
+var (
+	serviceInstalled = daemon.ServiceInstalled
+	restartService   = daemon.RestartService
+	serviceRunning   = daemon.ServiceRunning
+	daemonIsRunning  = daemon.IsRunning
+)
+
+// proxyRunning reports whether the proxy is up, either as a pidfile daemon or
+// under the managed launchd/systemd service.
 func (b *backend) proxyRunning() bool {
-	_, running := daemon.IsRunning()
-	return running
+	if _, running := daemonIsRunning(); running {
+		return true
+	}
+	return serviceRunning().Running
 }
 
-// restartProxy stops any running daemon and spawns a fresh detached one.
+// restartHint nudges the user to restart after config edits that the running
+// proxy has not applied. Empty when nothing is running.
+func (b *backend) restartHint() string {
+	if !b.proxyRunning() {
+		return ""
+	}
+	return " Restart the proxy (r on the dashboard) to apply."
+}
+
+// restartProxy restarts the proxy. With a managed service installed it goes
+// through the service manager — stopping the process directly would only
+// fight KeepAlive/Restart=always and race a second daemon onto the port.
 func (b *backend) restartProxy() error {
+	if serviceInstalled() {
+		if err := restartService(); err != nil {
+			return err
+		}
+		for i := 0; i < 30; i++ {
+			if b.proxyRunning() {
+				return nil
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		return fmt.Errorf("timed out waiting for the managed service to report running")
+	}
 	_ = daemon.Stop()
 	daemon.CleanStalePID()
 	exe, err := os.Executable()

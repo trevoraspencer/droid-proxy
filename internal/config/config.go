@@ -98,6 +98,12 @@ type Config struct {
 	OAuth          OAuth          `yaml:"oauth"`
 	Models         []*Model       `yaml:"models"`
 
+	// SourcePath and SourceModTime identify the file this config was loaded
+	// from, so a running server can detect on-disk edits it has not applied.
+	// Zero when the config was parsed from raw bytes.
+	SourcePath    string    `yaml:"-"`
+	SourceModTime time.Time `yaml:"-"`
+
 	present map[string]bool `yaml:"-"`
 }
 

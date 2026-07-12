@@ -30,9 +30,10 @@ type doctorOptions struct {
 }
 
 var (
-	doctorManagedEnvFile = daemon.ManagedEnvFile
-	doctorLoadLayeredEnv = daemon.LoadLayeredEnv
-	doctorServiceRunning = daemon.ServiceRunning
+	doctorManagedEnvFile  = daemon.ManagedEnvFile
+	doctorLoadLayeredEnv  = daemon.LoadLayeredEnv
+	doctorServiceRunning  = daemon.ServiceRunning
+	doctorRuntimeMetadata = daemon.ReadRuntimeMetadata
 )
 
 func runDoctor(args []string) {
@@ -228,9 +229,35 @@ func writeDoctorConfig(out io.Writer, opts doctorOptions) []string {
 		return append(issues, msg)
 	}
 	fmt.Fprintln(out, "config load: ok")
+	writeDoctorConfigFreshness(out, absConfig)
 	fmt.Fprintf(out, "listen: %s:%d\n", cfg.Listen.Host, cfg.Listen.Port)
 	writeDoctorModels(out, cfg)
 	return issues
+}
+
+// writeDoctorConfigFreshness soft-warns when the config file changed after the
+// running proxy loaded it (per runtime.json). The running instance is healthy,
+// just stale, so this is never a hard issue.
+func writeDoctorConfigFreshness(out io.Writer, absConfig string) {
+	meta, err := doctorRuntimeMetadata()
+	if err != nil || !samePath(meta.ConfigPath, absConfig) {
+		return
+	}
+	loadedAt, err := time.Parse(time.RFC3339, meta.ConfigModTime)
+	if err != nil {
+		// Older runtime.json files lack config_mtime; fall back to the
+		// proxy start time recorded in updated_at.
+		if loadedAt, err = time.Parse(time.RFC3339, meta.UpdatedAt); err != nil {
+			return
+		}
+	}
+	info, err := os.Stat(absConfig)
+	if err != nil {
+		return
+	}
+	if info.ModTime().Truncate(time.Second).After(loadedAt.Truncate(time.Second)) {
+		fmt.Fprintln(out, "config: changed since the proxy started — restart droid-proxy to apply")
+	}
 }
 
 func doctorSafeEnvError(err error) string {
