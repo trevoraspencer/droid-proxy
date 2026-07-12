@@ -20,11 +20,11 @@ type RuntimeMetadata struct {
 }
 
 func RuntimeFile() string {
-	return filepath.Join(stateDir, runtimeFileName)
+	return filepath.Join(stateDir(), runtimeFileName)
 }
 
 func WriteRuntimeMetadata(meta RuntimeMetadata) error {
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return err
 	}
 	if meta.PID == 0 {

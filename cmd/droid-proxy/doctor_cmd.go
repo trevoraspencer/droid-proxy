@@ -32,6 +32,7 @@ type doctorOptions struct {
 var (
 	doctorManagedEnvFile = daemon.ManagedEnvFile
 	doctorLoadLayeredEnv = daemon.LoadLayeredEnv
+	doctorServiceRunning = daemon.ServiceRunning
 )
 
 func runDoctor(args []string) {
@@ -149,6 +150,16 @@ func writeDoctorWithOptions(out io.Writer, opts doctorOptions) doctorResult {
 			msg := "service: issue: " + issue
 			fmt.Fprintln(out, msg)
 			res.HardIssues = append(res.HardIssues, msg)
+		}
+		st := doctorServiceRunning()
+		if st.Running {
+			fmt.Fprintf(out, "service state: running (pid %d)\n", st.PID)
+			if _, pidfileRunning := daemon.IsRunning(); !pidfileRunning {
+				fmt.Fprintf(out, "daemon note: the managed service reports pid %d; pidfile state is stale\n", st.PID)
+			}
+		} else {
+			// A deliberately stopped service is not a defect; report softly.
+			fmt.Fprintf(out, "service state: not running (%s)\n", st.Detail)
 		}
 	}
 

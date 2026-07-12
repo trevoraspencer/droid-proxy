@@ -8,14 +8,6 @@ import (
 
 func TestRuntimeMetadataRoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	oldStateDir := stateDir
-	oldPIDFile := pidFile
-	stateDir = filepath.Join(os.Getenv("HOME"), dirName)
-	pidFile = filepath.Join(stateDir, "droid-proxy.pid")
-	t.Cleanup(func() {
-		stateDir = oldStateDir
-		pidFile = oldPIDFile
-	})
 
 	want := RuntimeMetadata{
 		PID:        123,
@@ -46,14 +38,6 @@ func TestRuntimeMetadataRoundTrip(t *testing.T) {
 
 func TestRuntimeEnvFileForConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	oldStateDir := stateDir
-	oldPIDFile := pidFile
-	stateDir = filepath.Join(os.Getenv("HOME"), dirName)
-	pidFile = filepath.Join(stateDir, "droid-proxy.pid")
-	t.Cleanup(func() {
-		stateDir = oldStateDir
-		pidFile = oldPIDFile
-	})
 
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")

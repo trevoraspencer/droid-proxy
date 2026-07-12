@@ -169,10 +169,10 @@ func InstallLaunchd(configPath string) error {
 		return fmt.Errorf("resolving symlinks: %w", err)
 	}
 
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return err
 	}
-	_ = os.Remove(filepath.Join(stateDir, "run.sh"))
+	_ = os.Remove(filepath.Join(stateDir(), "run.sh"))
 
 	path := plistPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -185,7 +185,7 @@ func InstallLaunchd(configPath string) error {
 		ConfigPath: absConfig,
 		EnvFile:    ResolveExistingEnvFile(workDir),
 		WorkDir:    workDir,
-		LogDir:     stateDir,
+		LogDir:     stateDir(),
 	}
 	if err := writeLaunchdPlist(path, data); err != nil {
 		return err
