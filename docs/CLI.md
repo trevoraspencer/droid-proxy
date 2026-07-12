@@ -145,9 +145,9 @@ Keep the proxy running without an open terminal.
 | Command | Description |
 |---------|-------------|
 | `start` | Detaches a child process, writes PID to `~/.droid-proxy/droid-proxy.pid` |
-| `status` | Prints running PID or "not running" |
+| `status` | Prints the running PID; with a service installed it also queries launchctl/systemctl, so a proxy running under the managed service is reported even when the pidfile is stale |
 | `restart` | Restarts the installed launchd/systemd user service when present; otherwise stops and starts the background daemon |
-| `stop` | Sends SIGTERM; waits up to 10 seconds |
+| `stop` | With a service installed, stops through the service manager (`launchctl bootout` / `systemctl --user stop`) so KeepAlive cannot resurrect the process; the service starts again at next login (`droid-proxy service uninstall` removes it). Without a service: SIGTERM, waits up to 10 seconds |
 | `logs` | Tails the last 40 lines of `~/.droid-proxy/stderr.log` (override path as optional arg) |
 
 `start` fails if another instance is already running. On success it prints a
@@ -211,8 +211,14 @@ The doctor reports the executable path, resolved symlink target, CLI version and
 commit, config/env load status, model count and `agent_ready` summary, source
 checkout status when one is available, updater dry-run status for source
 installs, daemon status, launchd/systemd service issues, and runnable service
-configs using the env-file paths encoded in the service. It names env files and
-env variable keys but never prints env file contents or secret values. Missing
+configs using the env-file paths encoded in the service. It also probes
+`/health` on the configured listen address (hard issue when a different server
+answers or when nothing responds while the proxy reports running) and on
+`[::1]:<port>` (soft warning when a foreign IPv6 listener shadows `localhost`
+URLs), asks the service manager for the live service state (`service state:
+running (pid N)`), and warns when `config.yaml` changed after the running proxy
+loaded it. It names env files and env variable keys but never prints env file
+contents or secret values. Missing
 source checkouts are normal for release installs; pass `--repo` when you want a
 source checkout audited. A missing implicit config is reported as a setup hint,
 while an explicit `--config` path is treated as a hard diagnostic issue when it

@@ -40,14 +40,14 @@ func (m model) keyDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			model := sel
 			return m, func() tea.Msg {
 				err := m.be.syncFactory([]*config.Model{model})
-				return actionDoneMsg{text: fmt.Sprintf("Synced %q to Factory settings.", model.Alias), err: err, reload: true}
+				return actionDoneMsg{text: fmt.Sprintf("Synced %q to Factory settings.", model.Alias) + m.be.restartHint(), err: err, reload: true}
 			}
 		}
 	case "S":
 		all := m.models
 		return m, func() tea.Msg {
 			err := m.be.syncFactory(all)
-			return actionDoneMsg{text: fmt.Sprintf("Synced %d model(s) to Factory settings.", len(all)), err: err, reload: true}
+			return actionDoneMsg{text: fmt.Sprintf("Synced %d model(s) to Factory settings.", len(all)) + m.be.restartHint(), err: err, reload: true}
 		}
 	case "o":
 		m.screen = screenOAuthProviders
@@ -134,7 +134,7 @@ func (m model) keyAddKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.keyOnly {
 			return m, func() tea.Msg {
 				err := m.be.setKey(env, val)
-				return actionDoneMsg{text: fmt.Sprintf("Saved %s to %s", env, secretsPathHint()), err: err, reload: true}
+				return actionDoneMsg{text: fmt.Sprintf("Saved %s to %s.", env, secretsPathHint()) + m.be.restartHint(), err: err, reload: true}
 			}
 		}
 		if err := m.be.setKey(env, val); err != nil {
@@ -380,7 +380,7 @@ func (m model) keyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = screenDashboard
 			return m, tea.Batch(func() tea.Msg {
 				err := m.be.syncFactory([]*config.Model{model})
-				return actionDoneMsg{text: fmt.Sprintf("Synced %q to Factory settings.", model.Alias), err: err, reload: true}
+				return actionDoneMsg{text: fmt.Sprintf("Synced %q to Factory settings.", model.Alias) + m.be.restartHint(), err: err, reload: true}
 			})
 		case "n", "N", "esc", "enter":
 			m.pendingSync = nil
@@ -404,7 +404,7 @@ func (m model) keyConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.confirmDel = nil
 		return m, func() tea.Msg {
 			err := m.be.removeModel(target.Alias)
-			return actionDoneMsg{text: fmt.Sprintf("Removed model %q.", target.Alias), err: err, reload: true}
+			return actionDoneMsg{text: fmt.Sprintf("Removed model %q.", target.Alias) + m.be.restartHint(), err: err, reload: true}
 		}
 	case "n", "N", "esc":
 		m.confirmDel = nil

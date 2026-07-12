@@ -30,8 +30,10 @@ type doctorOptions struct {
 }
 
 var (
-	doctorManagedEnvFile = daemon.ManagedEnvFile
-	doctorLoadLayeredEnv = daemon.LoadLayeredEnv
+	doctorManagedEnvFile  = daemon.ManagedEnvFile
+	doctorLoadLayeredEnv  = daemon.LoadLayeredEnv
+	doctorServiceRunning  = daemon.ServiceRunning
+	doctorRuntimeMetadata = daemon.ReadRuntimeMetadata
 )
 
 func runDoctor(args []string) {
@@ -150,6 +152,16 @@ func writeDoctorWithOptions(out io.Writer, opts doctorOptions) doctorResult {
 			fmt.Fprintln(out, msg)
 			res.HardIssues = append(res.HardIssues, msg)
 		}
+		st := doctorServiceRunning()
+		if st.Running {
+			fmt.Fprintf(out, "service state: running (pid %d)\n", st.PID)
+			if _, pidfileRunning := daemon.IsRunning(); !pidfileRunning {
+				fmt.Fprintf(out, "daemon note: the managed service reports pid %d; pidfile state is stale\n", st.PID)
+			}
+		} else {
+			// A deliberately stopped service is not a defect; report softly.
+			fmt.Fprintf(out, "service state: not running (%s)\n", st.Detail)
+		}
 	}
 
 	if len(res.HardIssues) == 0 {
@@ -217,9 +229,43 @@ func writeDoctorConfig(out io.Writer, opts doctorOptions) []string {
 		return append(issues, msg)
 	}
 	fmt.Fprintln(out, "config load: ok")
+	writeDoctorConfigFreshness(out, absConfig)
 	fmt.Fprintf(out, "listen: %s:%d\n", cfg.Listen.Host, cfg.Listen.Port)
+	primary, v6 := doctorProbeListen(cfg)
+	expectRunning := false
+	if _, running := daemon.IsRunning(); running {
+		expectRunning = true
+	} else if daemon.ServiceInstalled() && doctorServiceRunning().Running {
+		expectRunning = true
+	}
+	issues = append(issues, writeListenProbe(out, primary, v6, expectRunning)...)
 	writeDoctorModels(out, cfg)
 	return issues
+}
+
+// writeDoctorConfigFreshness soft-warns when the config file changed after the
+// running proxy loaded it (per runtime.json). The running instance is healthy,
+// just stale, so this is never a hard issue.
+func writeDoctorConfigFreshness(out io.Writer, absConfig string) {
+	meta, err := doctorRuntimeMetadata()
+	if err != nil || !samePath(meta.ConfigPath, absConfig) {
+		return
+	}
+	loadedAt, err := time.Parse(time.RFC3339, meta.ConfigModTime)
+	if err != nil {
+		// Older runtime.json files lack config_mtime; fall back to the
+		// proxy start time recorded in updated_at.
+		if loadedAt, err = time.Parse(time.RFC3339, meta.UpdatedAt); err != nil {
+			return
+		}
+	}
+	info, err := os.Stat(absConfig)
+	if err != nil {
+		return
+	}
+	if info.ModTime().Truncate(time.Second).After(loadedAt.Truncate(time.Second)) {
+		fmt.Fprintln(out, "config: changed since the proxy started — restart droid-proxy to apply")
+	}
 }
 
 func doctorSafeEnvError(err error) string {

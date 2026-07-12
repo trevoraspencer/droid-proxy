@@ -80,20 +80,60 @@ func runStart(args []string) {
 	os.Exit(1)
 }
 
+var (
+	stopServiceInstalled = daemon.ServiceInstalled
+	stopService          = daemon.StopService
+	stopDaemon           = daemon.Stop
+)
+
 func runStop() {
-	if err := daemon.Stop(); err != nil {
+	if err := stopProxy(os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "droid-proxy stop error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("droid-proxy stopped.")
+}
+
+func stopProxy(out io.Writer) error {
+	if stopServiceInstalled() {
+		if err := stopService(); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "stopped managed service %s.\n", daemon.ServiceDescription())
+		fmt.Fprintln(out, "It starts again at next login; run 'droid-proxy service uninstall' to remove it, or 'droid-proxy restart' to start it now.")
+		return nil
+	}
+	if err := stopDaemon(); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "droid-proxy stopped.")
+	return nil
 }
 
 func runStatus() {
-	if pid, running := daemon.IsRunning(); running {
-		fmt.Printf("droid-proxy is running (pid %d)\n", pid)
+	writeStatus(os.Stdout, daemon.IsRunning, daemon.ServiceRunning)
+}
+
+func writeStatus(out io.Writer, isRunning func() (int, bool), serviceState func() daemon.RuntimeState) {
+	st := serviceState()
+	if pid, running := isRunning(); running {
+		fmt.Fprintf(out, "droid-proxy is running (pid %d)\n", pid)
+		if st.Installed {
+			fmt.Fprintf(out, "managed service: %s", st.Detail)
+			if st.Running {
+				fmt.Fprintf(out, " (pid %d)", st.PID)
+			}
+			fmt.Fprintln(out)
+		}
 		return
 	}
-	fmt.Println("droid-proxy is not running.")
+	if st.Installed && st.Running {
+		fmt.Fprintf(out, "droid-proxy is running under the managed service (pid %d); local pidfile state is stale\n", st.PID)
+		return
+	}
+	fmt.Fprintln(out, "droid-proxy is not running.")
+	if st.Installed {
+		fmt.Fprintf(out, "service installed but not active (%s) — check 'droid-proxy logs'\n", st.Detail)
+	}
 }
 
 func runRestart(args []string) {

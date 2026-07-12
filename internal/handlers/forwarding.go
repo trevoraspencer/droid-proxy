@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -57,13 +59,31 @@ func (a *API) resolveRequestModel(body []byte, errs modelResolveErrors) (*config
 	if err != nil {
 		var nf *upstream.NotFoundError
 		if errors.As(err, &nf) {
-			errs.NotFound(nf)
+			if hint := a.staleConfigHint(); hint != "" {
+				errs.NotFound(fmt.Errorf("%w — %s", nf, hint))
+			} else {
+				errs.NotFound(nf)
+			}
 			return nil, false
 		}
 		errs.Internal(err)
 		return nil, false
 	}
 	return m, true
+}
+
+// staleConfigHint reports when the config file changed on disk after this
+// server loaded it, so "model not configured" errors can explain themselves.
+// It stats the file only on the model-not-found path, never per request.
+func (a *API) staleConfigHint() string {
+	if a.Cfg == nil || strings.TrimSpace(a.Cfg.SourcePath) == "" {
+		return ""
+	}
+	info, err := os.Stat(a.Cfg.SourcePath)
+	if err != nil || !info.ModTime().After(a.Cfg.SourceModTime) {
+		return ""
+	}
+	return "config.yaml changed since the proxy started; restart droid-proxy to apply it"
 }
 
 func (a *API) doUpstream(c *gin.Context, opts upstream.SendOptions, writeBuildError, writeDoError func(error)) (*http.Response, bool) {

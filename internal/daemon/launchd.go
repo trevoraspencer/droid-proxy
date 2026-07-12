@@ -169,10 +169,10 @@ func InstallLaunchd(configPath string) error {
 		return fmt.Errorf("resolving symlinks: %w", err)
 	}
 
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return err
 	}
-	_ = os.Remove(filepath.Join(stateDir, "run.sh"))
+	_ = os.Remove(filepath.Join(stateDir(), "run.sh"))
 
 	path := plistPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -185,7 +185,7 @@ func InstallLaunchd(configPath string) error {
 		ConfigPath: absConfig,
 		EnvFile:    ResolveExistingEnvFile(workDir),
 		WorkDir:    workDir,
-		LogDir:     stateDir,
+		LogDir:     stateDir(),
 	}
 	if err := writeLaunchdPlist(path, data); err != nil {
 		return err
@@ -266,6 +266,11 @@ func loadLaunchAgent(path string) error {
 	return nil
 }
 
+var launchctlKickstart = func(target string) (string, error) {
+	out, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput()
+	return string(out), err
+}
+
 func RestartLaunchd() error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("launchd restart is supported on macOS only")
@@ -273,13 +278,22 @@ func RestartLaunchd() error {
 	if !LaunchdInstalled() {
 		return fmt.Errorf("launchd service not installed")
 	}
+	return restartLaunchdService()
+}
+
+func restartLaunchdService() error {
 	uid := os.Getuid()
 	target := "gui/" + strconv.Itoa(uid) + "/" + launchdLabel
-	out, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("launchctl kickstart: %s: %w", strings.TrimSpace(string(out)), err)
+	out, err := launchctlKickstart(target)
+	if err == nil {
+		return nil
 	}
-	return nil
+	// After `droid-proxy stop` (bootout) the agent is installed but not
+	// loaded; kickstart cannot start it, so bootstrap the plist instead.
+	if strings.Contains(out, "Could not find service") {
+		return launchAgentLoader(plistPath())
+	}
+	return fmt.Errorf("launchctl kickstart: %s: %w", strings.TrimSpace(out), err)
 }
 
 // UninstallLaunchd removes the launchd agent.

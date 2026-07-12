@@ -8,21 +8,14 @@ import (
 
 func TestRuntimeMetadataRoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	oldStateDir := stateDir
-	oldPIDFile := pidFile
-	stateDir = filepath.Join(os.Getenv("HOME"), dirName)
-	pidFile = filepath.Join(stateDir, "droid-proxy.pid")
-	t.Cleanup(func() {
-		stateDir = oldStateDir
-		pidFile = oldPIDFile
-	})
 
 	want := RuntimeMetadata{
-		PID:        123,
-		Executable: "/tmp/droid-proxy",
-		ConfigPath: "/tmp/config.yaml",
-		EnvFile:    "/tmp/.env.local",
-		WorkDir:    "/tmp",
+		PID:           123,
+		Executable:    "/tmp/droid-proxy",
+		ConfigPath:    "/tmp/config.yaml",
+		ConfigModTime: "2026-07-12T19:17:00Z",
+		EnvFile:       "/tmp/.env.local",
+		WorkDir:       "/tmp",
 	}
 	if err := WriteRuntimeMetadata(want); err != nil {
 		t.Fatalf("WriteRuntimeMetadata: %v", err)
@@ -34,8 +27,24 @@ func TestRuntimeMetadataRoundTrip(t *testing.T) {
 	if got.PID != want.PID || got.Executable != want.Executable || got.ConfigPath != want.ConfigPath || got.EnvFile != want.EnvFile || got.WorkDir != want.WorkDir {
 		t.Fatalf("metadata = %+v, want %+v", got, want)
 	}
+	if got.ConfigModTime != want.ConfigModTime {
+		t.Fatalf("ConfigModTime = %q, want %q", got.ConfigModTime, want.ConfigModTime)
+	}
 	if got.UpdatedAt == "" {
 		t.Fatal("UpdatedAt should be populated")
+	}
+
+	// Old runtime.json files predate config_mtime and must still parse.
+	legacy := []byte(`{"pid":7,"executable":"/tmp/droid-proxy","config_path":"/tmp/config.yaml","updated_at":"2026-07-10T00:00:00Z"}`)
+	if err := os.WriteFile(RuntimeFile(), legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old, err := ReadRuntimeMetadata()
+	if err != nil {
+		t.Fatalf("legacy runtime.json must parse: %v", err)
+	}
+	if old.ConfigModTime != "" {
+		t.Fatalf("legacy ConfigModTime = %q, want empty", old.ConfigModTime)
 	}
 
 	RemoveRuntimeMetadata()
@@ -46,14 +55,6 @@ func TestRuntimeMetadataRoundTrip(t *testing.T) {
 
 func TestRuntimeEnvFileForConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	oldStateDir := stateDir
-	oldPIDFile := pidFile
-	stateDir = filepath.Join(os.Getenv("HOME"), dirName)
-	pidFile = filepath.Join(stateDir, "droid-proxy.pid")
-	t.Cleanup(func() {
-		stateDir = oldStateDir
-		pidFile = oldPIDFile
-	})
 
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")

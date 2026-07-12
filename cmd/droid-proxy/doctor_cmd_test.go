@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 )
@@ -283,6 +284,7 @@ func TestDoctorLaunchdMissingPathsAreSecretSafe(t *testing.T) {
 	if err := os.Remove(envPath); err != nil {
 		t.Fatal(err)
 	}
+	stubDoctorServiceRunning(t, daemon.RuntimeState{Supported: true, Installed: true, Detail: "not loaded"})
 	plistDir := filepath.Join(home, "Library", "LaunchAgents")
 	if err := os.MkdirAll(plistDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -311,6 +313,202 @@ func TestDoctorLaunchdMissingPathsAreSecretSafe(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestDoctorReportsServiceRuntimeState(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd plist is only checked on macOS")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testDoctorGitRepo(t, "module github.com/trevoraspencer/droid-proxy\n")
+	writeValidDoctorPlist(t, home)
+	stubDoctorServiceRunning(t, daemon.RuntimeState{
+		Supported: true,
+		Installed: true,
+		Running:   true,
+		PID:       93000,
+		Detail:    "running",
+	})
+
+	var out bytes.Buffer
+	res := writeDoctor(&out, repo)
+	text := out.String()
+	if len(res.HardIssues) != 0 {
+		t.Fatalf("HardIssues = %#v\noutput:\n%s", res.HardIssues, text)
+	}
+	for _, want := range []string{
+		"daemon: not running",
+		"service state: running (pid 93000)",
+		"daemon note: the managed service reports pid 93000; pidfile state is stale",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestDoctorReportsServiceNotRunningAsSoftLine(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd plist is only checked on macOS")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := testDoctorGitRepo(t, "module github.com/trevoraspencer/droid-proxy\n")
+	writeValidDoctorPlist(t, home)
+	stubDoctorServiceRunning(t, daemon.RuntimeState{
+		Supported: true,
+		Installed: true,
+		Detail:    "not loaded",
+	})
+
+	var out bytes.Buffer
+	res := writeDoctor(&out, repo)
+	text := out.String()
+	if len(res.HardIssues) != 0 {
+		t.Fatalf("a stopped service must not be a hard issue; HardIssues = %#v\noutput:\n%s", res.HardIssues, text)
+	}
+	for _, want := range []string{"service state: not running (not loaded)", "status: ok"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestDoctorWarnsWhenConfigChangedSinceProxyStart(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	rawConfig := `
+models:
+  - alias: local-tools-off
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    upstream_model: llama
+    known_auth: ollama
+    capabilities:
+      tools: false
+`
+	if err := os.WriteFile(configPath, []byte(rawConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	withDoctorEnvHooks(t, filepath.Join(tmp, "managed-env"))
+	absConfig, err := filepath.Abs(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedAt := time.Now().Add(-time.Hour)
+	stubDoctorRuntimeMetadata(t, daemon.RuntimeMetadata{
+		PID:           123,
+		ConfigPath:    absConfig,
+		ConfigModTime: loadedAt.UTC().Format(time.RFC3339),
+	}, nil)
+
+	var out bytes.Buffer
+	res := writeDoctorWithOptions(&out, doctorOptions{ConfigPath: configPath, ConfigExplicit: true})
+	text := out.String()
+	if len(res.HardIssues) != 0 {
+		t.Fatalf("a stale config must be a soft warning, not a hard issue; HardIssues = %#v\noutput:\n%s", res.HardIssues, text)
+	}
+	if !strings.Contains(text, "config: changed since the proxy started — restart droid-proxy to apply") {
+		t.Fatalf("doctor output missing stale-config warning:\n%s", text)
+	}
+}
+
+func TestDoctorNoStaleWarningWhenConfigUnchanged(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	rawConfig := `
+models:
+  - alias: local-tools-off
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    upstream_model: llama
+    known_auth: ollama
+    capabilities:
+      tools: false
+`
+	if err := os.WriteFile(configPath, []byte(rawConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	withDoctorEnvHooks(t, filepath.Join(tmp, "managed-env"))
+	absConfig, err := filepath.Abs(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stubDoctorRuntimeMetadata(t, daemon.RuntimeMetadata{
+		PID:           123,
+		ConfigPath:    absConfig,
+		ConfigModTime: info.ModTime().UTC().Format(time.RFC3339),
+	}, nil)
+
+	var out bytes.Buffer
+	res := writeDoctorWithOptions(&out, doctorOptions{ConfigPath: configPath, ConfigExplicit: true})
+	text := out.String()
+	if len(res.HardIssues) != 0 {
+		t.Fatalf("HardIssues = %#v\noutput:\n%s", res.HardIssues, text)
+	}
+	if strings.Contains(text, "changed since the proxy started") {
+		t.Fatalf("unexpected stale-config warning:\n%s", text)
+	}
+}
+
+func stubDoctorRuntimeMetadata(t *testing.T, meta daemon.RuntimeMetadata, err error) {
+	t.Helper()
+	orig := doctorRuntimeMetadata
+	doctorRuntimeMetadata = func() (daemon.RuntimeMetadata, error) { return meta, err }
+	t.Cleanup(func() { doctorRuntimeMetadata = orig })
+}
+
+func stubDoctorServiceRunning(t *testing.T, st daemon.RuntimeState) {
+	t.Helper()
+	orig := doctorServiceRunning
+	doctorServiceRunning = func() daemon.RuntimeState { return st }
+	t.Cleanup(func() { doctorServiceRunning = orig })
+}
+
+func writeValidDoctorPlist(t *testing.T, home string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	rawConfig := `
+listen:
+  host: 127.0.0.1
+  port: 8787
+models:
+  - alias: local-tools-off
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    upstream_model: llama
+    known_auth: ollama
+    capabilities:
+      tools: false
+`
+	if err := os.WriteFile(configPath, []byte(rawConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plistDir := filepath.Join(home, "Library", "LaunchAgents")
+	if err := os.MkdirAll(plistDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>ProgramArguments</key><array>
+<string>` + exe + `</string><string>start</string><string>--foreground</string>
+<string>--config</string><string>` + configPath + `</string>
+</array><key>Label</key><string>com.droid-proxy.agent</string></dict></plist>`
+	if err := os.WriteFile(filepath.Join(plistDir, "com.droid-proxy.agent.plist"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

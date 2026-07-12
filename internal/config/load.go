@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -18,7 +19,17 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
-	return parse(raw)
+	cfg, err := parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	if abs, absErr := filepath.Abs(path); absErr == nil {
+		cfg.SourcePath = abs
+	}
+	if info, statErr := os.Stat(path); statErr == nil {
+		cfg.SourceModTime = info.ModTime()
+	}
+	return cfg, nil
 }
 
 func parse(raw []byte) (*Config, error) {

@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `doctor` probes `/health` on the configured listen address and on
+  `[::1]:<port>`: a foreign responder on the configured address is a hard
+  issue, and an IPv6 listener shadowing `localhost` URLs (for example
+  Cursor's MCP OAuth loopback or `wrangler dev` on port 8787) is called out
+  with a warning that points checks at `http://127.0.0.1:<port>`.
+- Stale-config detection: the model-not-found 404, `doctor`, and the config
+  TUI now say when `config.yaml` changed after the running proxy loaded it
+  and that a restart applies it.
+- `status` and `doctor` query launchctl/systemctl for the live service state,
+  so a proxy running under the managed service is reported correctly even
+  when the local pidfile is stale.
+- `docs/TROUBLESHOOTING.md` covering localhost/IPv6 port squatters, stale
+  config, and managed-service semantics.
+
+### Changed
+
+- With the per-user service installed, `droid-proxy stop` now stops through
+  the service manager (`launchctl bootout` / `systemctl --user stop`) so
+  KeepAlive cannot immediately resurrect the process; previously it sent
+  SIGTERM and the service restarted within seconds.
+
+### Fixed
+
+- The config TUI restart action restarts the managed service when one is
+  installed instead of spawning a competing background daemon.
+
 ## [0.2.1] - 2026-07-12
 
 ### Fixed

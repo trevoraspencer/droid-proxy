@@ -8,16 +8,8 @@ import (
 
 func withTempStateDir(t *testing.T) string {
 	t.Helper()
-	oldStateDir := stateDir
-	oldPIDFile := pidFile
-	home := t.TempDir()
-	stateDir = filepath.Join(home, dirName)
-	pidFile = filepath.Join(stateDir, "droid-proxy.pid")
-	t.Cleanup(func() {
-		stateDir = oldStateDir
-		pidFile = oldPIDFile
-	})
-	return stateDir
+	t.Setenv("HOME", t.TempDir())
+	return stateDir()
 }
 
 func TestLoadEnvFile(t *testing.T) {

@@ -260,6 +260,14 @@ curl -s http://127.0.0.1:8787/v1/models | jq '.data[].id'
 
 Confirm the Factory `baseUrl` matches the proxy listen address.
 
+**`localhost:8787` answers with something that is not droid-proxy**
+
+The proxy binds IPv4 loopback only; on macOS `localhost` resolves to IPv6
+`::1` first, so another process on `[::1]:8787` (Cursor's MCP OAuth loopback,
+`wrangler dev`) shadows it. Use `http://127.0.0.1:8787` for checks and run
+`droid-proxy doctor` to surface the conflict. Details and more scenarios in
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
 **A translated request returns a local `400`**
 
 T3 translation rejects request shapes that cannot be mapped safely to the target upstream. Use the error message to remove the unsupported field or select a native upstream protocol.

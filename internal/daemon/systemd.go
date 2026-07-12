@@ -62,7 +62,7 @@ func InstallSystemdUser(configPath string) error {
 	if err != nil {
 		return fmt.Errorf("resolving symlinks: %w", err)
 	}
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return err
 	}
 	path := SystemdUnitPath()
@@ -74,7 +74,7 @@ func InstallSystemdUser(configPath string) error {
 		ConfigPath: absConfig,
 		EnvFile:    ResolveExistingEnvFile(workDir),
 		WorkDir:    workDir,
-		LogDir:     stateDir,
+		LogDir:     stateDir(),
 	}
 	if err := writeSystemdUnit(path, data); err != nil {
 		return err

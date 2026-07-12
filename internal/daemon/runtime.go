@@ -14,17 +14,20 @@ type RuntimeMetadata struct {
 	PID        int    `json:"pid"`
 	Executable string `json:"executable"`
 	ConfigPath string `json:"config_path"`
-	EnvFile    string `json:"env_file"`
-	WorkDir    string `json:"work_dir"`
-	UpdatedAt  string `json:"updated_at"`
+	// ConfigModTime is the RFC3339 mtime of ConfigPath when the server loaded
+	// it; empty in runtime.json files written by older versions.
+	ConfigModTime string `json:"config_mtime,omitempty"`
+	EnvFile       string `json:"env_file"`
+	WorkDir       string `json:"work_dir"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 func RuntimeFile() string {
-	return filepath.Join(stateDir, runtimeFileName)
+	return filepath.Join(stateDir(), runtimeFileName)
 }
 
 func WriteRuntimeMetadata(meta RuntimeMetadata) error {
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return err
 	}
 	if meta.PID == 0 {

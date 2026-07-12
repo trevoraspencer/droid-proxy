@@ -14,26 +14,29 @@ import (
 const dirName = ".droid-proxy"
 
 var (
-	stateDir = filepath.Join(os.Getenv("HOME"), dirName)
-	pidFile  = filepath.Join(stateDir, "droid-proxy.pid")
-
 	processAlive            = processAliveDefault
 	findProcess             = findProcessDefault
 	verifyProcessExecutable = verifyProcessExecutableDefault
 )
 
+// stateDir resolves ~/.droid-proxy at call time so HOME changes (tests,
+// service managers with scrubbed environments) are honored.
+func stateDir() string { return filepath.Join(os.Getenv("HOME"), dirName) }
+
+func pidFile() string { return filepath.Join(stateDir(), "droid-proxy.pid") }
+
 // StateDir returns ~/.droid-proxy (created on demand by callers).
-func StateDir() string { return stateDir }
+func StateDir() string { return stateDir() }
 
 // PIDFile returns the path to the daemon PID file.
-func PIDFile() string { return pidFile }
+func PIDFile() string { return pidFile() }
 
 // WritePID atomically writes the current process PID.
 func WritePID() error {
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(pidFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(pidFile(), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
 			return fmt.Errorf("PID file already exists — another instance may be running (use 'droid-proxy stop' first)")
@@ -46,7 +49,7 @@ func WritePID() error {
 }
 
 func readPID() (int, error) {
-	data, err := os.ReadFile(pidFile)
+	data, err := os.ReadFile(pidFile())
 	if err != nil {
 		return 0, err
 	}
@@ -55,7 +58,7 @@ func readPID() (int, error) {
 
 // RemovePID deletes the PID file if present.
 func RemovePID() {
-	_ = os.Remove(pidFile)
+	_ = os.Remove(pidFile())
 }
 
 // CleanStalePID removes a PID file if the referenced process is no longer running.

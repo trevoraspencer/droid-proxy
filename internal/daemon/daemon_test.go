@@ -139,10 +139,10 @@ func (f signalFunc) Signal(sig os.Signal) error {
 
 func writePIDForTest(t *testing.T, pid int) {
 	t.Helper()
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o600); err != nil {
+	if err := os.WriteFile(pidFile(), []byte(strconv.Itoa(pid)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

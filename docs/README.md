@@ -23,6 +23,7 @@ Manual config is also supported: copy [config.example.yaml](../config.example.ya
 | [PROVIDERS.md](PROVIDERS.md) | Provider matrix, tiers, and OAuth summary |
 | [OAUTH.md](OAUTH.md) | Codex/ChatGPT and xAI OAuth walkthrough |
 | [SMOKE.md](SMOKE.md) | Curl checks and runtime validation |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Failure scenarios: localhost/IPv6 port squatters, stale config, managed-service stop/status semantics |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | Direct dependency SPDX licenses |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Development and contribution guide |
 | [../CHANGELOG.md](../CHANGELOG.md) | Release history |
