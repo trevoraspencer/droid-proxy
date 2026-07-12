@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST_DIR="${DIST_DIR:-$ROOT/dist}"
+SBOM_INPUT_DIR="${SBOM_INPUT_DIR:-$DIST_DIR/.sbom-input}"
 VERSION="${VERSION:-$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)}"
 COMMIT="${COMMIT:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
 VERSION_PKG="github.com/trevoraspencer/droid-proxy/internal/version"
@@ -29,6 +30,8 @@ echo "release-assets: version=$VERSION commit=$COMMIT dist=$DIST_DIR"
 if [[ "$DRY_RUN" != "1" ]]; then
   mkdir -p "$DIST_DIR"
   rm -f "$DIST_DIR"/checksums.txt
+  rm -rf "$SBOM_INPUT_DIR"
+  mkdir -p "$SBOM_INPUT_DIR"
 fi
 for platform in $PLATFORMS; do
   os="${platform%/*}"
@@ -48,6 +51,7 @@ for platform in $PLATFORMS; do
   cp "$ROOT/README.md" "$work/README.md"
   cp "$ROOT/internal/setup/install_config.yaml" "$work/install_config.yaml"
   tar -C "$work" -czf "$DIST_DIR/$asset" droid-proxy LICENSE README.md install_config.yaml
+  cp "$work/droid-proxy" "$SBOM_INPUT_DIR/droid-proxy_${os}_${arch}"
   rm -rf "$work"
   (
     cd "$DIST_DIR"

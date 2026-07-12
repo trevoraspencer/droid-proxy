@@ -94,6 +94,12 @@ tar_excludes_sensitive_paths() {
 
 info "Starting release asset audit in ${ROOT}"
 
+if python3 scripts/validate-binary-sbom-test.py >/dev/null; then
+  pass "binary SBOM validator rejects missing modules and digest drift"
+else
+  fail "binary SBOM validator tests failed"
+fi
+
 require_cmd go
 require_cmd tar
 require_cmd python3
@@ -134,12 +140,13 @@ if [[ -f "$release_workflow" ]]; then
     "bash scripts/validate-release-version.sh|release workflow validates SemVer" \
     "tag_commit=|release workflow resolves the tag commit" \
     "overwrite_files: false|release workflow refuses asset replacement" \
-    "--output spdx-json=dist/droid-proxy.spdx.json|release workflow selects SPDX JSON" \
-    "sha256sum droid-proxy.spdx.json >> checksums.txt|release workflow checksums the SBOM" \
+    "syft scan \"file:\${binary}\"|release workflow scans the actual built binaries" \
+    "python3 scripts/validate-binary-sbom.py|release workflow validates SBOMs against embedded modules" \
+    "sha256sum droid-proxy_*.spdx.json >> checksums.txt|release workflow checksums every binary SBOM" \
     "name: Attest build provenance|release workflow generates build provenance attestation" \
-    "name: Attest release SBOM|release workflow generates SBOM attestation" \
-    "sbom-path: dist/droid-proxy.spdx.json|release workflow supplies the SBOM predicate" \
-    "dist/droid-proxy.spdx.json|release workflow publishes the SBOM" \
+    "name: Attest Linux amd64 SBOM|release workflow generates per-archive SBOM attestations" \
+    "sbom-path: dist/droid-proxy_linux_amd64.spdx.json|release workflow supplies the matching Linux amd64 SBOM" \
+    "dist/droid-proxy_*.spdx.json|release workflow publishes every binary SBOM" \
     "COMMIT: \${{ github.sha }}|release build embeds the full triggering commit"; do
     needle="${spec%%|*}"
     description="${spec#*|}"
@@ -171,10 +178,10 @@ if [[ -f "$release_workflow" ]]; then
   pass "release tag validator enforces SemVer syntax"
 
   attest_count="$(grep -Ec 'uses:[[:space:]]+actions/attest@[0-9a-f]{40}' "$release_workflow" || true)"
-  if [[ "$attest_count" == "2" ]]; then
-    pass "release workflow has separate provenance and SBOM attestations"
+  if [[ "$attest_count" == "5" ]]; then
+    pass "release workflow has one provenance and four per-archive SBOM attestations"
   else
-    fail "release workflow must invoke actions/attest exactly twice (found $attest_count)"
+    fail "release workflow must invoke actions/attest exactly five times (found $attest_count)"
   fi
 
   verify_line="$(grep -nF "name: Verify release bundle checksums" "$release_workflow" | head -n 1 | cut -d: -f1 || true)"
@@ -295,6 +302,19 @@ for platform in $platforms; do
     pass "$asset droid-proxy is executable"
   else
     fail "$asset droid-proxy is not executable"
+  fi
+
+  sbom_input="$dist/.sbom-input/droid-proxy_${os}_${arch}"
+  if [[ -f "$sbom_input" && "$has_checksum_tool" == "1" ]] &&
+    [[ "$(sha256_value "$sbom_input")" == "$(sha256_value "$extract/droid-proxy")" ]]; then
+    pass "$asset SBOM input is byte-identical to the shipped binary"
+  else
+    fail "$asset SBOM input is missing or differs from the shipped binary"
+  fi
+  if go version -m "$sbom_input" 2>/dev/null | grep -q $'^\tdep\t'; then
+    pass "$asset SBOM input exposes embedded Go dependency metadata"
+  else
+    fail "$asset SBOM input lacks embedded Go dependency metadata"
   fi
 
   if [[ "$os" == "$host_os" && "$arch" == "$host_arch" && -x "$extract/droid-proxy" ]]; then

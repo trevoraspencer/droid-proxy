@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-12
+
+### Fixed
+
+- Generate and validate one SPDX SBOM from each shipped binary so all embedded Go dependencies are inventoried, then attach each SBOM only to its corresponding archive.
+
 ## [0.2.0] - 2026-07-12
 
 ### Added
@@ -66,6 +72,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - OAuth token, auth directory, installation ID, and refresh-lock permission hardening errors fail visibly.
 - Malformed OAuth ID-token identity handling is documented and tested.
 
-[Unreleased]: https://github.com/trevoraspencer/droid-proxy/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/trevoraspencer/droid-proxy/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/trevoraspencer/droid-proxy/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/trevoraspencer/droid-proxy/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/trevoraspencer/droid-proxy/releases/tag/v0.1.0

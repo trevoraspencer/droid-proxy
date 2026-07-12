@@ -9,6 +9,10 @@
 /.cache/
 /coverage.out
 
+# Python validation cache
+__pycache__/
+*.pyc
+
 # Editor / OS
 .DS_Store
 .idea/
