@@ -231,6 +231,14 @@ func writeDoctorConfig(out io.Writer, opts doctorOptions) []string {
 	fmt.Fprintln(out, "config load: ok")
 	writeDoctorConfigFreshness(out, absConfig)
 	fmt.Fprintf(out, "listen: %s:%d\n", cfg.Listen.Host, cfg.Listen.Port)
+	primary, v6 := doctorProbeListen(cfg)
+	expectRunning := false
+	if _, running := daemon.IsRunning(); running {
+		expectRunning = true
+	} else if daemon.ServiceInstalled() && doctorServiceRunning().Running {
+		expectRunning = true
+	}
+	issues = append(issues, writeListenProbe(out, primary, v6, expectRunning)...)
 	writeDoctorModels(out, cfg)
 	return issues
 }
