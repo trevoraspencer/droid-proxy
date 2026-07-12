@@ -68,13 +68,23 @@ jobs:
           tar -xzf "$archive" -C "$directory" syft
           chmod 0755 "$directory/syft"
           echo "$directory" >> "$GITHUB_PATH"
-      - name: Generate SPDX SBOM
-        run: syft scan dir:dist --output spdx-json=dist/droid-proxy.spdx.json
-      - name: Add SBOM checksum
+      - name: Generate and validate per-binary SPDX SBOMs
+        shell: bash
+        env:
+          SYFT_CHECK_FOR_APP_UPDATE: "false"
+        run: |
+          for binary in dist/.sbom-input/droid-proxy_*; do
+            name="$(basename "$binary")"
+            sbom="dist/${name}.spdx.json"
+            syft scan "file:${binary}" --output "spdx-json=${sbom}"
+            python3 scripts/validate-binary-sbom.py "$binary" "$sbom"
+          done
+          rm -rf dist/.sbom-input
+      - name: Add SBOM checksums
         shell: bash
         run: |
           cd dist
-          sha256sum droid-proxy.spdx.json >> checksums.txt
+          sha256sum droid-proxy_*.spdx.json >> checksums.txt
           LC_ALL=C sort -o checksums.txt checksums.txt
       - name: Upload verified release bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -110,16 +120,27 @@ jobs:
             dist/droid-proxy_*.tar.gz
             dist/install.sh
             dist/checksums.txt
-            dist/droid-proxy.spdx.json
-      - name: Attest release SBOM
+            dist/droid-proxy_*.spdx.json
+      - name: Attest Darwin amd64 SBOM
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
-          subject-path: |
-            dist/droid-proxy_*.tar.gz
-            dist/install.sh
-            dist/checksums.txt
-            dist/droid-proxy.spdx.json
-          sbom-path: dist/droid-proxy.spdx.json
+          subject-path: dist/droid-proxy_darwin_amd64.tar.gz
+          sbom-path: dist/droid-proxy_darwin_amd64.spdx.json
+      - name: Attest Darwin arm64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: dist/droid-proxy_darwin_arm64.tar.gz
+          sbom-path: dist/droid-proxy_darwin_arm64.spdx.json
+      - name: Attest Linux amd64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: dist/droid-proxy_linux_amd64.tar.gz
+          sbom-path: dist/droid-proxy_linux_amd64.spdx.json
+      - name: Attest Linux arm64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: dist/droid-proxy_linux_arm64.tar.gz
+          sbom-path: dist/droid-proxy_linux_arm64.spdx.json
       - name: Upload release assets
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
@@ -132,4 +153,4 @@ jobs:
             dist/droid-proxy_*.tar.gz
             dist/checksums.txt
             dist/install.sh
-            dist/droid-proxy.spdx.json
+            dist/droid-proxy_*.spdx.json
