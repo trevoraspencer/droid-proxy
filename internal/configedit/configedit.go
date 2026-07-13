@@ -235,15 +235,16 @@ type modelYAML struct {
 }
 
 type capsYAML struct {
-	Streaming        *bool  `yaml:"streaming,omitempty"`
-	Tools            *bool  `yaml:"tools,omitempty"`
-	ToolResultSafe   *bool  `yaml:"tool_result_safe,omitempty"`
-	Images           *bool  `yaml:"images,omitempty"`
-	JSONMode         *bool  `yaml:"json_mode,omitempty"`
-	StructuredOutput *bool  `yaml:"structured_output,omitempty"`
-	Reasoning        string `yaml:"reasoning,omitempty"`
-	FactoryReasoning string `yaml:"factory_reasoning,omitempty"`
-	PromptCaching    *bool  `yaml:"prompt_caching,omitempty"`
+	Streaming              *bool  `yaml:"streaming,omitempty"`
+	Tools                  *bool  `yaml:"tools,omitempty"`
+	ToolResultSafe         *bool  `yaml:"tool_result_safe,omitempty"`
+	Images                 *bool  `yaml:"images,omitempty"`
+	JSONMode               *bool  `yaml:"json_mode,omitempty"`
+	StructuredOutput       *bool  `yaml:"structured_output,omitempty"`
+	Reasoning              string `yaml:"reasoning,omitempty"`
+	FactoryReasoning       string `yaml:"factory_reasoning,omitempty"`
+	FactoryReasoningEffort string `yaml:"factory_reasoning_effort,omitempty"`
+	PromptCaching          *bool  `yaml:"prompt_caching,omitempty"`
 }
 
 func modelToNode(m *config.Model) (*yaml.Node, error) {
@@ -295,6 +296,9 @@ func capsToYAML(c config.Capabilities) *capsYAML {
 	}
 	if c.FactoryReasoning != "" {
 		out.FactoryReasoning = string(c.FactoryReasoning)
+	}
+	if c.FactoryReasoningEffort != "" {
+		out.FactoryReasoningEffort = string(c.FactoryReasoningEffort)
 	}
 	if out == (capsYAML{}) {
 		return nil

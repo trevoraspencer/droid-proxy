@@ -50,14 +50,15 @@ func codexGPT56Preset(label, alias, displayName, upstreamModel string, fast bool
 		MaxOutputTokens:  128000,
 		MaxContextTokens: 1050000,
 		Capabilities: config.Capabilities{
-			Streaming:        boolValue(true),
-			Tools:            boolValue(true),
-			ToolResultSafe:   boolValue(true),
-			Images:           boolValue(true),
-			JSONMode:         boolValue(true),
-			StructuredOutput: boolValue(true),
-			FactoryReasoning: config.FactoryReasoningPassthrough,
-			PromptCaching:    boolValue(true),
+			Streaming:              boolValue(true),
+			Tools:                  boolValue(true),
+			ToolResultSafe:         boolValue(true),
+			Images:                 boolValue(true),
+			JSONMode:               boolValue(true),
+			StructuredOutput:       boolValue(true),
+			FactoryReasoning:       config.FactoryReasoningPassthrough,
+			FactoryReasoningEffort: config.FactoryReasoningEffortMax,
+			PromptCaching:          boolValue(true),
 		},
 	}
 	if fast {
@@ -77,8 +78,9 @@ func xaiOAuthPresets() []oauthModelPreset {
 			MaxOutputTokens:  factory.DefaultMaxOutputTokens,
 			MaxContextTokens: 500000,
 			Capabilities: config.Capabilities{
-				FactoryReasoning: config.FactoryReasoningPassthrough,
-				PromptCaching:    boolValue(true),
+				FactoryReasoning:       config.FactoryReasoningPassthrough,
+				FactoryReasoningEffort: config.FactoryReasoningEffortHigh,
+				PromptCaching:          boolValue(true),
 			},
 		},
 		{

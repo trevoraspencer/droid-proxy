@@ -88,6 +88,69 @@ func TestUpsertPreservesUnknownTopLevelAndEntryFields(t *testing.T) {
 	}
 }
 
+func TestUpsertWritesAndRemovesReasoningEffort(t *testing.T) {
+	path := tempSettings(t, `{
+  "customModels": [
+    {"model":"gpt-5.6","reasoningEffort":"low","preserve":"yes"},
+    {"model":"grok-build-0.1","reasoningEffort":"high","preserve":"also"}
+  ]
+}`)
+
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gpt := &config.Model{
+		Alias:            "gpt-5.6",
+		FactoryProvider:  config.FactoryProviderOpenAI,
+		UpstreamProtocol: config.UpstreamCodexResponses,
+		Capabilities: config.Capabilities{
+			FactoryReasoning:       config.FactoryReasoningPassthrough,
+			FactoryReasoningEffort: config.FactoryReasoningEffortMax,
+		},
+	}
+	build := &config.Model{
+		Alias:            "grok-build-0.1",
+		FactoryProvider:  config.FactoryProviderOpenAI,
+		UpstreamProtocol: config.UpstreamXAIResponses,
+		Capabilities: config.Capabilities{
+			FactoryReasoning: config.FactoryReasoningDrop,
+		},
+	}
+	for _, model := range []*config.Model{gpt, build} {
+		if err := settings.Upsert(EntryFromModel(model, "http://127.0.0.1:8787", "x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := settings.Save(false); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		CustomModels []map[string]any `json:"customModels"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	byModel := map[string]map[string]any{}
+	for _, entry := range doc.CustomModels {
+		byModel[entry["model"].(string)] = entry
+	}
+	if got := byModel["gpt-5.6"]["reasoningEffort"]; got != "max" {
+		t.Fatalf("GPT-5.6 reasoningEffort = %#v, want max", got)
+	}
+	if _, exists := byModel["grok-build-0.1"]["reasoningEffort"]; exists {
+		t.Fatalf("drop model retained stale reasoningEffort: %#v", byModel["grok-build-0.1"])
+	}
+	if byModel["gpt-5.6"]["preserve"] != "yes" || byModel["grok-build-0.1"]["preserve"] != "also" {
+		t.Fatalf("unknown fields were not preserved: %#v", byModel)
+	}
+}
+
 func TestRemove(t *testing.T) {
 	path := tempSettings(t, `{"customModels":[{"model":"a"},{"model":"b"}]}`)
 	s, _ := Load(path)
@@ -140,5 +203,8 @@ func TestEntryFromModelDefaults(t *testing.T) {
 	}
 	if e.APIKey != "x" {
 		t.Errorf("APIKey = %q, want placeholder x", e.APIKey)
+	}
+	if e.ReasoningEffort != "" {
+		t.Errorf("ReasoningEffort = %q, want omitted default", e.ReasoningEffort)
 	}
 }

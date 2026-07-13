@@ -161,7 +161,8 @@ func TestUpsertOAuthModel(t *testing.T) {
 		OAuthProvider:    config.OAuthProviderXAI,
 		UpstreamModel:    "grok-4",
 		Capabilities: config.Capabilities{
-			FactoryReasoning: config.FactoryReasoningPassthrough,
+			FactoryReasoning:       config.FactoryReasoningPassthrough,
+			FactoryReasoningEffort: config.FactoryReasoningEffortHigh,
 		},
 	}
 	if err := doc.Upsert(m); err != nil {
@@ -177,6 +178,9 @@ func TestUpsertOAuthModel(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "factory_reasoning: passthrough") {
 		t.Errorf("factory_reasoning not written:\n%s", out)
+	}
+	if !strings.Contains(string(out), "factory_reasoning_effort: high") {
+		t.Errorf("factory_reasoning_effort not written:\n%s", out)
 	}
 
 	models, err := LoadModels(path)
@@ -200,6 +204,9 @@ func TestUpsertOAuthModel(t *testing.T) {
 	}
 	if got.Capabilities.FactoryReasoning != config.FactoryReasoningPassthrough {
 		t.Errorf("factory_reasoning round-trip = %q", got.Capabilities.FactoryReasoning)
+	}
+	if got.Capabilities.FactoryReasoningEffort != config.FactoryReasoningEffortHigh {
+		t.Errorf("factory_reasoning_effort round-trip = %q", got.Capabilities.FactoryReasoningEffort)
 	}
 }
 

@@ -47,6 +47,7 @@ models:
       json_mode: true
       structured_output: true
       factory_reasoning: passthrough
+      factory_reasoning_effort: max
       prompt_caching: true
 
   - alias: gpt-5.6-fast # local Factory alias, not an OpenAI model ID
@@ -67,6 +68,7 @@ models:
       json_mode: true
       structured_output: true
       factory_reasoning: passthrough
+      factory_reasoning_effort: max
       prompt_caching: true
 
   - alias: gpt-5.6-terra
@@ -85,6 +87,7 @@ models:
       json_mode: true
       structured_output: true
       factory_reasoning: passthrough
+      factory_reasoning_effort: max
       prompt_caching: true
 
   - alias: gpt-5.6-terra-fast
@@ -105,6 +108,7 @@ models:
       json_mode: true
       structured_output: true
       factory_reasoning: passthrough
+      factory_reasoning_effort: max
       prompt_caching: true
 
   - alias: gpt-5.6-luna
@@ -123,6 +127,7 @@ models:
       json_mode: true
       structured_output: true
       factory_reasoning: passthrough
+      factory_reasoning_effort: max
       prompt_caching: true
 
   - alias: gpt-5.6-luna-fast
@@ -143,6 +148,7 @@ models:
       json_mode: true
       structured_output: true
       factory_reasoning: passthrough
+      factory_reasoning_effort: max
       prompt_caching: true
 ```
 
@@ -210,7 +216,8 @@ This only applies to Codex OAuth — xAI OAuth is always single-account.
       "provider": "openai",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxOutputTokens": 128000
+      "maxOutputTokens": 128000,
+      "reasoningEffort": "max"
     }
   ]
 }

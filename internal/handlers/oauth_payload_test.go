@@ -9,7 +9,65 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/factory"
 )
+
+func TestReasoningCapabilityDrivesFactorySettingsAndResponses(t *testing.T) {
+	tests := []struct {
+		name          string
+		model         *config.Model
+		wantEffort    config.FactoryReasoningEffort
+		wantReasoning bool
+	}{
+		{
+			name: "GPT-5.6 advertises max and preserves reasoning",
+			model: &config.Model{
+				Alias: "gpt-5.6", FactoryProvider: config.FactoryProviderOpenAI,
+				UpstreamProtocol: config.UpstreamCodexResponses, OAuthProvider: config.OAuthProviderCodex,
+				Capabilities: config.Capabilities{FactoryReasoning: config.FactoryReasoningPassthrough, FactoryReasoningEffort: config.FactoryReasoningEffortMax},
+			},
+			wantEffort: config.FactoryReasoningEffortMax, wantReasoning: true,
+		},
+		{
+			name: "Grok 4.5 advertises high and preserves reasoning",
+			model: &config.Model{
+				Alias: "grok-4.5", FactoryProvider: config.FactoryProviderOpenAI,
+				UpstreamProtocol: config.UpstreamXAIResponses, OAuthProvider: config.OAuthProviderXAI,
+				Capabilities: config.Capabilities{FactoryReasoning: config.FactoryReasoningPassthrough, FactoryReasoningEffort: config.FactoryReasoningEffortHigh},
+			},
+			wantEffort: config.FactoryReasoningEffortHigh, wantReasoning: true,
+		},
+		{
+			name: "Grok Build advertises nothing and drops reasoning",
+			model: &config.Model{
+				Alias: "grok-build-0.1", FactoryProvider: config.FactoryProviderOpenAI,
+				UpstreamProtocol: config.UpstreamXAIResponses, OAuthProvider: config.OAuthProviderXAI,
+				Capabilities: config.Capabilities{FactoryReasoning: config.FactoryReasoningDrop},
+			},
+		},
+		{
+			name: "Composer advertises nothing and drops reasoning",
+			model: &config.Model{
+				Alias: "grok-composer-2.5-fast", FactoryProvider: config.FactoryProviderOpenAI,
+				UpstreamProtocol: config.UpstreamXAIResponses, OAuthProvider: config.OAuthProviderXAI,
+				Capabilities: config.Capabilities{FactoryReasoning: config.FactoryReasoningDrop},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := factory.EntryFromModel(tt.model, "http://127.0.0.1:8787", "x")
+			if entry.ReasoningEffort != tt.wantEffort {
+				t.Fatalf("settings reasoningEffort = %q, want %q", entry.ReasoningEffort, tt.wantEffort)
+			}
+			body := prepareOAuthResponsesPayload([]byte(`{"model":"alias","input":"hi","reasoning":{"effort":"high"}}`), tt.model, false, http.Header{})
+			if got := gjson.GetBytes(body, "reasoning").Exists(); got != tt.wantReasoning {
+				t.Fatalf("forwarded reasoning exists = %v, want %v: %s", got, tt.wantReasoning, body)
+			}
+		})
+	}
+}
 
 func TestPrepareOAuthResponsesPayload_XAIPrivateEndpointForcesUpstreamStreaming(t *testing.T) {
 	cliModel := &config.Model{

@@ -83,6 +83,7 @@ models:
       json_mode: true
       structured_output: true
       factory_reasoning: passthrough
+      factory_reasoning_effort: max
       prompt_caching: true
 
   - alias: gpt-5.6-fast # local alias; private OAuth uses explicit Sol ID
@@ -103,6 +104,7 @@ models:
       json_mode: true
       structured_output: true
       factory_reasoning: passthrough
+      factory_reasoning_effort: max
       prompt_caching: true
 ```
 
@@ -128,6 +130,7 @@ models:
     max_context_tokens: 500000
     capabilities:
       factory_reasoning: passthrough
+      factory_reasoning_effort: high
       prompt_caching: true
 
   - alias: grok-build-0.1
@@ -189,7 +192,8 @@ Use `provider: "openai"` and point `baseUrl` at the proxy:
       "provider": "openai",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxOutputTokens": 128000
+      "maxOutputTokens": 128000,
+      "reasoningEffort": "max"
     }
   ]
 }

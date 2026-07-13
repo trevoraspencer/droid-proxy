@@ -49,6 +49,7 @@ models:
     max_context_tokens: 500000
     capabilities:
       factory_reasoning: passthrough
+      factory_reasoning_effort: high
       prompt_caching: true
 
   - alias: gpt-5.6
@@ -67,6 +68,7 @@ models:
       json_mode: true
       structured_output: true
       factory_reasoning: passthrough
+      factory_reasoning_effort: max
       prompt_caching: true
 
   - alias: gpt-5.6-fast
@@ -87,6 +89,7 @@ models:
       json_mode: true
       structured_output: true
       factory_reasoning: passthrough
+      factory_reasoning_effort: max
       prompt_caching: true
 
   - alias: grok-build-0.1
