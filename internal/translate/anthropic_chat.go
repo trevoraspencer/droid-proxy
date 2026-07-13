@@ -152,9 +152,10 @@ func anthropicUserContentToChatMessages(raw any) ([]any, error) {
 			}
 			switch typ := stringValue(block["type"]); typ {
 			case "text", "":
-				if _, ok := block["cache_control"]; ok {
-					return nil, errors.New("unsupported Anthropic cache_control on content block")
-				}
+				// cache_control is a provider caching hint, not content; OpenAI
+				// Chat upstreams cache prompt prefixes implicitly, so the hint is
+				// dropped rather than rejected (Droid sends it whenever Anthropic
+				// prompt caching is enabled).
 				if text.Len() > 0 {
 					text.WriteByte('\n')
 				}
@@ -204,9 +205,8 @@ func anthropicAssistantContentToChatMessages(raw any) ([]any, error) {
 			}
 			switch typ := stringValue(block["type"]); typ {
 			case "text", "":
-				if _, ok := block["cache_control"]; ok {
-					return nil, errors.New("unsupported Anthropic cache_control on content block")
-				}
+				// cache_control hints are dropped in translation; see the user
+				// content path for rationale.
 				if text.Len() > 0 {
 					text.WriteByte('\n')
 				}
@@ -256,9 +256,8 @@ func anthropicTextBlocksToString(blocks []any) (string, error) {
 		if typ := stringValue(block["type"]); typ != "" && typ != "text" {
 			return "", fmt.Errorf("unsupported Anthropic text block type %q", typ)
 		}
-		if _, ok := block["cache_control"]; ok {
-			return "", errors.New("unsupported Anthropic cache_control on system block")
-		}
+		// cache_control hints are dropped in translation; see
+		// anthropicUserContentToChatMessages for rationale.
 		if b.Len() > 0 {
 			b.WriteByte('\n')
 		}

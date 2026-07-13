@@ -1,4 +1,4 @@
-.PHONY: build install-user test test-race test-installer vet fmt clean run lint audit-secrets security-audit legal-audit docs-audit ci-audit release-audit release-dry-run
+.PHONY: build install-user test test-race test-installer vet fmt clean run lint audit-secrets security-audit legal-audit docs-audit ci-audit release-audit release-dry-run bench bench-compare
 
 BIN := droid-proxy
 VERSION ?= 0.0.0-dev
@@ -27,6 +27,16 @@ install-user: build
 
 test:
 	go test ./...
+
+# Micro-benchmarks for the per-request hot paths (translation, SSE pump,
+# payload overrides). See docs/BENCHMARKS.md.
+bench:
+	go test -bench=. -benchmem -run='^$$' ./internal/translate/ ./internal/stream/ ./internal/handlers/
+
+# End-to-end proxy-overhead comparison against the mock upstream, plus
+# prompt-cache fidelity checks. Writes reports to bench-results/.
+bench-compare:
+	bash scripts/bench/local-compare.sh
 
 test-race:
 	go test -race ./...
