@@ -45,6 +45,7 @@ models:
     max_context_tokens: 500000
     capabilities:
       factory_reasoning: passthrough
+      factory_reasoning_effort: high
       prompt_caching: true
 ```
 
@@ -118,7 +119,8 @@ Optional: pin any xAI OAuth model to a specific logged-in account:
       "provider": "openai",
       "baseUrl": "http://127.0.0.1:8787",
       "apiKey": "x",
-      "maxOutputTokens": 128000
+      "maxOutputTokens": 128000,
+      "reasoningEffort": "high"
     },
     {
       "model": "grok-build-0.1",

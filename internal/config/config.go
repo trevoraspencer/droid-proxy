@@ -88,6 +88,39 @@ func (m FactoryReasoningMode) IsValid() bool {
 	return false
 }
 
+// FactoryReasoningEffort is the reasoningEffort value written to a Factory
+// Droid custom-model entry. Keep these values synchronized with Droid's
+// customModels schema.
+type FactoryReasoningEffort string
+
+const (
+	FactoryReasoningEffortNone    FactoryReasoningEffort = "none"
+	FactoryReasoningEffortDynamic FactoryReasoningEffort = "dynamic"
+	FactoryReasoningEffortOff     FactoryReasoningEffort = "off"
+	FactoryReasoningEffortMinimal FactoryReasoningEffort = "minimal"
+	FactoryReasoningEffortLow     FactoryReasoningEffort = "low"
+	FactoryReasoningEffortMedium  FactoryReasoningEffort = "medium"
+	FactoryReasoningEffortHigh    FactoryReasoningEffort = "high"
+	FactoryReasoningEffortXHigh   FactoryReasoningEffort = "xhigh"
+	FactoryReasoningEffortMax     FactoryReasoningEffort = "max"
+)
+
+func (e FactoryReasoningEffort) IsValid() bool {
+	switch e {
+	case FactoryReasoningEffortNone,
+		FactoryReasoningEffortDynamic,
+		FactoryReasoningEffortOff,
+		FactoryReasoningEffortMinimal,
+		FactoryReasoningEffortLow,
+		FactoryReasoningEffortMedium,
+		FactoryReasoningEffortHigh,
+		FactoryReasoningEffortXHigh,
+		FactoryReasoningEffortMax:
+		return true
+	}
+	return false
+}
+
 type Config struct {
 	Listen         Listen         `yaml:"listen"`
 	Server         Server         `yaml:"server"`
@@ -210,15 +243,16 @@ type Model struct {
 }
 
 type Capabilities struct {
-	Streaming        *bool                `yaml:"streaming"`
-	Tools            *bool                `yaml:"tools"`
-	ToolResultSafe   *bool                `yaml:"tool_result_safe"`
-	Images           *bool                `yaml:"images"`
-	JSONMode         *bool                `yaml:"json_mode"`
-	StructuredOutput *bool                `yaml:"structured_output"`
-	Reasoning        ReasoningMode        `yaml:"reasoning"`
-	FactoryReasoning FactoryReasoningMode `yaml:"factory_reasoning"`
-	PromptCaching    *bool                `yaml:"prompt_caching"`
+	Streaming              *bool                  `yaml:"streaming"`
+	Tools                  *bool                  `yaml:"tools"`
+	ToolResultSafe         *bool                  `yaml:"tool_result_safe"`
+	Images                 *bool                  `yaml:"images"`
+	JSONMode               *bool                  `yaml:"json_mode"`
+	StructuredOutput       *bool                  `yaml:"structured_output"`
+	Reasoning              ReasoningMode          `yaml:"reasoning"`
+	FactoryReasoning       FactoryReasoningMode   `yaml:"factory_reasoning"`
+	FactoryReasoningEffort FactoryReasoningEffort `yaml:"factory_reasoning_effort"`
+	PromptCaching          *bool                  `yaml:"prompt_caching"`
 }
 
 func boolPtr(b bool) *bool { return &b }
@@ -228,15 +262,16 @@ func boolPtr(b bool) *bool { return &b }
 func (m *Model) ResolvedCapabilities() ResolvedCapabilities {
 	c := m.Capabilities
 	r := ResolvedCapabilities{
-		Streaming:        true,
-		Tools:            true,
-		ToolResultSafe:   true,
-		Images:           false,
-		JSONMode:         true,
-		StructuredOutput: false,
-		Reasoning:        c.Reasoning,
-		FactoryReasoning: defaultFactoryReasoning(m.UpstreamProtocol),
-		PromptCaching:    false,
+		Streaming:              true,
+		Tools:                  true,
+		ToolResultSafe:         true,
+		Images:                 false,
+		JSONMode:               true,
+		StructuredOutput:       false,
+		Reasoning:              c.Reasoning,
+		FactoryReasoning:       defaultFactoryReasoning(m.UpstreamProtocol),
+		FactoryReasoningEffort: c.FactoryReasoningEffort,
+		PromptCaching:          false,
 	}
 	if r.Reasoning == "" {
 		r.Reasoning = ReasoningNone
@@ -270,15 +305,16 @@ func (m *Model) ResolvedCapabilities() ResolvedCapabilities {
 
 // ResolvedCapabilities is the fully-resolved capability set with all defaults applied.
 type ResolvedCapabilities struct {
-	Streaming        bool                 `json:"streaming"`
-	Tools            bool                 `json:"tools"`
-	ToolResultSafe   bool                 `json:"tool_result_safe"`
-	Images           bool                 `json:"images"`
-	JSONMode         bool                 `json:"json_mode"`
-	StructuredOutput bool                 `json:"structured_output"`
-	Reasoning        ReasoningMode        `json:"reasoning"`
-	FactoryReasoning FactoryReasoningMode `json:"factory_reasoning"`
-	PromptCaching    bool                 `json:"prompt_caching"`
+	Streaming              bool                   `json:"streaming"`
+	Tools                  bool                   `json:"tools"`
+	ToolResultSafe         bool                   `json:"tool_result_safe"`
+	Images                 bool                   `json:"images"`
+	JSONMode               bool                   `json:"json_mode"`
+	StructuredOutput       bool                   `json:"structured_output"`
+	Reasoning              ReasoningMode          `json:"reasoning"`
+	FactoryReasoning       FactoryReasoningMode   `json:"factory_reasoning"`
+	FactoryReasoningEffort FactoryReasoningEffort `json:"factory_reasoning_effort,omitempty"`
+	PromptCaching          bool                   `json:"prompt_caching"`
 }
 
 // AgentReady reports whether a model is safe for agentic tool-using workflows.
@@ -360,6 +396,14 @@ func (m *Model) Validate() error {
 	}
 	if m.Capabilities.FactoryReasoning != "" && !m.Capabilities.FactoryReasoning.IsValid() {
 		return fmt.Errorf("model %q: invalid capabilities.factory_reasoning %q (must be one of: drop, passthrough)", m.Alias, m.Capabilities.FactoryReasoning)
+	}
+	if effort := m.Capabilities.FactoryReasoningEffort; effort != "" {
+		if !effort.IsValid() {
+			return fmt.Errorf("model %q: invalid capabilities.factory_reasoning_effort %q (must be one of: none, dynamic, off, minimal, low, medium, high, xhigh, max)", m.Alias, effort)
+		}
+		if m.ResolvedCapabilities().FactoryReasoning != FactoryReasoningPassthrough {
+			return fmt.Errorf("model %q: capabilities.factory_reasoning_effort requires capabilities.factory_reasoning passthrough", m.Alias)
+		}
 	}
 	if err := validateBaseURL(m); err != nil {
 		return err

@@ -30,6 +30,7 @@ type Entry struct {
 	BaseURL         string
 	APIKey          string
 	MaxOutputTokens int
+	ReasoningEffort config.FactoryReasoningEffort
 }
 
 // EntryFromModel builds a Factory entry from a configured model. baseURL is the
@@ -47,6 +48,11 @@ func EntryFromModel(m *config.Model, baseURL, apiKey string) Entry {
 	if strings.TrimSpace(apiKey) == "" {
 		apiKey = "x"
 	}
+	var reasoningEffort config.FactoryReasoningEffort
+	capabilities := m.ResolvedCapabilities()
+	if capabilities.FactoryReasoning == config.FactoryReasoningPassthrough {
+		reasoningEffort = capabilities.FactoryReasoningEffort
+	}
 	return Entry{
 		Model:           m.Alias,
 		DisplayName:     display,
@@ -54,6 +60,7 @@ func EntryFromModel(m *config.Model, baseURL, apiKey string) Entry {
 		BaseURL:         baseURL,
 		APIKey:          apiKey,
 		MaxOutputTokens: maxOut,
+		ReasoningEffort: reasoningEffort,
 	}
 }
 
@@ -173,6 +180,13 @@ func (s *Settings) Upsert(e Entry) error {
 		if err := set(kv.key, kv.val); err != nil {
 			return err
 		}
+	}
+	if e.ReasoningEffort != "" {
+		if err := set("reasoningEffort", e.ReasoningEffort); err != nil {
+			return err
+		}
+	} else {
+		delete(target, "reasoningEffort")
 	}
 	if idx >= 0 {
 		entries[idx] = target

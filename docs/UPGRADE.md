@@ -2,6 +2,8 @@
 
 Release installs are upgraded by re-running the GitHub release installer. Source installs are for contributors who want to build from the repository.
 
+`cursor-proxy` and `deepseek-cursor-proxy` are retired; `droid-proxy` supersedes both.
+
 ## Release Installs
 
 ```bash

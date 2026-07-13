@@ -81,6 +81,9 @@ func TestModels_PreservesOrder(t *testing.T) {
 	if caps["factory_reasoning"] != string(config.FactoryReasoningPassthrough) {
 		t.Fatalf("factory_reasoning = %#v, want passthrough", caps["factory_reasoning"])
 	}
+	if _, exists := caps["factory_reasoning_effort"]; exists {
+		t.Fatalf("unconfigured factory_reasoning_effort should be omitted: %#v", caps)
+	}
 }
 
 func TestModels_AgentReadyFlag(t *testing.T) {
@@ -170,14 +173,15 @@ func TestModels_GPT56Metadata(t *testing.T) {
 		MaxOutputTokens:  128000,
 		MaxContextTokens: 1050000,
 		Capabilities: config.Capabilities{
-			Streaming:        boolPtr(true),
-			Tools:            boolPtr(true),
-			ToolResultSafe:   boolPtr(true),
-			Images:           boolPtr(true),
-			JSONMode:         boolPtr(true),
-			StructuredOutput: boolPtr(true),
-			FactoryReasoning: config.FactoryReasoningPassthrough,
-			PromptCaching:    boolPtr(true),
+			Streaming:              boolPtr(true),
+			Tools:                  boolPtr(true),
+			ToolResultSafe:         boolPtr(true),
+			Images:                 boolPtr(true),
+			JSONMode:               boolPtr(true),
+			StructuredOutput:       boolPtr(true),
+			FactoryReasoning:       config.FactoryReasoningPassthrough,
+			FactoryReasoningEffort: config.FactoryReasoningEffortMax,
+			PromptCaching:          boolPtr(true),
 		},
 	}})
 	w := httptest.NewRecorder()
@@ -204,6 +208,9 @@ func TestModels_GPT56Metadata(t *testing.T) {
 	}
 	if caps["factory_reasoning"] != string(config.FactoryReasoningPassthrough) {
 		t.Fatalf("factory_reasoning = %#v", caps["factory_reasoning"])
+	}
+	if caps["factory_reasoning_effort"] != string(config.FactoryReasoningEffortMax) {
+		t.Fatalf("factory_reasoning_effort = %#v", caps["factory_reasoning_effort"])
 	}
 }
 

@@ -300,7 +300,7 @@ func TestCodexOAuthGPT56PresetsBuildExpectedModels(t *testing.T) {
 				t.Fatalf("limits = %d/%d, want 1050000/128000", built.MaxContextTokens, built.MaxOutputTokens)
 			}
 			caps := built.ResolvedCapabilities()
-			if !caps.Streaming || !caps.Tools || !caps.ToolResultSafe || !caps.Images || !caps.JSONMode || !caps.StructuredOutput || !caps.PromptCaching || caps.FactoryReasoning != config.FactoryReasoningPassthrough {
+			if !caps.Streaming || !caps.Tools || !caps.ToolResultSafe || !caps.Images || !caps.JSONMode || !caps.StructuredOutput || !caps.PromptCaching || caps.FactoryReasoning != config.FactoryReasoningPassthrough || caps.FactoryReasoningEffort != config.FactoryReasoningEffortMax {
 				t.Fatalf("incomplete GPT-5.6 capabilities: %#v", caps)
 			}
 			if tt.fast {
@@ -357,7 +357,7 @@ func TestCodexOAuthGPT56FastPresetConfigRoundTrip(t *testing.T) {
 		t.Fatalf("round-trip service_tier = %#v", got.ExtraArgs["service_tier"])
 	}
 	caps := got.ResolvedCapabilities()
-	if !caps.Images || !caps.StructuredOutput || !caps.PromptCaching || caps.FactoryReasoning != config.FactoryReasoningPassthrough {
+	if !caps.Images || !caps.StructuredOutput || !caps.PromptCaching || caps.FactoryReasoning != config.FactoryReasoningPassthrough || caps.FactoryReasoningEffort != config.FactoryReasoningEffortMax {
 		t.Fatalf("round-trip capabilities = %#v", caps)
 	}
 }
@@ -444,7 +444,7 @@ func TestXAIOAuthPresets(t *testing.T) {
 	if built.Alias != "grok-4.5" || built.UpstreamModel != "grok-4.5" || built.BaseURL != "https://cli-chat-proxy.grok.com/v1" {
 		t.Fatalf("bad Grok 4.5 preset model: %#v", built)
 	}
-	if built.MaxContextTokens != 500000 || built.Capabilities.FactoryReasoning != config.FactoryReasoningPassthrough || built.Capabilities.PromptCaching == nil || !*built.Capabilities.PromptCaching {
+	if built.MaxContextTokens != 500000 || built.Capabilities.FactoryReasoning != config.FactoryReasoningPassthrough || built.Capabilities.FactoryReasoningEffort != config.FactoryReasoningEffortHigh || built.Capabilities.PromptCaching == nil || !*built.Capabilities.PromptCaching {
 		t.Fatalf("bad Grok 4.5 metadata: %#v", built)
 	}
 
@@ -473,6 +473,9 @@ func TestXAIOAuthPresets(t *testing.T) {
 	if built.Capabilities.FactoryReasoning != config.FactoryReasoningDrop {
 		t.Fatalf("Grok Build factory_reasoning = %q", built.Capabilities.FactoryReasoning)
 	}
+	if built.Capabilities.FactoryReasoningEffort != "" {
+		t.Fatalf("Grok Build advertised factory_reasoning_effort = %q", built.Capabilities.FactoryReasoningEffort)
+	}
 
 	composer, ok := oauthPresetByLabel(config.OAuthProviderXAI, "Composer 2.5 Fast")
 	if !ok {
@@ -498,6 +501,9 @@ func TestXAIOAuthPresets(t *testing.T) {
 	}
 	if built.Capabilities.FactoryReasoning != config.FactoryReasoningDrop {
 		t.Fatalf("Composer factory_reasoning = %q", built.Capabilities.FactoryReasoning)
+	}
+	if built.Capabilities.FactoryReasoningEffort != "" {
+		t.Fatalf("Composer advertised factory_reasoning_effort = %q", built.Capabilities.FactoryReasoningEffort)
 	}
 
 	grok43, ok := oauthPresetByLabel(config.OAuthProviderXAI, "Grok 4.3")

@@ -223,6 +223,7 @@ All optional. Defaults are reasonable for most OpenAI-compatible providers.
 | `structured_output` | bool | `false` | Whether JSON-Schema-constrained output (`response_format: {"type":"json_schema"}`) works. |
 | `reasoning` | enum | `none` | `none`, `deepseek`, or `anthropic-thinking`. `deepseek` enables reasoning replay. |
 | `factory_reasoning` | enum | protocol default | `drop` removes Factory's top-level `reasoning` object before upstream; `passthrough` preserves it. Defaults to `drop` for `xai-responses` and `passthrough` elsewhere. |
+| `factory_reasoning_effort` | enum | omitted | Optional Factory custom-model reasoning selector value: `none`, `dynamic`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Requires `factory_reasoning: passthrough`. |
 | `prompt_caching` | bool | `false` | Whether the model supports provider prompt-caching controls, such as `cache_control` or `prompt_cache_options`. |
 
 A model is reported as `agent_ready: true` in `/v1/models` iff
@@ -305,6 +306,7 @@ models:
       json_mode: true
       structured_output: true
       factory_reasoning: passthrough
+      factory_reasoning_effort: max
       prompt_caching: true
 
   - alias: gpt-5.6-fast # local Factory alias, not an upstream model ID
@@ -325,6 +327,7 @@ models:
       json_mode: true
       structured_output: true
       factory_reasoning: passthrough
+      factory_reasoning_effort: max
       prompt_caching: true
 
   - alias: grok-4.5
@@ -337,6 +340,7 @@ models:
     max_context_tokens: 500000
     capabilities:
       factory_reasoning: passthrough
+      factory_reasoning_effort: high
       prompt_caching: true
 
   - alias: grok-build-0.1

@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- `capabilities.factory_reasoning_effort` metadata and Factory settings sync
+  support so GPT-5.6 and Grok 4.5 custom models expose reasoning controls in
+  Droid while Grok Build and Composer remove stale reasoning metadata.
 - `doctor` probes `/health` on the configured listen address and on
   `[::1]:<port>`: a foreign responder on the configured address is a hard
   issue, and an IPv6 listener shadowing `localhost` URLs (for example

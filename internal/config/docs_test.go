@@ -132,6 +132,59 @@ func validateFactorySettingsJSON(t *testing.T, raw []byte) {
 		if key, _ := model["apiKey"].(string); key == "" || strings.Contains(key, "sk-") {
 			t.Fatalf("customModels[%d].apiKey must be a safe downstream placeholder, got %q", i, key)
 		}
+		if rawEffort, ok := model["reasoningEffort"]; ok {
+			effort, stringOK := rawEffort.(string)
+			if !stringOK || !FactoryReasoningEffort(effort).IsValid() {
+				t.Fatalf("customModels[%d].reasoningEffort = %#v, want an installed-Droid schema value", i, rawEffort)
+			}
+		}
+	}
+}
+
+func TestDocsFactoryReasoningEffortAssignments(t *testing.T) {
+	readEntries := func(name string) []map[string]any {
+		t.Helper()
+		raw := readRepoFile(t, "docs", "factory-settings", name)
+		var doc struct {
+			CustomModels []map[string]any `json:"customModels"`
+		}
+		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+			t.Fatal(err)
+		}
+		return doc.CustomModels
+	}
+
+	codex := readEntries("codex-oauth.json")
+	if len(codex) != 6 {
+		t.Fatalf("Codex settings aliases = %d, want six GPT-5.6 aliases", len(codex))
+	}
+	wantCodex := map[string]bool{
+		"gpt-5.6": true, "gpt-5.6-fast": true,
+		"gpt-5.6-terra": true, "gpt-5.6-terra-fast": true,
+		"gpt-5.6-luna": true, "gpt-5.6-luna-fast": true,
+	}
+	for _, model := range codex {
+		alias, _ := model["model"].(string)
+		if !wantCodex[alias] || model["reasoningEffort"] != "max" {
+			t.Fatalf("GPT-5.6 settings capability mismatch: %#v", model)
+		}
+		delete(wantCodex, alias)
+	}
+	if len(wantCodex) != 0 {
+		t.Fatalf("missing GPT-5.6 settings aliases: %#v", wantCodex)
+	}
+
+	xai := map[string]map[string]any{}
+	for _, model := range readEntries("xai-oauth.json") {
+		xai[model["model"].(string)] = model
+	}
+	if got := xai["grok-4.5"]["reasoningEffort"]; got != "high" {
+		t.Fatalf("Grok 4.5 reasoningEffort = %#v, want high", got)
+	}
+	for _, alias := range []string{"grok-build-0.1", "grok-composer-2.5-fast"} {
+		if _, exists := xai[alias]["reasoningEffort"]; exists {
+			t.Fatalf("%s must omit reasoningEffort: %#v", alias, xai[alias])
+		}
 	}
 }
 

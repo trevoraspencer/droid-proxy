@@ -303,6 +303,67 @@ models:
 	}
 }
 
+func TestLoad_FactoryReasoningEffortSchema(t *testing.T) {
+	for _, effort := range []FactoryReasoningEffort{
+		FactoryReasoningEffortNone,
+		FactoryReasoningEffortDynamic,
+		FactoryReasoningEffortOff,
+		FactoryReasoningEffortMinimal,
+		FactoryReasoningEffortLow,
+		FactoryReasoningEffortMedium,
+		FactoryReasoningEffortHigh,
+		FactoryReasoningEffortXHigh,
+		FactoryReasoningEffortMax,
+	} {
+		t.Run(string(effort), func(t *testing.T) {
+			in := `
+models:
+  - alias: reasoning-model
+    factory_provider: openai
+    upstream_protocol: codex-responses
+    oauth_provider: codex
+    capabilities:
+      factory_reasoning: passthrough
+      factory_reasoning_effort: ` + string(effort) + `
+`
+			cfg, err := parse([]byte(in))
+			if err != nil {
+				t.Fatalf("accepted Droid schema value rejected: %v", err)
+			}
+			if got := cfg.Models[0].ResolvedCapabilities().FactoryReasoningEffort; got != effort {
+				t.Fatalf("resolved effort = %q, want %q", got, effort)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name      string
+		reasoning string
+		effort    string
+		wantErr   string
+	}{
+		{name: "invalid effort", reasoning: "passthrough", effort: "ultra", wantErr: "invalid capabilities.factory_reasoning_effort"},
+		{name: "drop cannot advertise", reasoning: "drop", effort: "high", wantErr: "requires capabilities.factory_reasoning passthrough"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := `
+models:
+  - alias: reasoning-model
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    capabilities:
+      factory_reasoning: ` + tc.reasoning + `
+      factory_reasoning_effort: ` + tc.effort + `
+`
+			_, err := parse([]byte(in))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoad_OAuthModelValidation(t *testing.T) {
 	cases := []struct {
 		name    string
