@@ -105,6 +105,7 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 				a.Logger.WithFields(map[string]any{
 					"model":           m.Alias,
 					"upstream_status": resp.StatusCode,
+					"upstream_error":  upstreamErrorLogSnippet(raw),
 				}).Warn("upstream rejected encrypted reasoning items; retrying once without them")
 				continue
 			}
@@ -116,6 +117,7 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 		a.Logger.WithFields(map[string]any{
 			"model":           m.Alias,
 			"upstream_status": resp.StatusCode,
+			"upstream_error":  upstreamErrorLogSnippet(raw),
 		}).Warn("relaying oauth upstream error to client")
 		WriteUpstreamStatusError(c, resp.StatusCode, raw, resp.Header.Get("Content-Type"))
 		return
@@ -436,6 +438,7 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 				a.Logger.WithFields(map[string]any{
 					"model":           m.Alias,
 					"upstream_status": resp.StatusCode,
+					"upstream_error":  upstreamErrorLogSnippet(lastUpstreamBody),
 				}).Warn("upstream rejected encrypted reasoning items; retrying once without them")
 				attempt-- // replay does not consume the failover budget
 				continue

@@ -168,6 +168,7 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 				a.Logger.WithFields(map[string]any{
 					"model":           m.Alias,
 					"upstream_status": r.StatusCode,
+					"upstream_error":  upstreamErrorLogSnippet(raw),
 				}).Warn("upstream rejected encrypted reasoning items; retrying once without them")
 				continue
 			}
@@ -212,6 +213,7 @@ func (a *API) writeResponsesStreamError(c *gin.Context, status int, body []byte)
 	a.Logger.WithFields(map[string]any{
 		"upstream_status": status,
 		"request_id":      c.GetString("request_id"),
+		"upstream_error":  upstreamErrorLogSnippet(body),
 	}).Warn("relaying upstream error to streaming client")
 	writeSSEHeaders(c)
 	_ = a.writeResponsesStreamErrorFrame(c, status, body)
