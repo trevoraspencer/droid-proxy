@@ -144,21 +144,33 @@ func setXAIInclude(body []byte) []byte {
 	return body
 }
 
-// isEncryptedReasoningRejection reports whether an upstream 4xx rejected the
-// request because it could not use the encrypted reasoning items we forwarded.
-// This happens when a Factory thread mixes models behind the proxy's single
-// base URL: reasoning minted by one provider (e.g. Codex) is replayed to
-// another (e.g. xAI Grok), which cannot decrypt it. Stale same-provider blobs
-// after an upstream key rotation fail the same way.
-func isEncryptedReasoningRejection(status int, body []byte) bool {
+// reasoningStripRetryEligible reports whether an upstream rejection may be
+// answered with one replay that has reasoning input items stripped. Mixed-model
+// Factory threads replay reasoning minted by one provider into another (both
+// look like the same provider behind the proxy's single base URL), and the
+// upstream rejects the foreign encrypted_content with a 4xx; stale
+// same-provider blobs after an upstream key rotation fail the same way.
+//
+// Any payload-shape 4xx qualifies: the request is already failing, so a single
+// strip-retry can only help, and pinning the trigger to the words in the error
+// body would break the moment an upstream rewords its rejection. Auth and
+// rate-limit statuses are not payload-shape errors — those retry only when the
+// upstream explicitly blames encrypted content. Callers additionally gate the
+// retry on the payload actually containing reasoning items (the
+// stripReasoningInputItems changed result).
+func reasoningStripRetryEligible(status int, body []byte) bool {
 	if status < http.StatusBadRequest || status >= http.StatusInternalServerError {
 		return false
 	}
-	return bytes.Contains(bytes.ToLower(body), []byte("encrypted_content"))
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusProxyAuthRequired, http.StatusTooManyRequests:
+		return bytes.Contains(bytes.ToLower(body), []byte("encrypted_content"))
+	}
+	return true
 }
 
 // stripReasoningInputItems removes reasoning items from a Responses input
-// array so a request rejected via isEncryptedReasoningRejection can be
+// array so a request rejected via reasoningStripRetryEligible can be
 // replayed without them. Returns the filtered payload and whether anything
 // was removed.
 func stripReasoningInputItems(payload []byte) ([]byte, bool) {

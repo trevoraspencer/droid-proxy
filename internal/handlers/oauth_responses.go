@@ -98,7 +98,7 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 		if !ok {
 			return
 		}
-		if !strippedReasoning && isEncryptedReasoningRejection(resp.StatusCode, raw) {
+		if !strippedReasoning && reasoningStripRetryEligible(resp.StatusCode, raw) {
 			if stripped, changed := stripReasoningInputItems(payload); changed {
 				strippedReasoning = true
 				payload = stripped
@@ -429,7 +429,7 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		// reasoning input items stripped (mixed-model Factory threads carry
 		// items this upstream cannot decrypt). Does not consume the failover
 		// budget and does not mark the account as tried.
-		if !strippedReasoning && isEncryptedReasoningRejection(resp.StatusCode, lastUpstreamBody) {
+		if !strippedReasoning && reasoningStripRetryEligible(resp.StatusCode, lastUpstreamBody) {
 			if stripped, changed := stripReasoningInputItems(payload); changed {
 				strippedReasoning = true
 				payload = stripped

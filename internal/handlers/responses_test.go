@@ -718,7 +718,7 @@ func TestResponses_NativeRetriesWithoutUndecryptableReasoning(t *testing.T) {
 	}
 }
 
-func TestResponses_NativeUnrelated400DoesNotRetry(t *testing.T) {
+func TestResponses_NativeUnrelated400WithReasoningRetriesOnce(t *testing.T) {
 	var hits int
 	api := newResponsesTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
 		hits++
@@ -733,8 +733,31 @@ func TestResponses_NativeUnrelated400DoesNotRetry(t *testing.T) {
 		`{"model":"droid-gpt","stream":false,"input":[{"id":"rs_x","type":"reasoning","encrypted_content":"blob"}]}`))
 	api.engine.ServeHTTP(w, req)
 
+	if hits != 2 {
+		t.Fatalf("payload-shape 400 with reasoning items should strip-retry once, attempts = %d", hits)
+	}
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected relayed 400 after failed retry, got %d", w.Code)
+	}
+}
+
+func TestResponses_NativeUnrelated400WithoutReasoningDoesNotRetry(t *testing.T) {
+	var hits int
+	api := newResponsesTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad schema"}}`))
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(
+		`{"model":"droid-gpt","stream":false,"input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`))
+	api.engine.ServeHTTP(w, req)
+
 	if hits != 1 {
-		t.Fatalf("unrelated 400 must not retry, attempts = %d", hits)
+		t.Fatalf("400 without reasoning items must not retry, attempts = %d", hits)
 	}
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected relayed 400, got %d", w.Code)

@@ -161,7 +161,7 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 		if !ok {
 			return
 		}
-		if !strippedReasoning && isEncryptedReasoningRejection(r.StatusCode, raw) {
+		if !strippedReasoning && reasoningStripRetryEligible(r.StatusCode, raw) {
 			if stripped, changed := stripReasoningInputItems(payload); changed {
 				strippedReasoning = true
 				payload = stripped
