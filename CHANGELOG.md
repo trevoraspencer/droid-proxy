@@ -34,6 +34,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Transient upstream capacity rejections no longer kill the client's turn.
+  Grok Build answers capacity exhaustion with short-lived 429/422 errors
+  ("Some resource has been exhausted", "temporarily at capacity"); the proxy
+  relayed them immediately as in-stream error frames that Factory renders as
+  an empty response — during the 2026-07-14 blip this killed a running
+  mission worker. The xAI single-token and API-key `openai-responses` paths
+  now retry capacity rejections (429/503, or capacity-worded 4xx/5xx) up to
+  twice with backoff, honoring `Retry-After` up to 10s. Persistent rejections
+  are still relayed. Strip-retry and relay warns now also log a redacted
+  sample of the upstream error body, so streaming failures are diagnosable
+  from the log instead of requiring request reconstruction.
+
 - The reasoning strip-and-replay trigger no longer depends on the wording of
   the upstream error body: any payload-shape 4xx on a request that carries
   reasoning input items now gets the single strip-retry (the request is

@@ -147,6 +147,19 @@ func safeErrorMessage(msg string) string {
 	return msg
 }
 
+// upstreamErrorLogSnippet renders a short redacted sample of an upstream error
+// body for warn-level log fields. Upstream rejections relayed inside an SSE
+// stream are otherwise unrecoverable from the logs — the access line says
+// status=200 and the body is gone — which has repeatedly forced incident
+// debugging to reconstruct requests by hand.
+func upstreamErrorLogSnippet(body []byte) string {
+	s := safeErrorMessage(string(body))
+	if len(s) > 500 {
+		s = s[:500] + "…"
+	}
+	return s
+}
+
 // WriteUpstreamStatusError relays a non-2xx upstream response body to the client
 // with the same status code.
 func WriteUpstreamStatusError(c *gin.Context, status int, body []byte, contentType string) {

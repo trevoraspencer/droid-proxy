@@ -179,6 +179,7 @@ func TestResponses_StreamPassthrough(t *testing.T) {
 }
 
 func TestResponses_StreamErrorBeforeBody(t *testing.T) {
+	shrinkCapacityDelays(t)
 	// Upstream returns 429 with an OpenAI-shaped error body BEFORE the SSE starts.
 	// The proxy should emit a single SSE error chunk so the client's stream parser
 	// doesn't choke on a non-SSE response.
