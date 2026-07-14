@@ -34,6 +34,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- The reasoning strip-and-replay trigger no longer depends on the wording of
+  the upstream error body: any payload-shape 4xx on a request that carries
+  reasoning input items now gets the single strip-retry (the request is
+  already failing, so the replay can only help). Auth and rate-limit statuses
+  (401/403/407/429) still retry only when the upstream explicitly blames
+  `encrypted_content`.
+- The encrypted-reasoning strip-and-replay recovery for mixed-model Factory
+  threads now also covers the API-key `openai-responses` path, and the
+  `openai-chat` translation path drops reasoning items and Factory's
+  `reasoning.encrypted_content` include marker before translation (a
+  chat-backed model never mints reasoning items, so any it receives are
+  foreign by construction and previously failed the request at the proxy
+  with "unsupported Responses field/input item"). Other unsupported include
+  values are still rejected.
 - Mixed-model Factory threads no longer fail with an empty turn (Droid's
   generic BYOK error). Factory replays reasoning items minted by one provider
   into threads continued on another — both look like the same `openai`

@@ -256,15 +256,39 @@ func TestStripReasoningInputItems(t *testing.T) {
 	}
 }
 
-func TestIsEncryptedReasoningRejection(t *testing.T) {
-	xaiBody := []byte(`{"code":"invalid-argument","error":"Could not decrypt the provided encrypted_content. Ensure the value is the unmodified encrypted_content from a previous response."}`)
-	if !isEncryptedReasoningRejection(400, xaiBody) {
-		t.Fatal("live xAI decrypt rejection should be detected")
+func TestReasoningStripRetryEligible(t *testing.T) {
+	decryptBody := []byte(`{"code":"invalid-argument","error":"Could not decrypt the provided encrypted_content. Ensure the value is the unmodified encrypted_content from a previous response."}`)
+	unrelatedBody := []byte(`{"error":"model overloaded"}`)
+
+	cases := []struct {
+		name   string
+		status int
+		body   []byte
+		want   bool
+	}{
+		{"live xAI decrypt rejection", 400, decryptBody, true},
+		// Payload-shape 4xx: the request is already dead, so one strip-retry
+		// is safe even when the error text does not name encrypted content
+		// (upstreams word this rejection differently and reword over time).
+		{"unrelated 400", 400, unrelatedBody, true},
+		{"unrelated 422", 422, unrelatedBody, true},
+		{"unrelated 404", 404, unrelatedBody, true},
+		// Auth and rate-limit rejections are not about the payload shape:
+		// only retry those when the upstream explicitly blames encrypted
+		// content.
+		{"unrelated 401", 401, unrelatedBody, false},
+		{"unrelated 403", 403, unrelatedBody, false},
+		{"unrelated 407", 407, unrelatedBody, false},
+		{"unrelated 429", 429, unrelatedBody, false},
+		{"401 blaming encrypted content", 401, decryptBody, true},
+		{"403 blaming encrypted content", 403, decryptBody, true},
+		// Never on non-4xx.
+		{"500 decrypt-worded", 500, decryptBody, false},
+		{"200", 200, decryptBody, false},
 	}
-	if isEncryptedReasoningRejection(500, xaiBody) {
-		t.Fatal("5xx must not trigger the reasoning-strip retry")
-	}
-	if isEncryptedReasoningRejection(400, []byte(`{"error":"model overloaded"}`)) {
-		t.Fatal("unrelated 400 must not trigger the reasoning-strip retry")
+	for _, tc := range cases {
+		if got := reasoningStripRetryEligible(tc.status, tc.body); got != tc.want {
+			t.Errorf("%s: reasoningStripRetryEligible(%d) = %v, want %v", tc.name, tc.status, got, tc.want)
+		}
 	}
 }

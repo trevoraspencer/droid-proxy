@@ -1179,7 +1179,11 @@ func TestResponses_OAuthXAIReasoningStripRetryRelaysPersistentError(t *testing.T
 	}
 }
 
-func TestResponses_OAuthXAIUnrelated400DoesNotRetry(t *testing.T) {
+// Any payload-shape 4xx with reasoning items present gets one strip-retry —
+// the request is already failing, so the replay can only help. Upstreams word
+// (and reword) the encrypted-content rejection differently, so the trigger
+// must not depend on the error text alone.
+func TestResponses_OAuthXAIUnrelated400WithReasoningRetriesOnce(t *testing.T) {
 	var hits int
 	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
 		hits++
@@ -1194,7 +1198,50 @@ func TestResponses_OAuthXAIUnrelated400DoesNotRetry(t *testing.T) {
 		`{"model":"droid-oauth","stream":true,"input":[{"id":"rs_x","type":"reasoning","encrypted_content":"blob"},{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`))
 	api.engine.ServeHTTP(w, req)
 
+	if hits != 2 {
+		t.Fatalf("payload-shape 400 with reasoning items should strip-retry once, attempts = %d", hits)
+	}
+	if !strings.Contains(w.Body.String(), "event: error") || !strings.Contains(w.Body.String(), "bad tool schema") {
+		t.Fatalf("persistent error must still be relayed after the retry: %s", w.Body.String())
+	}
+}
+
+func TestResponses_OAuthXAIUnrelated400WithoutReasoningDoesNotRetry(t *testing.T) {
+	var hits int
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"bad tool schema"}`))
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(
+		`{"model":"droid-oauth","stream":true,"input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`))
+	api.engine.ServeHTTP(w, req)
+
 	if hits != 1 {
-		t.Fatalf("unrelated 400 must not retry, attempts = %d", hits)
+		t.Fatalf("400 without reasoning items must not retry, attempts = %d", hits)
+	}
+}
+
+func TestResponses_OAuthXAIUnrelated401WithReasoningDoesNotRetry(t *testing.T) {
+	var hits int
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"token expired"}`))
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(
+		`{"model":"droid-oauth","stream":true,"input":[{"id":"rs_x","type":"reasoning","encrypted_content":"blob"},{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`))
+	api.engine.ServeHTTP(w, req)
+
+	if hits != 1 {
+		t.Fatalf("auth 401 must not trigger the reasoning strip-retry, attempts = %d", hits)
 	}
 }

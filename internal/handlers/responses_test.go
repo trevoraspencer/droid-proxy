@@ -678,3 +678,138 @@ func assertNoRawChatSSE(t *testing.T, events []handlerSSEEvent) {
 		}
 	}
 }
+
+// Same mixed-model replay class as the OAuth paths (#27), on the API-key
+// openai-responses path: a 4xx blaming encrypted_content must trigger one
+// replay with reasoning input items stripped.
+func TestResponses_NativeRetriesWithoutUndecryptableReasoning(t *testing.T) {
+	const decryptRejection = `{"error":{"message":"Could not decrypt the provided encrypted_content.","type":"invalid_request_error"}}`
+	var bodies []string
+	api := newResponsesTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(body))
+		if len(bodies) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(decryptRejection))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\n" +
+			`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}` + "\n\n"))
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(
+		`{"model":"droid-gpt","stream":true,"input":[{"id":"rs_foreign","type":"reasoning","encrypted_content":"blob"},{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after strip-retry, got %d body=%s", w.Code, w.Body.String())
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("upstream attempts = %d, want 2", len(bodies))
+	}
+	if !strings.Contains(bodies[0], `"type":"reasoning"`) || strings.Contains(bodies[1], `"type":"reasoning"`) {
+		t.Fatalf("strip-retry payloads wrong:\n1st: %s\n2nd: %s", bodies[0], bodies[1])
+	}
+	if !strings.Contains(w.Body.String(), "response.completed") {
+		t.Fatalf("missing completed event: %s", w.Body.String())
+	}
+}
+
+func TestResponses_NativeUnrelated400WithReasoningRetriesOnce(t *testing.T) {
+	var hits int
+	api := newResponsesTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad schema"}}`))
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(
+		`{"model":"droid-gpt","stream":false,"input":[{"id":"rs_x","type":"reasoning","encrypted_content":"blob"}]}`))
+	api.engine.ServeHTTP(w, req)
+
+	if hits != 2 {
+		t.Fatalf("payload-shape 400 with reasoning items should strip-retry once, attempts = %d", hits)
+	}
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected relayed 400 after failed retry, got %d", w.Code)
+	}
+}
+
+func TestResponses_NativeUnrelated400WithoutReasoningDoesNotRetry(t *testing.T) {
+	var hits int
+	api := newResponsesTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad schema"}}`))
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(
+		`{"model":"droid-gpt","stream":false,"input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`))
+	api.engine.ServeHTTP(w, req)
+
+	if hits != 1 {
+		t.Fatalf("400 without reasoning items must not retry, attempts = %d", hits)
+	}
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected relayed 400, got %d", w.Code)
+	}
+}
+
+// Chat upstreams can never consume Responses reasoning items — in a mixed
+// Factory thread they are foreign by construction — so the translation path
+// must drop them (and Droid's reasoning include marker) instead of failing
+// the request before upstream is ever contacted.
+func TestResponses_ViaChatDropsReasoningItemsAndIncludeMarker(t *testing.T) {
+	var captured string
+	api := newResponsesTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		captured = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"c1","object":"chat.completion","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}`))
+	}, func(m *config.Model) {
+		m.UpstreamProtocol = config.UpstreamOpenAIChat
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(
+		`{"model":"droid-gpt","stream":false,"include":["reasoning.encrypted_content"],"input":[`+
+			`{"id":"rs_foreign","type":"reasoning","encrypted_content":"blob","summary":[]},`+
+			`{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(captured, "reasoning") || strings.Contains(captured, "blob") {
+		t.Fatalf("reasoning leaked into chat payload: %s", captured)
+	}
+	if !strings.Contains(captured, `"content":"hi"`) {
+		t.Fatalf("user message lost in translation: %s", captured)
+	}
+}
+
+func TestResponses_ViaChatStillRejectsOtherIncludeValues(t *testing.T) {
+	api := newResponsesTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("upstream must not be contacted")
+	}, func(m *config.Model) {
+		m.UpstreamProtocol = config.UpstreamOpenAIChat
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(
+		`{"model":"droid-gpt","stream":false,"include":["message.output_text.logprobs"],"input":"hi"}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("unsupported include values must still be rejected, got %d body=%s", w.Code, w.Body.String())
+	}
+}

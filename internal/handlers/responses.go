@@ -46,6 +46,16 @@ func (a *API) Responses(c *gin.Context) {
 }
 
 func (a *API) responsesViaChat(c *gin.Context, m *config.Model, body []byte) {
+	// Chat upstreams cannot consume Responses reasoning items, and mixed-model
+	// Factory threads replay them onto this path (a chat-backed model never
+	// mints its own, so any reasoning item here is foreign by construction).
+	// Drop the items and Factory's reasoning include marker before translation
+	// instead of failing the request; other include values still validate.
+	body = dropEncryptedReasoningInclude(body)
+	if stripped, changed := stripReasoningInputItems(body); changed {
+		body = stripped
+		a.Logger.WithField("model", m.Alias).Info("dropped reasoning input items for chat upstream")
+	}
 	payload, err := translate.ResponsesToChatRequest(body, m.UpstreamModel, m.ExtraArgs)
 	if err != nil {
 		WriteJSONError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
@@ -118,39 +128,61 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 	payload := applyUpstreamPayloadOverrides(body, m)
 	isStream := gjson.GetBytes(payload, "stream").Bool()
 
-	resp, ok := a.doUpstream(c, upstream.SendOptions{
-		Model:    m,
-		Method:   http.MethodPost,
-		Path:     "/responses",
-		Body:     payload,
-		IsStream: isStream,
-	}, func(err error) {
-		WriteJSONError(c, http.StatusInternalServerError, "configuration_error", err.Error())
-	}, func(err error) {
-		WriteJSONError(c, http.StatusBadGateway, "upstream_error", safeErrorMessage(err.Error()))
-	})
-	if !ok {
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, ok := a.rawUpstreamErrorBody(resp, func(msg string) {
-			WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
+	// One replay is allowed when the upstream rejects encrypted reasoning it
+	// cannot decrypt (foreign items from a mixed-model Factory thread); the
+	// retry resends the same request with reasoning input items stripped.
+	var resp *http.Response
+	strippedReasoning := false
+	for {
+		r, ok := a.doUpstream(c, upstream.SendOptions{
+			Model:    m,
+			Method:   http.MethodPost,
+			Path:     "/responses",
+			Body:     payload,
+			IsStream: isStream,
+		}, func(err error) {
+			WriteJSONError(c, http.StatusInternalServerError, "configuration_error", err.Error())
+		}, func(err error) {
+			WriteJSONError(c, http.StatusBadGateway, "upstream_error", safeErrorMessage(err.Error()))
 		})
 		if !ok {
 			return
+		}
+
+		if r.StatusCode >= 200 && r.StatusCode < 300 {
+			resp = r
+			break
+		}
+
+		raw, ok := a.rawUpstreamErrorBody(r, func(msg string) {
+			WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
+		})
+		_ = r.Body.Close()
+		if !ok {
+			return
+		}
+		if !strippedReasoning && reasoningStripRetryEligible(r.StatusCode, raw) {
+			if stripped, changed := stripReasoningInputItems(payload); changed {
+				strippedReasoning = true
+				payload = stripped
+				a.Logger.WithFields(map[string]any{
+					"model":           m.Alias,
+					"upstream_status": r.StatusCode,
+				}).Warn("upstream rejected encrypted reasoning items; retrying once without them")
+				continue
+			}
 		}
 		if isStream {
 			// stream callers don't get a structured non-stream error from the upstream;
 			// the upstream returned 4xx/5xx BEFORE emitting any SSE.  Send a single SSE
 			// error event so the client's parser doesn't trip.
-			a.writeResponsesStreamError(c, resp.StatusCode, raw)
+			a.writeResponsesStreamError(c, r.StatusCode, raw)
 			return
 		}
-		WriteUpstreamStatusError(c, resp.StatusCode, raw, resp.Header.Get("Content-Type"))
+		WriteUpstreamStatusError(c, r.StatusCode, raw, r.Header.Get("Content-Type"))
 		return
 	}
+	defer func() { _ = resp.Body.Close() }()
 
 	if !isStream {
 		raw, ok := a.rawUpstreamSuccessBody(resp, func(msg string) {
