@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -141,6 +142,54 @@ func setXAIInclude(body []byte) []byte {
 		return next
 	}
 	return body
+}
+
+// isEncryptedReasoningRejection reports whether an upstream 4xx rejected the
+// request because it could not use the encrypted reasoning items we forwarded.
+// This happens when a Factory thread mixes models behind the proxy's single
+// base URL: reasoning minted by one provider (e.g. Codex) is replayed to
+// another (e.g. xAI Grok), which cannot decrypt it. Stale same-provider blobs
+// after an upstream key rotation fail the same way.
+func isEncryptedReasoningRejection(status int, body []byte) bool {
+	if status < http.StatusBadRequest || status >= http.StatusInternalServerError {
+		return false
+	}
+	return bytes.Contains(bytes.ToLower(body), []byte("encrypted_content"))
+}
+
+// stripReasoningInputItems removes reasoning items from a Responses input
+// array so a request rejected via isEncryptedReasoningRejection can be
+// replayed without them. Returns the filtered payload and whether anything
+// was removed.
+func stripReasoningInputItems(payload []byte) ([]byte, bool) {
+	input := gjson.GetBytes(payload, "input")
+	if !input.IsArray() {
+		return payload, false
+	}
+	var buf bytes.Buffer
+	buf.WriteByte('[')
+	removed := false
+	wrote := false
+	for _, item := range input.Array() {
+		if strings.EqualFold(item.Get("type").String(), "reasoning") {
+			removed = true
+			continue
+		}
+		if wrote {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(item.Raw)
+		wrote = true
+	}
+	buf.WriteByte(']')
+	if !removed {
+		return payload, false
+	}
+	next, err := sjson.SetRawBytes(payload, "input", buf.Bytes())
+	if err != nil {
+		return payload, false
+	}
+	return next, true
 }
 
 func xaiSessionID(h http.Header) string {

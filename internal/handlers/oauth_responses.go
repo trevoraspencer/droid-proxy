@@ -62,32 +62,57 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 		WriteJSONError(c, http.StatusInternalServerError, "configuration_error", err.Error())
 		return
 	}
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamURL, bytes.NewReader(payload))
-	if err != nil {
-		WriteJSONError(c, http.StatusInternalServerError, "configuration_error", err.Error())
-		return
-	}
-	applyOAuthResponsesHeaders(req, c.Request.Header, m, token, payload, installationID, codexConversation)
 
-	resp, err := a.doPreparedUpstream(req, downstreamStream)
-	if err != nil {
-		WriteJSONError(c, http.StatusBadGateway, "upstream_error", safeErrorMessage(err.Error()))
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
+	// One replay is allowed when the upstream rejects encrypted reasoning it
+	// cannot decrypt (foreign items from a mixed-model Factory thread); the
+	// retry resends the same request with reasoning input items stripped.
+	var resp *http.Response
+	strippedReasoning := false
+	for {
+		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamURL, bytes.NewReader(payload))
+		if err != nil {
+			WriteJSONError(c, http.StatusInternalServerError, "configuration_error", err.Error())
+			return
+		}
+		applyOAuthResponsesHeaders(req, c.Request.Header, m, token, payload, installationID, codexConversation)
 
-	if m.OAuthProvider == config.OAuthProviderCodex {
-		quota, resetAt := oauth.ParseCodexRateLimitHeaders(resp.Header)
-		a.recordCodexUsage(token, quota, resetAt)
-	}
+		resp, err = a.doPreparedUpstream(req, downstreamStream)
+		if err != nil {
+			WriteJSONError(c, http.StatusBadGateway, "upstream_error", safeErrorMessage(err.Error()))
+			return
+		}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if m.OAuthProvider == config.OAuthProviderCodex {
+			quota, resetAt := oauth.ParseCodexRateLimitHeaders(resp.Header)
+			a.recordCodexUsage(token, quota, resetAt)
+		}
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			break
+		}
+
 		raw, ok := a.rawUpstreamErrorBody(resp, func(msg string) {
 			WriteJSONError(c, http.StatusBadGateway, "upstream_error", msg)
 		})
+		_ = resp.Body.Close()
 		if !ok {
 			return
 		}
+		if !strippedReasoning && isEncryptedReasoningRejection(resp.StatusCode, raw) {
+			if stripped, changed := stripReasoningInputItems(payload); changed {
+				strippedReasoning = true
+				payload = stripped
+				a.Logger.WithFields(map[string]any{
+					"model":           m.Alias,
+					"upstream_status": resp.StatusCode,
+				}).Warn("upstream rejected encrypted reasoning items; retrying once without them")
+				continue
+			}
+		}
+		a.Logger.WithFields(map[string]any{
+			"model":           m.Alias,
+			"upstream_status": resp.StatusCode,
+		}).Warn("relaying oauth upstream error to client")
 		if downstreamStream {
 			a.writeResponsesStreamError(c, resp.StatusCode, raw)
 			return
@@ -95,6 +120,7 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 		WriteUpstreamStatusError(c, resp.StatusCode, raw, resp.Header.Get("Content-Type"))
 		return
 	}
+	defer func() { _ = resp.Body.Close() }()
 
 	if downstreamStream {
 		a.forwardOAuthResponsesStream(c, m, resp, token, oauthResponsesRepairOptions(m, token))
@@ -168,6 +194,7 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 
 	tried := map[string]bool{}
 	authReplayed := map[string]bool{} // tracks which accounts have had a 401/403 force-refresh replay
+	strippedReasoning := false        // one payload replay without undecryptable reasoning items
 	var lastUpstreamStatus int
 	var lastUpstreamBody []byte
 	var lastUpstreamContentType string
@@ -396,6 +423,23 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 			}
 			tried[entry.Path] = true
 			continue
+		}
+
+		// Non-retryable 4xx that blames encrypted reasoning: replay once with
+		// reasoning input items stripped (mixed-model Factory threads carry
+		// items this upstream cannot decrypt). Does not consume the failover
+		// budget and does not mark the account as tried.
+		if !strippedReasoning && isEncryptedReasoningRejection(resp.StatusCode, lastUpstreamBody) {
+			if stripped, changed := stripReasoningInputItems(payload); changed {
+				strippedReasoning = true
+				payload = stripped
+				a.Logger.WithFields(map[string]any{
+					"model":           m.Alias,
+					"upstream_status": resp.StatusCode,
+				}).Warn("upstream rejected encrypted reasoning items; retrying once without them")
+				attempt-- // replay does not consume the failover budget
+				continue
+			}
 		}
 
 		// Non-retryable 4xx: relay directly to the client.

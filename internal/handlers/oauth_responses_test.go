@@ -1066,3 +1066,135 @@ func containsString(value any, want string) bool {
 	}
 	return false
 }
+
+// Live incident 2026-07-13: Droid replays reasoning items minted by one
+// provider (Codex GPT-5.6) into a thread continued on another (xAI Grok)
+// because both share the proxy's base URL. The upstream rejects the foreign
+// encrypted_content with a 400; the proxy must strip reasoning items and
+// retry once instead of relaying an error Droid renders as an empty turn.
+func TestResponses_OAuthXAIRetriesWithoutUndecryptableReasoning(t *testing.T) {
+	const decryptRejection = `{"code":"invalid-argument","error":"Could not decrypt the provided encrypted_content. Ensure the value is the unmodified encrypted_content from a previous response."}`
+	requestBody := `{"model":"droid-oauth","stream":true,"input":[` +
+		`{"role":"user","content":[{"type":"input_text","text":"hi"}]},` +
+		`{"id":"rs_foreign","type":"reasoning","encrypted_content":"openai-blob","summary":[]},` +
+		`{"type":"function_call","call_id":"call_1","name":"LS","arguments":"{}"},` +
+		`{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`
+
+	var upstreamBodies []string
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstreamBodies = append(upstreamBodies, string(body))
+		if len(upstreamBodies) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(decryptRejection))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: response.completed\n" +
+			`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"recovered"}]}]}}` + "\n\n"))
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(requestBody))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after strip-retry, got %d body=%s", w.Code, w.Body.String())
+	}
+	if len(upstreamBodies) != 2 {
+		t.Fatalf("upstream attempts = %d, want 2", len(upstreamBodies))
+	}
+	if !strings.Contains(upstreamBodies[0], `"type":"reasoning"`) {
+		t.Fatalf("first attempt should carry the reasoning item: %s", upstreamBodies[0])
+	}
+	if strings.Contains(upstreamBodies[1], `"type":"reasoning"`) || strings.Contains(upstreamBodies[1], "openai-blob") {
+		t.Fatalf("retry must not carry reasoning items: %s", upstreamBodies[1])
+	}
+	if !strings.Contains(upstreamBodies[1], `"call_id":"call_1"`) {
+		t.Fatalf("retry lost non-reasoning items: %s", upstreamBodies[1])
+	}
+	events := parseHandlerSSE(t, w.Body.String())
+	assertEventCount(t, events, "response.completed", 1)
+	if !strings.Contains(w.Body.String(), "recovered") {
+		t.Fatalf("expected recovered output, got %s", w.Body.String())
+	}
+}
+
+func TestResponses_OAuthXAIReasoningStripRetryNonStreaming(t *testing.T) {
+	const decryptRejection = `{"code":"invalid-argument","error":"Could not decrypt the provided encrypted_content."}`
+	var hits int
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = io.ReadAll(r.Body)
+		if hits == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(decryptRejection))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\n" +
+			`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}` + "\n\n"))
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(
+		`{"model":"droid-oauth","stream":false,"input":[{"id":"rs_x","type":"reasoning","encrypted_content":"blob"},{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after strip-retry, got %d body=%s", w.Code, w.Body.String())
+	}
+	if hits != 2 {
+		t.Fatalf("upstream attempts = %d, want 2", hits)
+	}
+	if !strings.Contains(w.Body.String(), `"ok"`) {
+		t.Fatalf("missing reconstructed output: %s", w.Body.String())
+	}
+}
+
+func TestResponses_OAuthXAIReasoningStripRetryRelaysPersistentError(t *testing.T) {
+	const decryptRejection = `{"code":"invalid-argument","error":"Could not decrypt the provided encrypted_content."}`
+	var hits int
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(decryptRejection))
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(
+		`{"model":"droid-oauth","stream":true,"input":[{"id":"rs_x","type":"reasoning","encrypted_content":"blob"},{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`))
+	api.engine.ServeHTTP(w, req)
+
+	if hits != 2 {
+		t.Fatalf("upstream attempts = %d, want exactly 2 (no retry loop)", hits)
+	}
+	if !strings.Contains(w.Body.String(), "event: error") || !strings.Contains(w.Body.String(), "Could not decrypt") {
+		t.Fatalf("persistent upstream rejection must be relayed: %s", w.Body.String())
+	}
+}
+
+func TestResponses_OAuthXAIUnrelated400DoesNotRetry(t *testing.T) {
+	var hits int
+	api := newOAuthResponsesTestAPI(t, config.OAuthProviderXAI, config.UpstreamXAIResponses, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"bad tool schema"}`))
+	}, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(
+		`{"model":"droid-oauth","stream":true,"input":[{"id":"rs_x","type":"reasoning","encrypted_content":"blob"},{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`))
+	api.engine.ServeHTTP(w, req)
+
+	if hits != 1 {
+		t.Fatalf("unrelated 400 must not retry, attempts = %d", hits)
+	}
+}

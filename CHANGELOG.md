@@ -34,6 +34,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Mixed-model Factory threads no longer fail with an empty turn (Droid's
+  generic BYOK error). Factory replays reasoning items minted by one provider
+  into threads continued on another — both look like the same `openai`
+  provider behind the proxy's single base URL — and the upstream rejects the
+  foreign `encrypted_content` with a 400 the proxy relayed as an in-band SSE
+  error frame that Droid renders as "LLM response contained no usable
+  output". The Responses OAuth paths (xAI single-token and Codex pool
+  failover) now detect the encrypted-reasoning rejection, strip reasoning
+  input items, and replay the request once; persistent or unrelated 4xx
+  responses are still relayed unchanged. Relayed upstream errors are also
+  logged at warn level so streaming failures no longer hide behind
+  `status=200` access-log lines.
 - The config TUI restart action restarts the managed service when one is
   installed instead of spawning a competing background daemon.
 
