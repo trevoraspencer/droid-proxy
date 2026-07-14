@@ -109,14 +109,14 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 				continue
 			}
 		}
-		a.Logger.WithFields(map[string]any{
-			"model":           m.Alias,
-			"upstream_status": resp.StatusCode,
-		}).Warn("relaying oauth upstream error to client")
 		if downstreamStream {
 			a.writeResponsesStreamError(c, resp.StatusCode, raw)
 			return
 		}
+		a.Logger.WithFields(map[string]any{
+			"model":           m.Alias,
+			"upstream_status": resp.StatusCode,
+		}).Warn("relaying oauth upstream error to client")
 		WriteUpstreamStatusError(c, resp.StatusCode, raw, resp.Header.Get("Content-Type"))
 		return
 	}

@@ -173,8 +173,14 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 
 // writeResponsesStreamError emits an SSE error chunk in the OpenAI Responses
 // streaming shape. Used when upstream returns a non-2xx status BEFORE any SSE
-// has been sent.
+// has been sent. Logged at warn level here — the SSE headers commit an HTTP
+// 200, so without this line a relayed upstream failure is indistinguishable
+// from a success in the access log.
 func (a *API) writeResponsesStreamError(c *gin.Context, status int, body []byte) {
+	a.Logger.WithFields(map[string]any{
+		"upstream_status": status,
+		"request_id":      c.GetString("request_id"),
+	}).Warn("relaying upstream error to streaming client")
 	writeSSEHeaders(c)
 	_ = a.writeResponsesStreamErrorFrame(c, status, body)
 }
