@@ -4097,3 +4097,56 @@ func TestCodexAuthReplayTransportErrorPreservesOriginalStatus(t *testing.T) {
 		}
 	}
 }
+
+// Mixed-model Factory threads can replay reasoning items minted by another
+// provider into the Codex pool path. A 400 blaming encrypted_content must
+// trigger exactly one same-pool replay with reasoning items stripped, without
+// consuming the failover budget.
+func TestResponsesCodexFailoverStripsUndecryptableReasoningAndReplays(t *testing.T) {
+	var bodies []string
+	var mu sync.Mutex
+
+	api := newCodexFailoverTestAPI(t, failoverTestOptions{
+		maxFailovers: 0, // replay must work even with no failover budget
+		accounts: []failoverTestAccount{
+			{email: "a@test.com", accountID: "acct_a"},
+			{email: "b@test.com", accountID: "acct_b"},
+		},
+		upstreamHandler: func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			bodies = append(bodies, string(body))
+			n := len(bodies)
+			mu.Unlock()
+			if n == 1 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"message":"Could not decrypt the provided encrypted_content.","type":"invalid_request_error"}}`))
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("event: response.completed\n" +
+				`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}` + "\n\n"))
+		},
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(
+		`{"model":"droid-oauth","input":[{"id":"rs_foreign","type":"reasoning","encrypted_content":"xai-blob"},{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after strip-replay, got %d body=%s", w.Code, w.Body.String())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 2 {
+		t.Fatalf("upstream attempts = %d, want 2", len(bodies))
+	}
+	if !strings.Contains(bodies[0], `"type":"reasoning"`) {
+		t.Fatalf("first attempt should carry the reasoning item: %s", bodies[0])
+	}
+	if strings.Contains(bodies[1], `"type":"reasoning"`) || strings.Contains(bodies[1], "xai-blob") {
+		t.Fatalf("replay must not carry reasoning items: %s", bodies[1])
+	}
+}

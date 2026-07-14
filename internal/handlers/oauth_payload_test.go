@@ -148,3 +148,65 @@ func TestSanitizeXAIToolFields_PreservesPropertyNamedFormat(t *testing.T) {
 		t.Errorf("required list altered: %#v", params["required"])
 	}
 }
+
+func TestStripReasoningInputItems(t *testing.T) {
+	payload := []byte(`{
+		"model": "grok-4.5",
+		"input": [
+			{"role": "user", "content": [{"type": "input_text", "text": "hi"}]},
+			{"id": "rs_openai_minted", "type": "reasoning", "encrypted_content": "opaque-openai-blob", "summary": []},
+			{"type": "function_call", "call_id": "call_1", "name": "LS", "arguments": "{}"},
+			{"type": "function_call_output", "call_id": "call_1", "output": "ok"},
+			{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "done"}]}
+		],
+		"stream": true
+	}`)
+	stripped, changed := stripReasoningInputItems(payload)
+	if !changed {
+		t.Fatal("expected reasoning items to be stripped")
+	}
+	input := gjson.GetBytes(stripped, "input")
+	if !input.IsArray() || len(input.Array()) != 4 {
+		t.Fatalf("input after strip = %s", input.Raw)
+	}
+	for _, item := range input.Array() {
+		if item.Get("type").String() == "reasoning" {
+			t.Fatalf("reasoning item survived strip: %s", item.Raw)
+		}
+	}
+	if gjson.GetBytes(stripped, "input.1.type").String() != "function_call" {
+		t.Fatalf("item order not preserved: %s", input.Raw)
+	}
+
+	// No-op when there is nothing to strip.
+	same, changed := stripReasoningInputItems(stripped)
+	if changed {
+		t.Fatalf("second strip should be a no-op, got %s", same)
+	}
+
+	// Only-reasoning input degrades to an empty array, not null.
+	onlyReasoning := []byte(`{"input":[{"type":"reasoning","encrypted_content":"blob"}]}`)
+	strippedOnly, changed := stripReasoningInputItems(onlyReasoning)
+	if !changed || gjson.GetBytes(strippedOnly, "input").Raw != "[]" {
+		t.Fatalf("only-reasoning strip = %s changed=%v", strippedOnly, changed)
+	}
+
+	// String input (non-array) is untouched.
+	str := []byte(`{"input":"plain prompt"}`)
+	if _, changed := stripReasoningInputItems(str); changed {
+		t.Fatal("string input should not be modified")
+	}
+}
+
+func TestIsEncryptedReasoningRejection(t *testing.T) {
+	xaiBody := []byte(`{"code":"invalid-argument","error":"Could not decrypt the provided encrypted_content. Ensure the value is the unmodified encrypted_content from a previous response."}`)
+	if !isEncryptedReasoningRejection(400, xaiBody) {
+		t.Fatal("live xAI decrypt rejection should be detected")
+	}
+	if isEncryptedReasoningRejection(500, xaiBody) {
+		t.Fatal("5xx must not trigger the reasoning-strip retry")
+	}
+	if isEncryptedReasoningRejection(400, []byte(`{"error":"model overloaded"}`)) {
+		t.Fatal("unrelated 400 must not trigger the reasoning-strip retry")
+	}
+}
