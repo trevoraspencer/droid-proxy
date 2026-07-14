@@ -1011,7 +1011,9 @@ func TestResponsesCodexFailoverNoMutationOnNoEligible(t *testing.T) {
 
 func TestResponsesCodexFailoverXAIUsesSingleTokenPath(t *testing.T) {
 	// Verify that xAI requests still use the single-token path and do not
-	// use the pool even when a pool is configured.
+	// use the pool even when a pool is configured. A 429 gets the bounded
+	// in-place capacity backoff on the same token, never pool failover.
+	shrinkCapacityDelays(t)
 	var attemptCount int32
 
 	authDir := t.TempDir()
@@ -1085,13 +1087,13 @@ func TestResponsesCodexFailoverXAIUsesSingleTokenPath(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"droid-oauth","input":"hi"}`))
 	engine.ServeHTTP(w, req)
 
-	// xAI should get 429 directly, no failover.
+	// xAI should get 429 relayed after the in-place capacity retries.
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429 for xAI (no failover), got %d body=%s", w.Code, w.Body.String())
 	}
-	// xAI should make exactly 1 attempt (no pool failover).
-	if atomic.LoadInt32(&attemptCount) != 1 {
-		t.Fatalf("xAI should not fail over, got %d attempts", attemptCount)
+	// Same-token capacity retries only — no pool failover.
+	if got := atomic.LoadInt32(&attemptCount); got != int32(1+capacityRetryMaxAttempts) {
+		t.Fatalf("xAI should make 1+%d same-token attempts, got %d", capacityRetryMaxAttempts, got)
 	}
 }
 
@@ -2625,7 +2627,9 @@ func TestResponsesCodexFailoverXAI500DoesNotFailover(t *testing.T) {
 func TestResponsesCodexFailoverXAI429DoesNotFailover(t *testing.T) {
 	// xAI requests should NOT fail over even when the upstream returns 429.
 	// This extends the existing TestResponsesCodexFailoverXAIUsesSingleTokenPath
-	// to also verify no Codex pool side effects.
+	// to also verify no Codex pool side effects. The 429 is retried in place
+	// (capacity backoff) on the same token before being relayed.
+	shrinkCapacityDelays(t)
 	var attemptCount int32
 
 	authDir := t.TempDir()
@@ -2700,8 +2704,8 @@ func TestResponsesCodexFailoverXAI429DoesNotFailover(t *testing.T) {
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429 for xAI (no failover), got %d body=%s", w.Code, w.Body.String())
 	}
-	if atomic.LoadInt32(&attemptCount) != 1 {
-		t.Fatalf("xAI 429 should not fail over, got %d attempts", attemptCount)
+	if got := atomic.LoadInt32(&attemptCount); got != int32(1+capacityRetryMaxAttempts) {
+		t.Fatalf("xAI 429 should retry in place without failover, want %d attempts, got %d", 1+capacityRetryMaxAttempts, got)
 	}
 
 	// Verify Codex pool has no rate-limit marks from xAI request.

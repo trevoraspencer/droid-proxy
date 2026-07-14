@@ -1013,6 +1013,7 @@ func TestResponses_OAuthXAIAPIDefaultAllowsEmptyOutput(t *testing.T) {
 }
 
 func TestResponses_OAuthUpstreamErrorMapping(t *testing.T) {
+	shrinkCapacityDelays(t)
 	api := newOAuthResponsesTestAPI(t, config.OAuthProviderCodex, config.UpstreamCodexResponses, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)

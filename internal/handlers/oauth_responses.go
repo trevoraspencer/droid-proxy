@@ -66,8 +66,10 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 	// One replay is allowed when the upstream rejects encrypted reasoning it
 	// cannot decrypt (foreign items from a mixed-model Factory thread); the
 	// retry resends the same request with reasoning input items stripped.
+	// Transient capacity rejections additionally get a bounded backoff retry.
 	var resp *http.Response
 	strippedReasoning := false
+	capacityRetries := 0
 	for {
 		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamURL, bytes.NewReader(payload))
 		if err != nil {
@@ -109,6 +111,21 @@ func (a *API) responsesViaOAuth(c *gin.Context, m *config.Model, body []byte) {
 				}).Warn("upstream rejected encrypted reasoning items; retrying once without them")
 				continue
 			}
+		}
+		if capacityRetries < capacityRetryMaxAttempts && upstreamCapacityRejection(resp.StatusCode, raw) {
+			delay := capacityRetryDelay(resp.Header, capacityRetries)
+			capacityRetries++
+			a.Logger.WithFields(map[string]any{
+				"model":           m.Alias,
+				"upstream_status": resp.StatusCode,
+				"upstream_error":  upstreamErrorLogSnippet(raw),
+				"retry_in":        delay.String(),
+				"retry":           capacityRetries,
+			}).Warn("upstream at capacity; backing off before retrying")
+			if !sleepWithContext(c.Request.Context(), delay) {
+				return
+			}
+			continue
 		}
 		if downstreamStream {
 			a.writeResponsesStreamError(c, resp.StatusCode, raw)

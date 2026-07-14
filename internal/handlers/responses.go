@@ -133,6 +133,7 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 	// retry resends the same request with reasoning input items stripped.
 	var resp *http.Response
 	strippedReasoning := false
+	capacityRetries := 0
 	for {
 		r, ok := a.doUpstream(c, upstream.SendOptions{
 			Model:    m,
@@ -172,6 +173,21 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 				}).Warn("upstream rejected encrypted reasoning items; retrying once without them")
 				continue
 			}
+		}
+		if capacityRetries < capacityRetryMaxAttempts && upstreamCapacityRejection(r.StatusCode, raw) {
+			delay := capacityRetryDelay(r.Header, capacityRetries)
+			capacityRetries++
+			a.Logger.WithFields(map[string]any{
+				"model":           m.Alias,
+				"upstream_status": r.StatusCode,
+				"upstream_error":  upstreamErrorLogSnippet(raw),
+				"retry_in":        delay.String(),
+				"retry":           capacityRetries,
+			}).Warn("upstream at capacity; backing off before retrying")
+			if !sleepWithContext(c.Request.Context(), delay) {
+				return
+			}
+			continue
 		}
 		if isStream {
 			// stream callers don't get a structured non-stream error from the upstream;
