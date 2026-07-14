@@ -88,6 +88,58 @@ func TestRunnerAgainstMock(t *testing.T) {
 	}
 }
 
+// TestRunnerInterleavedRepeats pins the paired-delta aggregation path: with
+// Repeat > 1, every cell runs once per rep, aggregates carry mean±sd, and
+// non-baseline targets get deltas paired against the same-rep baseline.
+func TestRunnerInterleavedRepeats(t *testing.T) {
+	mock := httptest.NewServer(mockupstream.New(mockupstream.Options{StreamChunks: 3}).Handler())
+	defer mock.Close()
+
+	cfg := Config{
+		Targets: []Target{
+			{Name: "base", BaseURL: mock.URL, Model: "m", Baseline: true},
+			{Name: "other", BaseURL: mock.URL, Model: "m"},
+		},
+		Scenarios: []Scenario{
+			{Name: "s", Protocol: ProtocolOpenAIChat, Requests: 3},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	runner := &Runner{Config: cfg, Repeat: 3}
+	results, err := runner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(results) != 6 {
+		t.Fatalf("expected 2 targets × 3 reps = 6 results, got %d", len(results))
+	}
+	report := BuildReport(results)
+	if len(report.Aggregates) != 2 {
+		t.Fatalf("expected 2 aggregates, got %d", len(report.Aggregates))
+	}
+	for _, a := range report.Aggregates {
+		if a.Reps != 3 {
+			t.Fatalf("aggregate %s/%s has %d reps", a.Scenario, a.Target, a.Reps)
+		}
+		if a.Totalp50ms.N != 3 || a.Totalp50ms.Mean <= 0 {
+			t.Fatalf("aggregate %s/%s missing latency stats: %+v", a.Scenario, a.Target, a.Totalp50ms)
+		}
+		if a.Baseline && a.TotalDeltaPct.N != 0 {
+			t.Fatalf("baseline should have no paired delta: %+v", a)
+		}
+		if !a.Baseline && a.TotalDeltaPct.N != 3 {
+			t.Fatalf("non-baseline should have 3 paired deltas: %+v", a)
+		}
+	}
+	var text bytes.Buffer
+	report.WriteText(&text)
+	if !strings.Contains(text.String(), "interleaved reps") || !strings.Contains(text.String(), "±") {
+		t.Fatalf("aggregate rendering missing:\n%s", text.String())
+	}
+}
+
 // TestGrowingConversationPrefixReuse pins that request i's messages extend
 // request i-1's messages byte-for-byte (the property that makes provider
 // prompt caches hit across agent turns).

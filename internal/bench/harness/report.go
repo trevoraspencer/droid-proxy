@@ -14,6 +14,7 @@ type Summary struct {
 	Target   string `json:"target"`
 	Scenario string `json:"scenario"`
 	Baseline bool   `json:"baseline"`
+	Rep      int    `json:"rep"`
 	Skipped  string `json:"skipped,omitempty"`
 	Count    int    `json:"count"`
 	Errors   int    `json:"errors"`
@@ -40,7 +41,7 @@ type Summary struct {
 
 // Summarize reduces a Result to a Summary.
 func Summarize(r Result) Summary {
-	s := Summary{Target: r.Target, Scenario: r.Scenario, Baseline: r.Baseline, Skipped: r.Skipped}
+	s := Summary{Target: r.Target, Scenario: r.Scenario, Baseline: r.Baseline, Rep: r.Rep, Skipped: r.Skipped}
 	if r.Skipped != "" {
 		return s
 	}
@@ -114,14 +115,23 @@ func percentiles(d []time.Duration) (p50, p95, p99 time.Duration) {
 type Report struct {
 	GeneratedAt time.Time `json:"generated_at"`
 	Summaries   []Summary `json:"summaries"`
-	Results     []Result  `json:"results"`
+	// Aggregates is populated when the run used interleaved repetitions.
+	Aggregates []RepAggregate `json:"aggregates,omitempty"`
+	Results    []Result       `json:"results"`
 }
 
 // BuildReport summarizes results into a Report.
 func BuildReport(results []Result) Report {
 	rep := Report{GeneratedAt: time.Now(), Results: results}
+	repeated := false
 	for _, r := range results {
 		rep.Summaries = append(rep.Summaries, Summarize(r))
+		if r.Rep > 0 {
+			repeated = true
+		}
+	}
+	if repeated {
+		rep.Aggregates = Aggregate(rep.Summaries)
 	}
 	return rep
 }
@@ -158,8 +168,13 @@ func deltaPct(v, b time.Duration) string {
 
 // WriteText renders an aligned comparison table grouped by scenario. When a
 // baseline target exists, non-baseline rows show relative deltas for TTFT
-// (streaming) and total latency.
+// (streaming) and total latency. Repeated runs render the cross-rep aggregate
+// table instead of one table per rep.
 func (rep Report) WriteText(w io.Writer) {
+	if len(rep.Aggregates) > 0 {
+		writeAggregates(w, rep.Aggregates)
+		return
+	}
 	byScenario := map[string][]Summary{}
 	var order []string
 	for _, s := range rep.Summaries {
@@ -217,6 +232,11 @@ func (rep Report) WriteText(w io.Writer) {
 
 // WriteMarkdown renders the comparison as GitHub-flavored markdown tables.
 func (rep Report) WriteMarkdown(w io.Writer) {
+	if len(rep.Aggregates) > 0 {
+		fmt.Fprintf(w, "# droid-bench report\n\nGenerated: %s\n", rep.GeneratedAt.Format(time.RFC3339))
+		writeAggregatesMarkdown(w, rep.Aggregates)
+		return
+	}
 	byScenario := map[string][]Summary{}
 	var order []string
 	for _, s := range rep.Summaries {

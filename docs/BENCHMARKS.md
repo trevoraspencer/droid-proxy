@@ -67,6 +67,10 @@ Guidance for live-provider runs:
   requests) for cache scenarios.
 - Use ≥30 requests per scenario and compare p50/p95, not means; wide-area
   network variance dominates single samples.
+- Use `--repeat N` (≥4) for any comparison you intend to act on: it
+  interleaves full passes over the targets (A/B/A/B) and reports paired
+  per-rep deltas with mean±sd, which cancels host/provider drift and puts
+  error bars on the difference.
 - The `cache hit %` column is computed from provider usage counters
   (`cached_tokens` / `cache_read_input_tokens`), so it works on live
   providers exactly as on the mock. On a shared mock run, compare a target's
@@ -139,16 +143,30 @@ Measured with this suite (mock upstream, loopback, quick mode):
 
 The shared proxy engine used by the reference projects (built from its public
 Go module, v7.2.73) was configured with the same mock as an OpenAI-compatible
-provider and measured with identical scenarios. Added latency vs the direct
-baseline (p50):
+provider and measured with identical scenarios using `droid-bench run
+--repeat 6`: six interleaved passes over the target matrix, each target's
+per-rep p50 paired against the same-rep baseline so shared-host drift cancels
+out of the deltas. The engine ran in its lowest-overhead shipped
+configuration (`commercial-mode` enabled, which removes its request-capture
+middleware; stdout discarded — its per-request console log cannot be disabled
+below Info level). Added latency vs the direct baseline, paired p50 deltas
+(mean±sd over 6 reps):
 
 | Scenario | droid-proxy | shared engine |
 |---|---|---|
-| chat-small-nonstream (ttfb) | +6.4% | +8.6% |
-| chat-agentic-stream (ttft) | +6.2% | +15.1% |
-| chat-large-context-nonstream (ttfb) | +18.0% | +40.4% |
-| chat-cache-growth (ttfb) | +6.6% | +24.2% |
-| chat-concurrent-stream ×8 (ttft) | +0.7% | +11.7% |
+| chat-small-nonstream (ttfb) | +9.3%±0.8 | +11.6%±2.1 |
+| chat-agentic-stream (ttft) | +8.6%±1.9 | +14.8%±3.9 |
+| chat-large-context-nonstream (ttfb) | +22.3%±5.4 | +51.9%±8.5 |
+| chat-concurrent-stream ×8 (ttft) | +9.6%±3.9 | +14.8%±5.5 |
+
+droid-proxy is lighter on every scenario; the separation is decisive on
+large-context payloads (where the engine's overhead grows superlinearly with
+body size) and inside the error bars on the small-request and concurrent
+scenarios. An earlier single-pass run had reported droid-proxy at +0.7% ttft
+under concurrency — the repeated, paired measurement shows that was
+single-sample flattery; ~9–10% (≈0.85 ms absolute) is the honest number.
+Equalizing logging did not close the engine's gap, so the difference is not a
+logging artifact.
 
 Both proxies pass every applicable fidelity check (byte-identical chat
 passthrough, deterministic prefix-stable translation, usage/`prompt_cache_key`
@@ -159,8 +177,10 @@ observed: the engine re-serializes response JSON (alphabetized keys) and
 reports the upstream model name instead of the client-facing alias unless its
 force-mapping option is enabled, and it fetches remote model catalogs at
 startup. Percentages are loopback-relative: against a real provider, both
-proxies' absolute overhead (≈0.4–2.7 ms here) is noise; the fidelity
-properties are what carry over.
+proxies' absolute overhead (≈0.5–3.6 ms here) is noise; the fidelity
+properties are what carry over. Not covered by this comparison: OAuth paths
+(need real accounts), TLS/HTTP2 connection behavior (plaintext loopback), and
+the macOS wrapper apps' own relay layers.
 
 Two fixes shipped with the suite (both were found by writing it):
 

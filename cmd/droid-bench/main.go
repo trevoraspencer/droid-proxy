@@ -110,6 +110,7 @@ func runBench(args []string) {
 	configPath := fs.String("config", "", "bench config YAML (see 'droid-bench example-config')")
 	jsonOut := fs.String("json", "", "write full report JSON to this file")
 	mdOut := fs.String("md", "", "write markdown report to this file")
+	repeat := fs.Int("repeat", 1, "interleaved repetitions of the full target matrix; >1 reports paired deltas with mean±sd")
 	quiet := fs.Bool("quiet", false, "suppress progress output")
 	_ = fs.Parse(args)
 
@@ -120,7 +121,7 @@ func runBench(args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	runner := &harness.Runner{Config: *cfg}
+	runner := &harness.Runner{Config: *cfg, Repeat: *repeat}
 	if !*quiet {
 		runner.Log = os.Stderr
 	}

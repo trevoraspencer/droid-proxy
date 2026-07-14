@@ -18,6 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   targets, CI-covered fidelity tests, and [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 - Micro-benchmarks for the translation, SSE pump, and payload-override hot
   paths.
+- `droid-bench run --repeat N`: interleaved repetitions of the target matrix
+  with paired per-rep deltas (mean±sd) so comparisons carry error bars and
+  shared-host drift cancels out.
 
 - `capabilities.factory_reasoning_effort` metadata and Factory settings sync
   support so GPT-5.6 and Grok 4.5 custom models expose reasoning controls in
