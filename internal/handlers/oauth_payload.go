@@ -192,6 +192,52 @@ func stripReasoningInputItems(payload []byte) ([]byte, bool) {
 	return next, true
 }
 
+// dropEncryptedReasoningInclude removes the reasoning.encrypted_content
+// include marker Factory sends when replaying reasoning items. Used on the
+// chat-translation path, where the marker (like the items themselves) has no
+// chat equivalent. Other include values are left in place so the translator's
+// strict validation still rejects them.
+func dropEncryptedReasoningInclude(payload []byte) []byte {
+	inc := gjson.GetBytes(payload, "include")
+	if !inc.Exists() {
+		return payload
+	}
+	if inc.Type == gjson.String {
+		if inc.String() != xaiEncryptedReasoningInclude {
+			return payload
+		}
+		if next, err := sjson.DeleteBytes(payload, "include"); err == nil {
+			return next
+		}
+		return payload
+	}
+	if !inc.IsArray() {
+		return payload
+	}
+	kept := make([]string, 0, len(inc.Array()))
+	removed := false
+	for _, v := range inc.Array() {
+		if v.String() == xaiEncryptedReasoningInclude {
+			removed = true
+			continue
+		}
+		kept = append(kept, v.String())
+	}
+	if !removed {
+		return payload
+	}
+	if len(kept) == 0 {
+		if next, err := sjson.DeleteBytes(payload, "include"); err == nil {
+			return next
+		}
+		return payload
+	}
+	if next, err := sjson.SetBytes(payload, "include", kept); err == nil {
+		return next
+	}
+	return payload
+}
+
 func xaiSessionID(h http.Header) string {
 	for _, v := range []string{
 		h.Get("X-Session-ID"),

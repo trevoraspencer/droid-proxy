@@ -34,6 +34,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- The encrypted-reasoning strip-and-replay recovery for mixed-model Factory
+  threads now also covers the API-key `openai-responses` path, and the
+  `openai-chat` translation path drops reasoning items and Factory's
+  `reasoning.encrypted_content` include marker before translation (a
+  chat-backed model never mints reasoning items, so any it receives are
+  foreign by construction and previously failed the request at the proxy
+  with "unsupported Responses field/input item"). Other unsupported include
+  values are still rejected.
 - Mixed-model Factory threads no longer fail with an empty turn (Droid's
   generic BYOK error). Factory replays reasoning items minted by one provider
   into threads continued on another — both look like the same `openai`
