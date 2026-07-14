@@ -135,6 +135,33 @@ Measured with this suite (mock upstream, loopback, quick mode):
   conversation prefixes on all three paths, `cache_control` and usage
   passthrough, intact stream framing.
 
+### Three-way head-to-head (in-container, mock upstream)
+
+The shared proxy engine used by the reference projects (built from its public
+Go module, v7.2.73) was configured with the same mock as an OpenAI-compatible
+provider and measured with identical scenarios. Added latency vs the direct
+baseline (p50):
+
+| Scenario | droid-proxy | shared engine |
+|---|---|---|
+| chat-small-nonstream (ttfb) | +6.4% | +8.6% |
+| chat-agentic-stream (ttft) | +6.2% | +15.1% |
+| chat-large-context-nonstream (ttfb) | +18.0% | +40.4% |
+| chat-cache-growth (ttfb) | +6.6% | +24.2% |
+| chat-concurrent-stream ×8 (ttft) | +0.7% | +11.7% |
+
+Both proxies pass every applicable fidelity check (byte-identical chat
+passthrough, deterministic prefix-stable translation, usage/`prompt_cache_key`
+passthrough, stream integrity) — caching correctness does not differentiate
+them on these paths; overhead and footprint do. Resident memory after the run:
+droid-proxy ~21 MB vs ~48 MB; binary ~35 MB vs ~56 MB. Behavioral differences
+observed: the engine re-serializes response JSON (alphabetized keys) and
+reports the upstream model name instead of the client-facing alias unless its
+force-mapping option is enabled, and it fetches remote model catalogs at
+startup. Percentages are loopback-relative: against a real provider, both
+proxies' absolute overhead (≈0.4–2.7 ms here) is noise; the fidelity
+properties are what carry over.
+
 Two fixes shipped with the suite (both were found by writing it):
 
 - `extra_args` are now applied in sorted key order, making upstream bodies
