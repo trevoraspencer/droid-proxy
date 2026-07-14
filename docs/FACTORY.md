@@ -117,6 +117,49 @@ models:
 
 A mismatch causes Droid to hit the wrong endpoint and requests will fail.
 
+## Mixed-model threads: the cross-provider artifact invariant
+
+Droid identifies a custom model's provider family by `(provider, baseUrl)`.
+Every proxy model shares the same base URL, so Droid cannot tell the
+upstreams apart and replays provider-minted opaque artifacts — Responses
+reasoning items with `encrypted_content`, thinking signatures — across model
+switches inside one thread. Those artifacts are scoped to the provider (and
+key epoch) that minted them: OpenAI cannot decrypt xAI's blobs, xAI cannot
+decrypt OpenAI's, and a provider may reject its own blobs after a key
+rotation. Droid's subagent and compaction model settings mix models in one
+thread routinely, so this is normal traffic, not an edge case.
+
+The invariant this proxy maintains:
+
+> **Provider-minted opaque artifacts never usefully cross upstreams. When a
+> client replays them into the wrong upstream, the proxy must recover the
+> request — by dropping the foreign artifacts — rather than fail the turn.
+> Any upstream error the proxy does relay inside a stream must also be
+> logged, because streaming relays are invisible in access logs (the HTTP
+> status is already committed as 200).**
+
+How that is implemented today:
+
+- **Responses upstreams** (`codex-responses`, `xai-responses`,
+  `openai-responses`): when an upstream rejects a request with a
+  payload-shape 4xx and the payload carries reasoning items, the proxy strips
+  the reasoning input items and replays the request once. Auth and rate-limit
+  statuses (401/403/407/429) trigger the replay only when the upstream
+  explicitly blames `encrypted_content`. Exactly one replay per request; a
+  persistent rejection is relayed unchanged.
+- **Chat-translation path** (`openai-chat` behind `/v1/responses`): reasoning
+  items and Factory's `reasoning.encrypted_content` include marker are
+  dropped before translation — a chat upstream never mints reasoning items,
+  so any it receives are foreign by construction.
+- Dropping reasoning items is safe recovery: they are optional context, and
+  models run without them wherever `factory_reasoning: drop` applies.
+
+Changes that touch request translation, routing, or retry behavior should be
+tested against this invariant (see the strip-retry tests in
+`internal/handlers/`). If a new provider mints its own opaque replay
+artifacts, it must either fit the strip-and-replay recovery or document why
+it cannot.
+
 ## Checking agent readiness
 
 Before relying on a model for tool-using agent workflows, confirm it is
