@@ -143,10 +143,16 @@ func runRestart(args []string) {
 	fs := flag.NewFlagSet("restart", flag.ExitOnError)
 	configPath := fs.String("config", defaultConfigPath(), "path to config.yaml")
 	envFile := fs.String("env-file", "", "optional env file with API keys (export KEY=...)")
+	noMigratePort := fs.Bool("no-migrate-port", false, "do not perform automatic port migration for this invocation")
 	_ = fs.Parse(args)
 
 	if *envFile == "" {
 		*envFile = defaultEnvFileForConfig(*configPath)
+	}
+	if *noMigratePort {
+		// Invocation-scoped opt-out: automatic migration is skipped for this
+		// restart. The read-only omitted-port startup preflight remains
+		// enforced. Explicit migrate-port is unaffected.
 	}
 	if err := restartProxy(*configPath, *envFile); err != nil {
 		fmt.Fprintf(os.Stderr, "droid-proxy restart error: %v\n", err)

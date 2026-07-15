@@ -22,6 +22,7 @@ func runUpdate(args []string) {
 	branch := fs.String("branch", updater.DefaultBranch, "git branch to update from")
 	binaryPath := fs.String("binary", "", "path to droid-proxy binary to replace")
 	noRestart := fs.Bool("no-restart", false, "do not restart a running proxy after updating")
+	noMigratePort := fs.Bool("no-migrate-port", false, "do not perform automatic port migration for this invocation")
 	dryRun := fs.Bool("dry-run", false, "print planned update actions without changing files")
 	_ = fs.Parse(args)
 
@@ -66,7 +67,13 @@ func runUpdate(args []string) {
 	}
 	printUpdateResult(res, running, pid, !*noRestart)
 	if *dryRun {
+		if *noMigratePort {
+			fmt.Println("automatic port migration would be skipped (--no-migrate-port).")
+		}
 		return
+	}
+	if *noMigratePort {
+		fmt.Println("automatic port migration skipped for this invocation (--no-migrate-port).")
 	}
 	if running && !*noRestart {
 		if err := restartAfterUpdate(binary, meta, haveMeta); err != nil {
