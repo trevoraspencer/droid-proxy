@@ -201,6 +201,9 @@ func (m model) viewPickModel() string {
 func (m model) viewForm() string {
 	var b strings.Builder
 	b.WriteString(m.header("New model — " + m.sel.label))
+	if m.discoverFeedback != "" {
+		b.WriteString(warnStyle.Render(m.discoverFeedback) + "\n\n")
+	}
 	for i, f := range m.form {
 		marker := "  "
 		label := f.label

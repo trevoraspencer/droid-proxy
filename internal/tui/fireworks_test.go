@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -559,5 +561,185 @@ func TestFirePassModelRoundTripPersistsProfile(t *testing.T) {
 	}
 	if got.BaseURL != "https://api.fireworks.ai/inference/v1" {
 		t.Errorf("BaseURL = %q", got.BaseURL)
+	}
+}
+
+// TestDiscoveryErrorSetsActionableFeedback verifies that when Standard
+// discovery returns a non-nil error, the TUI sets a concise actionable
+// fallback message before presenting the still-usable manual model form.
+func TestDiscoveryErrorSetsActionableFeedback(t *testing.T) {
+	m := model{
+		discoverGeneration: 1,
+	}
+	msg := discoverMsg{
+		err:        fmt.Errorf("provider returned 401 Unauthorized"),
+		ids:        nil,
+		generation: 1,
+	}
+	next, cmd := m.onDiscover(msg)
+	got := next.(model)
+	if got.screen != screenForm {
+		t.Fatalf("screen = %v, want screenForm", got.screen)
+	}
+	if cmd == nil {
+		t.Errorf("expected non-nil cmd for form blink")
+	}
+	if got.discoverFeedback == "" {
+		t.Error("expected non-empty discoverFeedback for error case")
+	}
+}
+
+// TestDiscoveryEmptyResultsSetsActionableFeedback verifies that when
+// Standard discovery returns no models without an error, the TUI sets a
+// concise actionable fallback message before the manual model form.
+func TestDiscoveryEmptyResultsSetsActionableFeedback(t *testing.T) {
+	m := model{
+		discoverGeneration: 1,
+	}
+	msg := discoverMsg{
+		err:        nil,
+		ids:        []string{},
+		generation: 1,
+	}
+	next, cmd := m.onDiscover(msg)
+	got := next.(model)
+	if got.screen != screenForm {
+		t.Fatalf("screen = %v, want screenForm", got.screen)
+	}
+	if cmd == nil {
+		t.Errorf("expected non-nil cmd for form blink")
+	}
+	if got.discoverFeedback == "" {
+		t.Error("expected non-empty discoverFeedback for empty results case")
+	}
+}
+
+// TestDiscoverySuccessClearsFeedback verifies that a successful discovery
+// does not set any fallback feedback.
+func TestDiscoverySuccessClearsFeedback(t *testing.T) {
+	m := model{
+		discoverGeneration: 1,
+	}
+	msg := discoverMsg{
+		err:        nil,
+		ids:        []string{"model-a", "model-b"},
+		generation: 1,
+	}
+	next, _ := m.onDiscover(msg)
+	got := next.(model)
+	if got.discoverFeedback != "" {
+		t.Errorf("expected empty discoverFeedback on success, got %q", got.discoverFeedback)
+	}
+}
+
+// TestDiscoveryFeedbackIsSecretSafe verifies that the fallback feedback for
+// error and empty cases never includes raw error text, URLs, HTTP status
+// details, response bodies, or credential sentinels.
+func TestDiscoveryFeedbackIsSecretSafe(t *testing.T) {
+	sensitiveError := fmt.Errorf("provider returned 500 Internal Server Error at https://api.fireworks.ai/inference/v1/models")
+	secrets := []string{
+		"https://api.fireworks.ai",
+		"500",
+		"Internal Server Error",
+		"/inference/v1/models",
+		"fw_testsecret",
+		"fpk_testsecret",
+	}
+	checks := []struct {
+		name string
+		msg  discoverMsg
+	}{
+		{"error", discoverMsg{err: sensitiveError, generation: 1}},
+		{"empty", discoverMsg{ids: []string{}, generation: 1}},
+	}
+	for _, tc := range checks {
+		t.Run(tc.name, func(t *testing.T) {
+			m := model{discoverGeneration: 1}
+			next, _ := m.onDiscover(tc.msg)
+			got := next.(model)
+			if got.discoverFeedback == "" {
+				t.Fatal("expected non-empty discoverFeedback")
+			}
+			for _, secret := range secrets {
+				if strings.Contains(got.discoverFeedback, secret) {
+					t.Errorf("discoverFeedback leaked %q: %q", secret, got.discoverFeedback)
+				}
+			}
+			if !strings.Contains(got.discoverFeedback, "manual") {
+				t.Errorf("discoverFeedback should mention manual entry: %q", got.discoverFeedback)
+			}
+		})
+	}
+}
+
+// TestDiscoveryErrorFeedbackDistinctFromEmpty verifies that error and empty
+// cases produce distinct feedback so the user can tell which situation
+// occurred.
+func TestDiscoveryErrorFeedbackDistinctFromEmpty(t *testing.T) {
+	m1 := model{discoverGeneration: 1}
+	next1, _ := m1.onDiscover(discoverMsg{err: fmt.Errorf("fail"), generation: 1})
+	errMsg := next1.(model).discoverFeedback
+
+	m2 := model{discoverGeneration: 1}
+	next2, _ := m2.onDiscover(discoverMsg{ids: []string{}, generation: 1})
+	emptyMsg := next2.(model).discoverFeedback
+
+	if errMsg == emptyMsg {
+		t.Errorf("error feedback (%q) should differ from empty feedback (%q)", errMsg, emptyMsg)
+	}
+}
+
+// TestStaleDiscoveryErrorDoesNotSetFeedback verifies that a stale discovery
+// result with an error does not set feedback or change the current screen.
+func TestStaleDiscoveryErrorDoesNotSetFeedback(t *testing.T) {
+	m := model{
+		screen:             screenDashboard,
+		discoverGeneration: 2,
+	}
+	msg := discoverMsg{
+		err:        fmt.Errorf("provider returned 500"),
+		ids:        nil,
+		generation: 1, // stale
+	}
+	next, _ := m.onDiscover(msg)
+	got := next.(model)
+	if got.screen != screenDashboard {
+		t.Errorf("screen = %v, want screenDashboard (stale ignored)", got.screen)
+	}
+	if got.discoverFeedback != "" {
+		t.Errorf("stale discovery should not set feedback, got %q", got.discoverFeedback)
+	}
+}
+
+// TestViewFormRendersDiscoverFeedback verifies the form view includes the
+// discovery fallback message when set.
+func TestViewFormRendersDiscoverFeedback(t *testing.T) {
+	ka, _ := config.LookupKnownAuth("fireworks")
+	sel := providerChoice{kind: pkKnown, ka: ka, label: ka.Label()}
+	m := newFormModel(t, sel, map[string]string{
+		"upstream_model": "accounts/fireworks/models/test",
+		"alias":          "test",
+	})
+	m.discoverFeedback = "Discovery was unavailable. Enter a model ID manually."
+	view := m.viewForm()
+	if !strings.Contains(view, "Discovery was unavailable") {
+		t.Errorf("viewForm should render discoverFeedback, got:\n%s", view)
+	}
+}
+
+// TestViewFormOmitsFeedbackWhenEmpty verifies the form view does not show a
+// feedback section when discoverFeedback is empty (e.g. manual entry from
+// static catalog).
+func TestViewFormOmitsFeedbackWhenEmpty(t *testing.T) {
+	ka, _ := config.LookupKnownAuth("fireworks")
+	sel := providerChoice{kind: pkKnown, ka: ka, label: ka.Label()}
+	m := newFormModel(t, sel, map[string]string{
+		"upstream_model": "accounts/fireworks/models/test",
+		"alias":          "test",
+	})
+	m.discoverFeedback = ""
+	view := m.viewForm()
+	if strings.Contains(strings.ToLower(view), "discovery was unavailable") {
+		t.Errorf("viewForm should not render discovery feedback when empty")
 	}
 }

@@ -99,10 +99,23 @@ func (m model) onDiscover(msg discoverMsg) (tea.Model, tea.Cmd) {
 	m.pickCursor = 0
 	if msg.err != nil || len(msg.ids) == 0 {
 		m.buildForm()
+		m.discoverFeedback = discoveryFallbackMessage(msg.err)
 		m.screen = screenForm
 		return m, textinput.Blink
 	}
+	m.discoverFeedback = ""
 	m.pickItems = append([]string{manualEntryLabel}, msg.ids...)
 	m.screen = screenPickModel
 	return m, nil
+}
+
+// discoveryFallbackMessage returns a concise, actionable, generic, and
+// secret-safe message for display when best-effort model discovery fails or
+// returns no models. It never includes the raw error, URLs, HTTP status
+// details, response bodies, or credentials.
+func discoveryFallbackMessage(err error) string {
+	if err != nil {
+		return "Model discovery was unavailable. Enter a model ID manually below."
+	}
+	return "No models were found via discovery. Enter a model ID manually below."
 }

@@ -83,7 +83,8 @@ type model struct {
 
 	servingPath string // "standard", "priority", "fast", or "" when not from a Fireworks serving-path flow
 
-	discoverGeneration int // incremented to invalidate stale discovery results
+	discoverGeneration int    // incremented to invalidate stale discovery results
+	discoverFeedback   string // generic actionable message shown when best-effort discovery fails or returns no models
 
 	keyInput textinput.Model
 	keyEnv   string

@@ -284,6 +284,7 @@ func (m model) keyPickModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *model) buildForm() {
 	m.oauthPreset = nil
+	m.discoverFeedback = ""
 	var fields []formField
 	add := func(key, label, placeholder string, optional bool) {
 		ti := textinput.New()
