@@ -202,3 +202,253 @@ func TestReservedPortAudit_LiveE2eCleanupExcludesReserved(t *testing.T) {
 		}
 	}
 }
+
+// --- Executable-action classifier framework ---
+//
+// The following types and functions provide reusable classifiers that detect
+// executable reserved-port actions across different executable file types.
+// Both file-scanning tests and focused synthetic tests use these classifiers.
+
+// actionClassifier checks a single line for an executable action targeting a
+// reserved port and returns true when the line should be refused.
+type actionClassifier struct {
+	name  string
+	check func(line string) bool
+}
+
+// classifyLine returns the name of the first matching classifier, or "" if
+// no classifier matches.
+func classifyLine(line string, classifiers []actionClassifier) string {
+	for _, c := range classifiers {
+		if c.check(line) {
+			return c.name
+		}
+	}
+	return ""
+}
+
+// isMakefile returns true for Makefile, makefile, GNUmakefile, or *.mk files.
+func isMakefile(rel string) bool {
+	switch filepath.Base(rel) {
+	case "Makefile", "makefile", "GNUmakefile":
+		return true
+	}
+	return filepath.Ext(rel) == ".mk"
+}
+
+// isPythonFile returns true for *.py files.
+func isPythonFile(rel string) bool {
+	return filepath.Ext(rel) == ".py"
+}
+
+// Precompiled patterns shared across shell-like contexts (shell scripts and
+// Makefile recipes) and Python classifiers.
+var (
+	pidOnlyLsofRe   = regexp.MustCompile(`lsof\s+-[a-zA-Z]*t[a-zA-Z]*`)
+	curlOrWgetRe    = regexp.MustCompile(`\b(curl|wget)\b`)
+	reservedURLRe   = regexp.MustCompile(`https?://[^\s"']*:(8787|9787)\b`)
+	killPortArrayRe = regexp.MustCompile(`(?i)(KILL_PORTS|KILL_PORT|STOP_PORTS|CLEANUP_PORTS)\s*[=(]\s*([^)]*)`)
+)
+
+// Precompiled Python-specific patterns.
+var (
+	pythonSocketRe   = regexp.MustCompile(`\.(connect|bind)\s*\(`)
+	pythonNetLibRe   = regexp.MustCompile(`\b(requests|urllib)\b`)
+	pythonHTTPConnRe = regexp.MustCompile(`HTTPConnection\s*\(`)
+	subprocessCallRe = regexp.MustCompile(`subprocess\.\w+\s*\(`)
+	curlOrWgetArgRe  = regexp.MustCompile(`["'](curl|wget)["']`)
+	lsofArgRe        = regexp.MustCompile(`["']lsof["']`)
+	pythonPidFlagRe  = regexp.MustCompile(`["']\-[a-zA-Z]*t[a-zA-Z]*["']`)
+)
+
+// makefileClassifiers detects executable reserved-port actions in Makefile
+// recipes. Since Make recipes are shell commands, these patterns mirror the
+// shell-script audit: curl/wget URLs, PID-only lsof, and kill-port arrays.
+func makefileClassifiers() []actionClassifier {
+	return []actionClassifier{
+		{
+			name: "curl/wget with reserved-port URL",
+			check: func(line string) bool {
+				return curlOrWgetRe.MatchString(line) && reservedURLRe.MatchString(line)
+			},
+		},
+		{
+			name: "PID-only lsof with literal reserved port",
+			check: func(line string) bool {
+				return pidOnlyLsofRe.MatchString(line) && reservedPortLiteral.MatchString(line)
+			},
+		},
+		{
+			name: "kill/cleanup port array with reserved port",
+			check: func(line string) bool {
+				m := killPortArrayRe.FindStringSubmatch(line)
+				if m == nil {
+					return false
+				}
+				return reservedPortLiteral.MatchString(m[2])
+			},
+		},
+	}
+}
+
+// pythonClassifiers detects executable reserved-port actions in Python files:
+// network/socket operations, HTTP library calls, subprocess curl/wget, and
+// subprocess PID-only lsof.
+func pythonClassifiers() []actionClassifier {
+	return []actionClassifier{
+		{
+			name: "socket connect/bind with reserved port",
+			check: func(line string) bool {
+				return pythonSocketRe.MatchString(line) && reservedPortLiteral.MatchString(line)
+			},
+		},
+		{
+			name: "requests/urllib with reserved-port URL",
+			check: func(line string) bool {
+				return pythonNetLibRe.MatchString(line) && reservedURLRe.MatchString(line)
+			},
+		},
+		{
+			name: "HTTPConnection with reserved port",
+			check: func(line string) bool {
+				return pythonHTTPConnRe.MatchString(line) && reservedPortLiteral.MatchString(line)
+			},
+		},
+		{
+			name: "subprocess curl/wget with reserved port",
+			check: func(line string) bool {
+				return subprocessCallRe.MatchString(line) &&
+					curlOrWgetArgRe.MatchString(line) &&
+					reservedPortLiteral.MatchString(line)
+			},
+		},
+		{
+			name: "subprocess PID-only lsof with reserved port",
+			check: func(line string) bool {
+				return subprocessCallRe.MatchString(line) &&
+					lsofArgRe.MatchString(line) &&
+					pythonPidFlagRe.MatchString(line) &&
+					reservedPortLiteral.MatchString(line)
+			},
+		},
+	}
+}
+
+// --- Makefile file-scanning audit ---
+
+// TestReservedPortAudit_MakefileExcludesReserved scans all tracked Makefile,
+// makefile, GNUmakefile, and *.mk files for executable actions targeting a
+// reserved port. Makefile recipes are shell commands, so the same curl/wget,
+// PID-only lsof, and kill-port-array patterns apply.
+func TestReservedPortAudit_MakefileExcludesReserved(t *testing.T) {
+	files := gitTrackedFiles(t)
+	classifiers := makefileClassifiers()
+
+	for _, rel := range files {
+		if !isMakefile(rel) {
+			continue
+		}
+		lines := readTrackedLines(t, rel)
+		for i, line := range lines {
+			if matched := classifyLine(line, classifiers); matched != "" {
+				t.Fatalf("%s:%d: %s: %s",
+					rel, i+1, matched, strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
+// --- Python file-scanning audit ---
+
+// TestReservedPortAudit_PythonExcludesReserved scans all tracked Python files
+// for executable network/socket, subprocess curl/wget, and PID-only lsof
+// actions targeting a reserved port.
+func TestReservedPortAudit_PythonExcludesReserved(t *testing.T) {
+	files := gitTrackedFiles(t)
+	classifiers := pythonClassifiers()
+
+	for _, rel := range files {
+		if !isPythonFile(rel) {
+			continue
+		}
+		lines := readTrackedLines(t, rel)
+		for i, line := range lines {
+			if matched := classifyLine(line, classifiers); matched != "" {
+				t.Fatalf("%s:%d: %s: %s",
+					rel, i+1, matched, strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
+// --- Synthetic classifier tests ---
+//
+// These focused tests verify the classifiers independently of the repository's
+// tracked files. They ensure the patterns correctly refuse executable actions
+// targeting reserved ports and allow fixture/comment-only values.
+
+func TestReservedPortAudit_MakefileClassifierSynthetic(t *testing.T) {
+	classifiers := makefileClassifiers()
+
+	refuseCases := []string{
+		`	curl http://localhost:8787/health`,
+		`	wget http://127.0.0.1:9787/`,
+		`	lsof -ti tcp:8787 | xargs kill`,
+		`	KILL_PORTS=(8787 9787)`,
+		`	STOP_PORTS=9787`,
+	}
+	allowCases := []string{
+		`# Default port is 9787`,
+		`DEFAULT_PORT ?= 9787`,
+		`	@echo "Proxy on port 9787"`,
+		`PROXY_PORT ?= 9787`,
+		`	curl $(PROXY_URL)`, // variable-based URL is safe
+	}
+
+	for _, line := range refuseCases {
+		if matched := classifyLine(line, classifiers); matched == "" {
+			t.Errorf("refuse line not caught:\n  %s", line)
+		}
+	}
+	for _, line := range allowCases {
+		if matched := classifyLine(line, classifiers); matched != "" {
+			t.Errorf("allow line falsely caught by %q:\n  %s", matched, line)
+		}
+	}
+}
+
+func TestReservedPortAudit_PythonClassifierSynthetic(t *testing.T) {
+	classifiers := pythonClassifiers()
+
+	refuseCases := []string{
+		`sock.connect(("127.0.0.1", 8787))`,
+		`s.bind(("0.0.0.0", 9787))`,
+		`requests.get("http://localhost:8787/health")`,
+		`urllib.request.urlopen("http://127.0.0.1:9787")`,
+		`http.client.HTTPConnection("localhost", 8787)`,
+		`subprocess.run(["curl", "http://localhost:9787"])`,
+		`subprocess.check_output(["wget", "http://127.0.0.1:8787"])`,
+		`subprocess.run(["lsof", "-ti", "tcp:8787"])`,
+		`subprocess.check_output(["lsof", "-t", "-i", ":9787"])`,
+	}
+	allowCases := []string{
+		`# Default port is 9787`,
+		`DEFAULT_PORT = "9787"`,
+		`expected_url = "http://127.0.0.1:9787"`,
+		`assert port == 9787`,
+		`# Connect to port 9787 for testing`,
+		`subprocess.run(["curl", proxy_url])`, // variable, no literal port
+		`requests.get(proxy_url)`,             // variable, no literal port
+	}
+
+	for _, line := range refuseCases {
+		if matched := classifyLine(line, classifiers); matched == "" {
+			t.Errorf("refuse line not caught:\n  %s", line)
+		}
+	}
+	for _, line := range allowCases {
+		if matched := classifyLine(line, classifiers); matched != "" {
+			t.Errorf("allow line falsely caught by %q:\n  %s", matched, line)
+		}
+	}
+}

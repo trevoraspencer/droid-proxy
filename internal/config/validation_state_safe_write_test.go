@@ -33,26 +33,51 @@ type validationStateSchema struct {
 	} `json:"assertions"`
 }
 
-// validateValidationState parses raw JSON and checks the minimum schema
-// invariant: a top-level "assertions" object whose entries each have a
-// non-empty "status". This mirrors the cardinality check that prevents an
-// empty or malformed file from replacing a valid one.
-func validateValidationState(t *testing.T, raw []byte) {
-	t.Helper()
+// validAssertionStatuses defines the set of known assertion status values.
+// Any status outside this set is rejected by the shared schema validator.
+var validAssertionStatuses = map[string]bool{
+	"passed":  true,
+	"pending": true,
+	"failed":  true,
+	"blocked": true,
+}
+
+// validateValidationStateSchema is the one shared error-returning schema
+// validator for validation-state.json. It rejects invalid JSON, a missing or
+// empty assertions map, empty assertion statuses, and unknown assertion
+// statuses. It returns an error rather than calling t.Fatalf so that callers
+// can decide how to handle validation failures (e.g. clean up temp files and
+// leave the destination untouched).
+func validateValidationStateSchema(raw []byte) error {
 	var state validationStateSchema
 	if err := json.Unmarshal(raw, &state); err != nil {
-		t.Fatalf("validation-state output is not valid JSON: %v", err)
+		return fmt.Errorf("invalid JSON: %w", err)
 	}
 	if state.Assertions == nil {
-		t.Fatal("validation-state output has no assertions map")
+		return fmt.Errorf("missing assertions map")
 	}
 	if len(state.Assertions) == 0 {
-		t.Fatal("validation-state output has zero assertions (cardinality check)")
+		return fmt.Errorf("zero assertions (cardinality check)")
 	}
 	for key, entry := range state.Assertions {
 		if entry.Status == "" {
-			t.Fatalf("assertion %q has empty status", key)
+			return fmt.Errorf("assertion %q has empty status", key)
 		}
+		if !validAssertionStatuses[entry.Status] {
+			return fmt.Errorf("assertion %q has unknown status %q", key, entry.Status)
+		}
+	}
+	return nil
+}
+
+// validateValidationState is a test-helper wrapper around the shared
+// validateValidationStateSchema that fatals on error. Production callers
+// must use validateValidationStateSchema directly so they can clean up
+// temporary output and preserve the destination on refusal.
+func validateValidationState(t *testing.T, raw []byte) {
+	t.Helper()
+	if err := validateValidationStateSchema(raw); err != nil {
+		t.Fatalf("validation-state schema error: %v", err)
 	}
 }
 
@@ -83,24 +108,17 @@ func safeWriteValidationState(t *testing.T, dest string, transformed []byte) err
 		return fmt.Errorf("close temp: %w", err)
 	}
 
-	// Step 2: read back and validate the temp output.
+	// Step 2: validate the temp output through the one shared error-returning
+	// schema validator. This catches invalid JSON, missing/empty assertions,
+	// empty statuses, and unknown statuses before atomic replacement.
 	checkRaw, err := os.ReadFile(tmpName)
 	if err != nil {
 		cleanup()
 		return fmt.Errorf("read temp: %w", err)
 	}
-	var check validationStateSchema
-	if err := json.Unmarshal(checkRaw, &check); err != nil {
+	if err := validateValidationStateSchema(checkRaw); err != nil {
 		cleanup()
-		return fmt.Errorf("parse temp: %w", err)
-	}
-	if check.Assertions == nil {
-		cleanup()
-		return fmt.Errorf("temp output has no assertions map")
-	}
-	if len(check.Assertions) == 0 {
-		cleanup()
-		return fmt.Errorf("temp output has zero assertions (cardinality check)")
+		return fmt.Errorf("schema validation: %w", err)
 	}
 
 	// Step 3: atomic rename only after all checks pass.
@@ -285,5 +303,184 @@ func TestValidationStateSafeWrite_TempFileIsSameDirectory(t *testing.T) {
 	}
 	if !strings.Contains(string(result), "passed") {
 		t.Fatalf("destination not updated: %s", result)
+	}
+}
+
+// --- Shared schema validator tests ---
+//
+// The shared error-returning validator must reject empty and unknown statuses
+// before atomic replacement. These tests verify the validator directly so
+// callers can rely on its contract independently of the safe-write wrapper.
+
+func TestValidationStateSchema_AcceptsKnownStatuses(t *testing.T) {
+	for _, status := range []string{"passed", "pending", "failed", "blocked"} {
+		raw := []byte(fmt.Sprintf(`{"assertions":{"VAL-X-001":{"status":%q}}}`, status))
+		if err := validateValidationStateSchema(raw); err != nil {
+			t.Fatalf("status %q should be accepted: %v", status, err)
+		}
+	}
+}
+
+func TestValidationStateSchema_RejectsEmptyStatus(t *testing.T) {
+	raw := []byte(`{"assertions":{"VAL-X-001":{"status":""}}}`)
+	err := validateValidationStateSchema(raw)
+	if err == nil {
+		t.Fatal("expected error for empty status")
+	}
+	if !strings.Contains(err.Error(), "empty status") {
+		t.Fatalf("error should mention empty status: %v", err)
+	}
+}
+
+func TestValidationStateSchema_RejectsUnknownStatus(t *testing.T) {
+	raw := []byte(`{"assertions":{"VAL-X-001":{"status":"totally-bogus"}}}`)
+	err := validateValidationStateSchema(raw)
+	if err == nil {
+		t.Fatal("expected error for unknown status")
+	}
+	if !strings.Contains(err.Error(), "unknown status") {
+		t.Fatalf("error should mention unknown status: %v", err)
+	}
+}
+
+func TestValidationStateSchema_RejectsMissingStatus(t *testing.T) {
+	raw := []byte(`{"assertions":{"VAL-X-001":{}}}`)
+	err := validateValidationStateSchema(raw)
+	if err == nil {
+		t.Fatal("expected error for missing status field")
+	}
+}
+
+func TestValidationStateSchema_ReturnsErrorNotFatal(t *testing.T) {
+	// The shared validator must return an error rather than calling t.Fatalf
+	// so callers can decide cleanup strategy. This test verifies the function
+	// signature returns a non-nil error for all rejection cases without
+	// requiring a *testing.T parameter.
+	cases := [][]byte{
+		[]byte(`INVALID`),
+		[]byte(`{"assertions":{}}`),
+		[]byte(`{"metadata":{}}`),
+		[]byte(`{"assertions":{"X":{"status":""}}}`),
+		[]byte(`{"assertions":{"X":{"status":"bogus"}}}`),
+	}
+	for i, raw := range cases {
+		err := validateValidationStateSchema(raw)
+		if err == nil {
+			t.Fatalf("case %d: expected non-nil error", i)
+		}
+	}
+}
+
+// --- Safe-write status refusal tests ---
+//
+// These tests verify that when the shared schema validator rejects empty or
+// unknown statuses, the safe-write wrapper preserves the exact destination
+// bytes and removes temporary output.
+
+func TestValidationStateSafeWrite_EmptyStatusDoesNotCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "validation-state.json")
+
+	original := `{"assertions":{"VAL-PORT-024":{"status":"pending"}}}`
+	originalBytes := []byte(original)
+	if err := os.WriteFile(dest, originalBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A transform that produces valid JSON with an empty status.
+	emptyStatus := []byte(`{"assertions":{"VAL-PORT-024":{"status":""}}}`)
+
+	err := safeWriteValidationState(t, dest, emptyStatus)
+	if err == nil {
+		t.Fatal("expected error for empty status")
+	}
+
+	// The destination must be byte-identical to the original.
+	result, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(result) != original {
+		t.Fatalf("destination corrupted by empty-status refusal:\ngot:  %s\nwant: %s", result, original)
+	}
+
+	// No temp files left behind.
+	assertNoTempFiles(t, dir)
+}
+
+func TestValidationStateSafeWrite_UnknownStatusDoesNotCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "validation-state.json")
+
+	original := `{"assertions":{"VAL-PORT-024":{"status":"pending"},"VAL-PORT-001":{"status":"passed"}}}`
+	if err := os.WriteFile(dest, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A transform that produces valid JSON with an unknown status value.
+	unknownStatus := []byte(`{"assertions":{"VAL-PORT-024":{"status":"bogus-value"},"VAL-PORT-001":{"status":"passed"}}}`)
+
+	err := safeWriteValidationState(t, dest, unknownStatus)
+	if err == nil {
+		t.Fatal("expected error for unknown status")
+	}
+
+	// The destination must be byte-identical to the original.
+	result, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(result) != original {
+		t.Fatalf("destination corrupted by unknown-status refusal:\ngot:  %s\nwant: %s", result, original)
+	}
+
+	// No temp files left behind.
+	assertNoTempFiles(t, dir)
+}
+
+func TestValidationStateSafeWrite_TempCleanupOnStatusRefusal(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "validation-state.json")
+
+	original := `{"assertions":{"VAL-PORT-024":{"status":"pending"}}}`
+	if err := os.WriteFile(dest, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Transform with an unknown status that will be rejected by the validator.
+	// The temp file must be removed after the refusal.
+	unknownStatus := []byte(`{"assertions":{"VAL-PORT-024":{"status":"invalid"}}}`)
+
+	_, err := os.Stat(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := safeWriteValidationState(t, dest, unknownStatus); err == nil {
+		t.Fatal("expected error for unknown status")
+	}
+
+	// Verify the temp file was removed.
+	assertNoTempFiles(t, dir)
+
+	// Verify the destination is untouched.
+	result, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(result) != original {
+		t.Fatalf("destination corrupted:\ngot:  %s\nwant: %s", result, original)
+	}
+}
+
+// assertNoTempFiles verifies that no temporary files remain in dir.
+func assertNoTempFiles(t *testing.T, dir string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(dir, ".*.tmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temp files left behind: %v", matches)
 	}
 }
