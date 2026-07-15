@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1188,6 +1189,29 @@ func TestDocsGoModVersionMatchesBootstrap(t *testing.T) {
 	}
 }
 
+// extractMarkdownSection returns the text under a "## Heading" up to the next
+// same-or-higher-level heading. Returns "" if the heading is absent.
+func extractMarkdownSection(body, heading string) string {
+	lines := strings.Split(body, "\n")
+	prefix := "## " + heading
+	var found bool
+	var out []string
+	for _, line := range lines {
+		if !found {
+			if strings.HasPrefix(line, prefix) {
+				found = true
+			}
+			continue
+		}
+		// Stop at the next ## (or higher) heading.
+		if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "# ") {
+			break
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
 // --- VAL-FIREWORKS-020: Recipes accurately separate Standard, Priority, Fast, and Fire Pass ---
 
 // TestFireworksDocsRecipesSeparatePaths verifies the Fireworks guide defines
@@ -1283,16 +1307,81 @@ func TestFireworksDocsRecipesSeparatePaths(t *testing.T) {
 	}
 }
 
-// TestFireworksDocsFastNotServiceTier verifies the docs do not describe
-// service_tier: fast as a valid Fireworks configuration.
-func TestFireworksDocsFastNotServiceTier(t *testing.T) {
-	body := readRepoRel(t, "docs/examples/fireworks.md")
-	if strings.Contains(body, "service_tier: fast") || strings.Contains(body, "service_tier:\"fast\"") {
-		// Allow it only in a negative context (warning that it is NOT valid).
-		lower := strings.ToLower(body)
-		if !strings.Contains(lower, "not a valid") && !strings.Contains(lower, "not") {
-			t.Fatal("fireworks.md must not present service_tier: fast as valid")
+// checkYAMLRecipeServiceTiers parses every YAML fenced block in body and
+// returns an error if any model entry has extra_args.service_tier == "fast".
+// This check is independent of surrounding prose so a negation in unrelated
+// text cannot mask a positive service_tier: fast recipe.
+func checkYAMLRecipeServiceTiers(body string) error {
+	for _, block := range fencedBlocks(body, "yaml") {
+		var m struct {
+			Models []struct {
+				Alias         string         `yaml:"alias"`
+				ExtraArgs     map[string]any `yaml:"extra_args"`
+				UpstreamModel string         `yaml:"upstream_model"`
+			} `yaml:"models"`
 		}
+		if err := yaml.Unmarshal([]byte(block), &m); err != nil {
+			continue // skip non-model YAML blocks
+		}
+		for _, model := range m.Models {
+			if st, ok := model.ExtraArgs["service_tier"]; ok {
+				if s, ok := st.(string); ok && s == "fast" {
+					return fmt.Errorf("YAML recipe for alias %q uses service_tier: fast — Fast must be a router model ID, not a service_tier value", model.Alias)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// TestFireworksDocsFastNotServiceTier verifies no YAML recipe in either
+// Fireworks guide uses service_tier: fast. The check parses every fenced
+// YAML recipe block individually so unrelated prose containing a negation
+// cannot mask a positive service_tier: fast entry.
+func TestFireworksDocsFastNotServiceTier(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/fireworks.md",
+		"docs/examples/fireworks-fire-pass.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			if err := checkYAMLRecipeServiceTiers(body); err != nil {
+				t.Fatalf("%s: %v", rel, err)
+			}
+		})
+	}
+}
+
+// TestFireworksDocsFastNotServiceTierDeterministic verifies that the
+// detection logic catches a positive service_tier: fast recipe even when
+// the surrounding text contains a negation. This proves the guard has a
+// deterministic failing test path that cannot be masked by unrelated prose.
+func TestFireworksDocsFastNotServiceTierDeterministic(t *testing.T) {
+	// Construct a doc where unrelated text says "not" but a YAML recipe
+	// uses service_tier: fast. The old document-wide check would pass
+	// because "not" appears in the body. The hardened check must fail.
+	badDoc := "# Fireworks\n\nThis is not a valid configuration.\n\n```yaml\n" +
+		`models:
+  - alias: bad-fast
+    known_auth: fireworks
+    upstream_model: accounts/fireworks/routers/glm-5p2-fast
+    extra_args:
+      service_tier: fast
+` + "```\n"
+	if err := checkYAMLRecipeServiceTiers(badDoc); err == nil {
+		t.Fatal("checkYAMLRecipeServiceTiers must reject service_tier: fast in a YAML recipe even when unrelated prose contains a negation")
+	}
+
+	// A clean doc with no service_tier: fast recipe must pass even if the
+	// prose discusses fast as a concept.
+	cleanDoc := "# Fireworks\n\nFast is a router model ID, not a service_tier value.\n\n```yaml\n" +
+		`models:
+  - alias: good-fast
+    known_auth: fireworks
+    upstream_model: accounts/fireworks/routers/glm-5p2-fast
+` + "```\n"
+	if err := checkYAMLRecipeServiceTiers(cleanDoc); err != nil {
+		t.Fatalf("checkYAMLRecipeServiceTiers must accept clean doc: %v", err)
 	}
 }
 
@@ -1491,23 +1580,25 @@ func TestFireworksCatalogsUseIndependentMembership(t *testing.T) {
 }
 
 // TestFireworksSnapshotSupportedFastPriorityExact verifies the snapshot
-// marks only the documented router as supported for Fast+Priority.
+// marks only the documented router as supported for Fast+Priority. The
+// check asserts exact cardinality and exact membership so adding or removing
+// an entry is a deterministic test failure.
 func TestFireworksSnapshotSupportedFastPriorityExact(t *testing.T) {
 	supported := FireworksSnapshotSupportedFastPriority()
-	if len(supported) == 0 {
-		t.Fatal("snapshot-supported Fast+Priority list must not be empty")
+	want := []string{
+		"accounts/fireworks/routers/glm-5p2-fast",
 	}
-	found := false
-	for _, id := range supported {
-		if id == "accounts/fireworks/routers/glm-5p2-fast" {
-			found = true
-		}
-		if !strings.Contains(id, "/routers/") {
-			t.Errorf("snapshot-supported entry %q must be a router ID", id)
+	if len(supported) != len(want) {
+		t.Fatalf("snapshot-supported Fast+Priority cardinality = %d, want exactly %d (got %v)", len(supported), len(want), supported)
+	}
+	for i, id := range want {
+		if supported[i] != id {
+			t.Errorf("snapshot-supported[%d] = %q, want %q", i, supported[i], id)
 		}
 	}
-	if !found {
-		t.Error("snapshot must mark accounts/fireworks/routers/glm-5p2-fast as supported for Fast+Priority")
+	// Slices.Equal provides a clean cardinality+membership assertion.
+	if !slices.Equal(supported, want) {
+		t.Fatalf("snapshot-supported Fast+Priority = %v, want exactly %v", supported, want)
 	}
 }
 
@@ -1554,52 +1645,209 @@ func TestFireworksDocsPassThroughFieldsDocumented(t *testing.T) {
 	}
 }
 
-// TestFireworksDocsNoStaticAffinityClaim verifies no Fireworks doc promises
-// translation or static session affinity.
-func TestFireworksDocsNoStaticAffinityClaim(t *testing.T) {
+// prohibitedClaimPatterns maps prohibited claim phrases to the negation
+// markers that may appear in the same sentence to make the claim explicitly
+// negative (and thus acceptable). A sentence containing a prohibited phrase
+// without a co-occurring negation marker fails.
+var prohibitedClaimPatterns = []struct {
+	phrase   string
+	negation []string
+}{
+	// Translation claims — the proxy must not translate between protocols.
+	{"translates", []string{"does not", "not "}},
+	{"translate ", []string{"does not", "not "}},
+	// Static / synthesized affinity claims.
+	{"session affinity", []string{"does not", "not invent", "not "}},
+	{"static affinity", []string{"does not", "not invent", "not "}},
+	{"synthesized affinity", []string{"does not", "not invent", "not "}},
+	// Live-validation claims — mock-only validation is not live.
+	{"mock validation establishes", []string{}}, // always prohibited
+	{"mocked success proves", []string{}},       // always prohibited
+	{"establishes live", []string{}},            // always prohibited
+	// Universal-capability claims — capabilities are model-dependent.
+	{"all models support", []string{}},   // always prohibited
+	{"every model supports", []string{}}, // always prohibited
+}
+
+// checkNoProhibitedClaims splits body into sentences and verifies that no
+// sentence contains a prohibited claim without a co-occurring negation. This
+// prevents a document-wide negation from masking a positive prohibited claim.
+func checkNoProhibitedClaims(body string) error {
+	// Split on sentence boundaries while preserving enough context.
+	// We split on newlines and periods followed by space+capital, then
+	// also check each line as a unit for table rows.
+	sentences := splitSentences(body)
+	for _, sent := range sentences {
+		lower := strings.ToLower(sent)
+		for _, p := range prohibitedClaimPatterns {
+			if !strings.Contains(lower, p.phrase) {
+				continue
+			}
+			// If the phrase is present, verify a negation is in the same sentence.
+			allowed := false
+			for _, neg := range p.negation {
+				if strings.Contains(lower, neg) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("prohibited claim %q appears without co-occurring negation in sentence: %q", p.phrase, strings.TrimSpace(sent))
+			}
+		}
+	}
+	return nil
+}
+
+// splitSentences splits markdown text into sentence-like units for claim
+// checking. It preserves table rows and list items as individual units and
+// splits prose on sentence boundaries.
+func splitSentences(text string) []string {
+	// First split on newlines to get lines.
+	lines := strings.Split(text, "\n")
+	var sentences []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		// For prose lines, further split on ". " boundaries.
+		// But keep table rows and list items as whole lines.
+		if strings.HasPrefix(trimmed, "|") || strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "```") {
+			sentences = append(sentences, line)
+			continue
+		}
+		// Split on period-space for prose.
+		parts := strings.Split(line, ". ")
+		sentences = append(sentences, parts...)
+	}
+	return sentences
+}
+
+// TestFireworksDocsNoProhibitedClaims verifies no Fireworks documentation
+// sentence contains a prohibited translation, static-affinity,
+// live-validation, or universal-capability claim without a co-occurring
+// negation in the same sentence. The check is scoped to Fireworks-specific
+// guides; PROVIDERS.md legitimately describes T3 protocol translation paths
+// as a core proxy feature and is not a Fireworks pass-through violation.
+func TestFireworksDocsNoProhibitedClaims(t *testing.T) {
 	for _, rel := range []string{
 		"docs/examples/fireworks.md",
 		"docs/examples/fireworks-fire-pass.md",
 	} {
-		body := readRepoRel(t, rel)
-		lower := strings.ToLower(body)
-		// Must not promise translation.
-		if strings.Contains(lower, "translates") && !strings.Contains(lower, "does not") && !strings.Contains(lower, "not") {
-			// Translation references are allowed if explicitly negative.
-		}
-		// Must not promise static affinity.
-		for _, bad := range []string{
-			"session affinity",
-			"static affinity value",
-			"synthesized affinity",
-		} {
-			if strings.Contains(lower, bad) && !strings.Contains(lower, "not invent") && !strings.Contains(lower, "does not") {
-				t.Fatalf("%s must not promise %q", rel, bad)
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			if err := checkNoProhibitedClaims(body); err != nil {
+				t.Fatalf("%s: %v", rel, err)
 			}
-		}
+		})
 	}
 }
 
-// TestFireworksDocsFactorySyncExcludesUpstream verifies the guides document
-// that Factory sync excludes upstream URL, known_auth, model ID, service_tier,
-// extra_args, env-var names, and credentials.
+// TestFireworksDocsProhibitedClaimsDeterministic verifies the sentence-level
+// check catches a positive prohibited claim even when unrelated text elsewhere
+// contains a negation. This proves the guard cannot be masked by a
+// document-wide substring match.
+func TestFireworksDocsProhibitedClaimsDeterministic(t *testing.T) {
+	// A doc where "not" appears in one sentence and "translates" in a
+	// different sentence must fail. The old document-wide check would pass
+	// because "not" is present in the body.
+	badDoc := "# Guide\n\nThe proxy does not modify your data.\n\nThe proxy translates between protocols automatically.\n"
+	if err := checkNoProhibitedClaims(badDoc); err == nil {
+		t.Fatal("checkNoProhibitedClaims must reject 'translates' in a sentence without a co-occurring negation")
+	}
+
+	// A doc where "translates" appears with "does not" in the same sentence
+	// must pass (explicitly negative claim).
+	goodDoc := "# Guide\n\nThe proxy does not translate between protocols.\n"
+	if err := checkNoProhibitedClaims(goodDoc); err != nil {
+		t.Fatalf("checkNoProhibitedClaims must accept explicitly negative claim: %v", err)
+	}
+
+	// "all models support" with no negation must always fail.
+	badUniversal := "# Guide\n\nAll models support reasoning output.\n"
+	if err := checkNoProhibitedClaims(badUniversal); err == nil {
+		t.Fatal("checkNoProhibitedClaims must reject universal-capability claim 'all models support'")
+	}
+
+	// "mocked success proves" with no negation must always fail.
+	badLive := "# Guide\n\nMocked success proves live provider availability.\n"
+	if err := checkNoProhibitedClaims(badLive); err == nil {
+		t.Fatal("checkNoProhibitedClaims must reject live-validation claim 'mocked success proves'")
+	}
+}
+
+// factorySyncRequiredExclusions lists every value that must be explicitly
+// excluded from the Factory-sync entry, and the markdown text that should
+// appear within the Factory-sync section to document that exclusion.
+var factorySyncRequiredExclusions = []struct {
+	desc   string // human-readable description of the excluded value
+	marker string // substring that must appear within the Factory-sync section
+}{
+	{"Fireworks upstream URL", "upstream URL"},
+	{"known_auth", "known_auth"},
+	{"upstream model/router ID", "router ID"},
+	{"service_tier", "service_tier"},
+	{"extra_args", "extra_args"},
+	{"env-var name", "env-var name"},
+	{"upstream credential", "credential"},
+}
+
+// checkFactorySyncSectionExclusions extracts the "Factory sync" section from
+// body and verifies each required exclusion marker is present within that
+// section. This prevents a document-wide substring from masking a missing
+// exclusion within the section.
+func checkFactorySyncSectionExclusions(body string) error {
+	section := extractMarkdownSection(body, "Factory sync")
+	if section == "" {
+		return fmt.Errorf("no '## Factory sync' section found")
+	}
+	for _, ex := range factorySyncRequiredExclusions {
+		if !strings.Contains(section, ex.marker) {
+			return fmt.Errorf("Factory sync section must state exclusion of %s (looking for %q within the section)", ex.desc, ex.marker)
+		}
+	}
+	return nil
+}
+
+// TestFireworksDocsFactorySyncExcludesUpstream verifies each required
+// Factory-sync exclusion is asserted within the Factory-sync documentation
+// section. The check is section-scoped so a document-wide mention of
+// "credential" in an unrelated section cannot mask a missing exclusion.
 func TestFireworksDocsFactorySyncExcludesUpstream(t *testing.T) {
 	for _, rel := range []string{
 		"docs/examples/fireworks.md",
 		"docs/examples/fireworks-fire-pass.md",
 	} {
-		body := readRepoRel(t, rel)
-		if !strings.Contains(body, "Factory sync") {
-			t.Fatalf("%s must document Factory sync behavior", rel)
-		}
-		// Must state upstream URL is excluded.
-		lower := strings.ToLower(body)
-		if !strings.Contains(lower, "never") {
-			t.Fatalf("%s must use 'never' to state Factory sync exclusions", rel)
-		}
-		// Must mention upstream credential exclusion.
-		if !strings.Contains(lower, "credential") {
-			t.Fatalf("%s must state credentials are excluded from Factory sync", rel)
-		}
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			if err := checkFactorySyncSectionExclusions(body); err != nil {
+				t.Fatalf("%s: %v", rel, err)
+			}
+		})
+	}
+}
+
+// TestFireworksDocsFactorySyncExcludesDeterministic verifies that the
+// section-scoped check catches a missing exclusion even when the value
+// appears elsewhere in the document. This proves the guard cannot be masked
+// by a document-wide substring match.
+func TestFireworksDocsFactorySyncExcludesDeterministic(t *testing.T) {
+	// Construct a doc where "credential" appears in a different section
+	// but is missing from the Factory-sync section. The old document-wide
+	// check would pass; the hardened section-scoped check must fail.
+	badDoc := "# Guide\n\n## Overview\n\nYour credential is private.\n\n## Factory sync\n\n" +
+		"Factory sync writes the local alias and baseUrl.\n\n## Notes\n\nDone.\n"
+	if err := checkFactorySyncSectionExclusions(badDoc); err == nil {
+		t.Fatal("checkFactorySyncSectionExclusions must reject a Factory-sync section missing required exclusions")
+	}
+
+	// A doc with all exclusions in the section must pass.
+	goodDoc := "# Guide\n\n## Factory sync\n\n" +
+		"Factory sync never includes the upstream URL, known_auth, " +
+		"the model/router ID, service_tier, any extra_args, " +
+		"the env-var name, or the upstream credential.\n"
+	if err := checkFactorySyncSectionExclusions(goodDoc); err != nil {
+		t.Fatalf("checkFactorySyncSectionExclusions must accept complete section: %v", err)
 	}
 }
