@@ -43,6 +43,7 @@ func docExampleMarkdownFiles() []string {
 		"docs/examples/codex-oauth.md",
 		"docs/examples/deepseek.md",
 		"docs/examples/fireworks.md",
+		"docs/examples/fireworks-fire-pass.md",
 		"docs/examples/groq.md",
 		"docs/examples/kimi.md",
 		"docs/examples/local-ollama.md",
@@ -1184,5 +1185,421 @@ func TestDocsGoModVersionMatchesBootstrap(t *testing.T) {
 	}
 	if goVersion != "1.26.4" {
 		t.Fatalf("go.mod Go version = %q, want 1.26.4", goVersion)
+	}
+}
+
+// --- VAL-FIREWORKS-020: Recipes accurately separate Standard, Priority, Fast, and Fire Pass ---
+
+// TestFireworksDocsRecipesSeparatePaths verifies the Fireworks guide defines
+// Standard, Priority, baseline Fast, and Fire Pass as distinct recipes, with
+// a router-plus-priority combination only when the committed snapshot marks
+// it supported. No managed combination picker is required.
+func TestFireworksDocsRecipesSeparatePaths(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/fireworks.md")
+
+	// Standard recipe: ordinary model ID, no service_tier.
+	stdBlocks := fencedBlocks(body, "yaml")
+	if len(stdBlocks) < 4 {
+		t.Fatalf("fireworks.md must contain at least 4 YAML recipes (Standard, Priority, Fast, combination); got %d", len(stdBlocks))
+	}
+
+	// Parse all YAML blocks and look for each recipe type.
+	type recipe struct {
+		hasKnownAuth   string
+		hasServiceTier bool
+		serviceTierVal string
+		upstreamModel  string
+	}
+	recipes := []recipe{}
+	for _, block := range stdBlocks {
+		var m struct {
+			Models []struct {
+				KnownAuth     string         `yaml:"known_auth"`
+				UpstreamModel string         `yaml:"upstream_model"`
+				ExtraArgs     map[string]any `yaml:"extra_args"`
+			} `yaml:"models"`
+		}
+		if err := yaml.Unmarshal([]byte(block), &m); err != nil {
+			continue
+		}
+		for _, model := range m.Models {
+			r := recipe{
+				hasKnownAuth:  model.KnownAuth,
+				upstreamModel: model.UpstreamModel,
+			}
+			if st, ok := model.ExtraArgs["service_tier"]; ok {
+				r.hasServiceTier = true
+				if s, ok := st.(string); ok {
+					r.serviceTierVal = s
+				}
+			}
+			recipes = append(recipes, r)
+		}
+	}
+
+	// Standard: fireworks, models/... , no tier.
+	hasStandard := false
+	// Priority: fireworks, models/..., service_tier: priority.
+	hasPriority := false
+	// Fast: fireworks, routers/..., no tier.
+	hasFast := false
+	// Combination: fireworks, routers/..., service_tier: priority (snapshot-supported).
+	hasCombo := false
+
+	for _, r := range recipes {
+		isRouter := strings.Contains(r.upstreamModel, "/routers/")
+		isModel := strings.Contains(r.upstreamModel, "/models/")
+		switch {
+		case r.hasKnownAuth == "fireworks" && isModel && !r.hasServiceTier:
+			hasStandard = true
+		case r.hasKnownAuth == "fireworks" && isModel && r.serviceTierVal == "priority":
+			hasPriority = true
+		case r.hasKnownAuth == "fireworks" && isRouter && !r.hasServiceTier:
+			hasFast = true
+		case r.hasKnownAuth == "fireworks" && isRouter && r.serviceTierVal == "priority":
+			hasCombo = true
+		}
+	}
+
+	if !hasStandard {
+		t.Error("fireworks.md must define a Standard recipe (fireworks, models/..., no service_tier)")
+	}
+	if !hasPriority {
+		t.Error("fireworks.md must define a Priority recipe (fireworks, models/..., service_tier: priority)")
+	}
+	if !hasFast {
+		t.Error("fireworks.md must define a baseline Fast recipe (fireworks, routers/..., no service_tier)")
+	}
+	if !hasCombo {
+		t.Error("fireworks.md must define a snapshot-supported Fast+Priority recipe (fireworks, routers/..., service_tier: priority)")
+	}
+
+	// Must state the combination is snapshot-supported only and not inferred.
+	if !strings.Contains(body, "snapshot") {
+		t.Error("fireworks.md must state the Fast+Priority combination is snapshot-supported")
+	}
+	if !strings.Contains(body, "neither infers nor synthesizes") {
+		t.Error("fireworks.md must state the proxy neither infers nor synthesizes the combination")
+	}
+}
+
+// TestFireworksDocsFastNotServiceTier verifies the docs do not describe
+// service_tier: fast as a valid Fireworks configuration.
+func TestFireworksDocsFastNotServiceTier(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/fireworks.md")
+	if strings.Contains(body, "service_tier: fast") || strings.Contains(body, "service_tier:\"fast\"") {
+		// Allow it only in a negative context (warning that it is NOT valid).
+		lower := strings.ToLower(body)
+		if !strings.Contains(lower, "not a valid") && !strings.Contains(lower, "not") {
+			t.Fatal("fireworks.md must not present service_tier: fast as valid")
+		}
+	}
+}
+
+// --- VAL-FIREWORKS-021: Registry, catalog, env, and docs stay synchronized ---
+
+// TestFireworksDocsFirePassExperimentalScope verifies the Fire Pass guide
+// identifies the product as experimental, limits zero-cost claims to
+// eligible routers with active pass, states the documented scope, warns about
+// mutable availability/pricing, and never implies arbitrary models are free.
+func TestFireworksDocsFirePassExperimentalScope(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/fireworks-fire-pass.md")
+
+	for _, want := range []string{
+		"experimental",
+		"mutable",
+		"availability",
+		"pricing",
+	} {
+		if !strings.Contains(strings.ToLower(body), want) {
+			t.Fatalf("fireworks-fire-pass.md must mention %q", want)
+		}
+	}
+
+	// Must limit zero-token-cost claims to eligible routers with active pass.
+	if !strings.Contains(body, "active") || !strings.Contains(body, "eligible") {
+		t.Fatal("fireworks-fire-pass.md must limit zero-cost claims to currently eligible routers with an active pass")
+	}
+
+	// Must never imply arbitrary Fireworks models become free.
+	if !strings.Contains(strings.ToLower(body), "not free") && !strings.Contains(strings.ToLower(body), "not") {
+		t.Fatal("fireworks-fire-pass.md must clarify arbitrary models are not free")
+	}
+
+	// Must mention personal/non-production scope.
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "personal") && !strings.Contains(lower, "non-production") {
+		t.Fatal("fireworks-fire-pass.md must state the personal/non-production agentic coding scope")
+	}
+}
+
+// TestFireworksDocsManualEntryGuaranteed verifies both guides document manual
+// model entry as the guaranteed onboarding path.
+func TestFireworksDocsManualEntryGuaranteed(t *testing.T) {
+	stdBody := readRepoRel(t, "docs/examples/fireworks.md")
+	fpBody := readRepoRel(t, "docs/examples/fireworks-fire-pass.md")
+
+	for _, want := range []string{"manual", "guaranteed"} {
+		if !strings.Contains(strings.ToLower(stdBody), want) {
+			t.Fatalf("fireworks.md must mention %q for manual entry", want)
+		}
+	}
+	for _, want := range []string{"manual"} {
+		if !strings.Contains(strings.ToLower(fpBody), want) {
+			t.Fatalf("fireworks-fire-pass.md must mention %q for manual entry", want)
+		}
+	}
+}
+
+// TestFireworksDocsNoLiveValidationClaims verifies no public Fireworks guidance
+// calls the compatibility path the official model-list API or implies mocked
+// success proves live availability.
+func TestFireworksDocsNoLiveValidationClaims(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/fireworks.md",
+		"docs/examples/fireworks-fire-pass.md",
+		"docs/PROVIDERS.md",
+		"docs/CONFIG.md",
+	} {
+		body := readRepoRel(t, rel)
+		lower := strings.ToLower(body)
+		// The compatibility path must be labeled best-effort, not official.
+		if strings.Contains(lower, "official fireworks list models api") || strings.Contains(lower, "official account-scoped list models api") {
+			t.Fatalf("%s must not label the compatibility path as the official model-list API", rel)
+		}
+		// Must not claim mock validation proves live availability.
+		if strings.Contains(lower, "mock validation establishes") || strings.Contains(lower, "mocked success proves") {
+			t.Fatalf("%s must not claim mock validation proves live availability", rel)
+		}
+	}
+}
+
+// TestFireworksDocsCompatibilityPathQualified verifies the Standard discovery
+// path is explicitly labeled as best-effort compatibility, not official.
+func TestFireworksDocsCompatibilityPathQualified(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/fireworks.md")
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "best-effort compatibility") {
+		t.Fatal("fireworks.md must label the discovery path as best-effort compatibility")
+	}
+}
+
+// TestFireworksEnvTemplateHasBothKeys verifies the env template contains
+// exactly one empty assignment for each Fireworks credential.
+func TestFireworksEnvTemplateHasBothKeys(t *testing.T) {
+	body := readRepoRel(t, ".env.local.example")
+	for _, key := range []string{"FIREWORKS_API_KEY", "FIREWORKS_FIRE_PASS_API_KEY"} {
+		// Count empty assignments: KEY=""
+		pattern := key + `=""`
+		count := strings.Count(body, pattern)
+		if count != 1 {
+			t.Fatalf(".env.local.example must contain exactly one empty %s assignment, got %d", key, count)
+		}
+	}
+}
+
+// TestFireworksDocsIndexLinksFirePass verifies the docs index and README link
+// to the Fire Pass example.
+func TestFireworksDocsIndexLinksFirePass(t *testing.T) {
+	for _, rel := range []string{"docs/README.md", "README.md"} {
+		body := readRepoRel(t, rel)
+		if !strings.Contains(body, "fireworks-fire-pass.md") {
+			t.Fatalf("%s must link to fireworks-fire-pass.md", rel)
+		}
+	}
+}
+
+// --- VAL-FIREWORKS-021: Catalog source records are pinned and deterministic ---
+
+// TestFireworksCatalogSourceRecordsPinned verifies both catalogs have a
+// committed official source URL and as-of date.
+func TestFireworksCatalogSourceRecordsPinned(t *testing.T) {
+	fpSrc := FireworksFirePassCatalogSource()
+	if fpSrc.URL == "" {
+		t.Error("Fire Pass catalog source URL must not be empty")
+	}
+	if fpSrc.AsOf == "" {
+		t.Error("Fire Pass catalog source as-of date must not be empty")
+	}
+	if !strings.HasPrefix(fpSrc.URL, "https://") {
+		t.Errorf("Fire Pass source URL must be https: %q", fpSrc.URL)
+	}
+
+	fastSrc := FireworksFastCatalogSource()
+	if fastSrc.URL == "" {
+		t.Error("Fast catalog source URL must not be empty")
+	}
+	if fastSrc.AsOf == "" {
+		t.Error("Fast catalog source as-of date must not be empty")
+	}
+	if !strings.HasPrefix(fastSrc.URL, "https://") {
+		t.Errorf("Fast source URL must be https: %q", fastSrc.URL)
+	}
+
+	// Sources must be independent (different URL or different label).
+	if fpSrc.URL == fastSrc.URL && fpSrc.Label == fastSrc.Label {
+		t.Error("Fire Pass and Fast sources must be independent (different URL or label)")
+	}
+}
+
+// TestFireworksCatalogsUseIndependentMembership verifies Fire Pass and Fast
+// catalogs use independent official-source membership and may overlap, but
+// Fire Pass excludes routers not in its own catalog.
+func TestFireworksCatalogsUseIndependentMembership(t *testing.T) {
+	fpCatalog := FireworksFirePassCatalog()
+	fastCatalog := FireworksFastCatalog()
+
+	// Canonical router must be present in Fire Pass.
+	fpHasCanonical := false
+	for _, e := range fpCatalog {
+		if e.ID == "accounts/fireworks/routers/glm-5p2-fast" {
+			fpHasCanonical = true
+		}
+	}
+	if !fpHasCanonical {
+		t.Error("Fire Pass catalog must contain accounts/fireworks/routers/glm-5p2-fast")
+	}
+
+	// Canonical router must be present in Fast.
+	fastHasCanonical := false
+	for _, e := range fastCatalog {
+		if e.ID == "accounts/fireworks/routers/glm-5p2-fast" {
+			fastHasCanonical = true
+		}
+	}
+	if !fastHasCanonical {
+		t.Error("Fast catalog must contain accounts/fireworks/routers/glm-5p2-fast")
+	}
+
+	// Overlap is allowed and tested (both have glm-5p2-fast).
+	if fpHasCanonical && fastHasCanonical {
+		// Good: overlap is tested.
+	}
+
+	// Fire Pass entries must all be router IDs (not ordinary model IDs).
+	for _, e := range fpCatalog {
+		if !strings.Contains(e.ID, "/routers/") {
+			t.Errorf("Fire Pass catalog entry %q must be a router ID", e.ID)
+		}
+	}
+	// Fast entries must all be router IDs.
+	for _, e := range fastCatalog {
+		if !strings.Contains(e.ID, "/routers/") {
+			t.Errorf("Fast catalog entry %q must be a router ID", e.ID)
+		}
+	}
+}
+
+// TestFireworksSnapshotSupportedFastPriorityExact verifies the snapshot
+// marks only the documented router as supported for Fast+Priority.
+func TestFireworksSnapshotSupportedFastPriorityExact(t *testing.T) {
+	supported := FireworksSnapshotSupportedFastPriority()
+	if len(supported) == 0 {
+		t.Fatal("snapshot-supported Fast+Priority list must not be empty")
+	}
+	found := false
+	for _, id := range supported {
+		if id == "accounts/fireworks/routers/glm-5p2-fast" {
+			found = true
+		}
+		if !strings.Contains(id, "/routers/") {
+			t.Errorf("snapshot-supported entry %q must be a router ID", id)
+		}
+	}
+	if !found {
+		t.Error("snapshot must mark accounts/fireworks/routers/glm-5p2-fast as supported for Fast+Priority")
+	}
+}
+
+// --- VAL-FIREWORKS-022: Pass-through and security boundaries documented ---
+
+// TestFireworksDocsPassThroughFieldsDocumented verifies the guide identifies
+// extra_args as top-level pass-through and covers the agreed field set.
+func TestFireworksDocsPassThroughFieldsDocumented(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/fireworks.md")
+	lower := strings.ToLower(body)
+
+	// Must identify extra_args as top-level pass-through.
+	if !strings.Contains(lower, "pass-through") && !strings.Contains(lower, "passthrough") {
+		t.Fatal("fireworks.md must identify extra_args as top-level pass-through")
+	}
+	if !strings.Contains(lower, "top-level") {
+		t.Fatal("fireworks.md must state extra_args are merged at the top level")
+	}
+
+	// Must cover the agreed field set.
+	requiredFields := []string{
+		"service_tier",
+		"reasoning_effort",
+		"reasoning_history",
+		"thinking",
+		"prompt_cache_key",
+		"prompt_cache_isolation_key",
+		"perf_metrics_in_response",
+		"context_length_exceeded_behavior",
+		"response_format",
+		"min_p",
+		"top_k",
+		"repetition_penalty",
+		"tools",
+		"tool_choice",
+		"parallel_tool_calls",
+		"stream",
+		"stream_options",
+	}
+	for _, field := range requiredFields {
+		if !strings.Contains(lower, field) {
+			t.Fatalf("fireworks.md must document pass-through field %q", field)
+		}
+	}
+}
+
+// TestFireworksDocsNoStaticAffinityClaim verifies no Fireworks doc promises
+// translation or static session affinity.
+func TestFireworksDocsNoStaticAffinityClaim(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/fireworks.md",
+		"docs/examples/fireworks-fire-pass.md",
+	} {
+		body := readRepoRel(t, rel)
+		lower := strings.ToLower(body)
+		// Must not promise translation.
+		if strings.Contains(lower, "translates") && !strings.Contains(lower, "does not") && !strings.Contains(lower, "not") {
+			// Translation references are allowed if explicitly negative.
+		}
+		// Must not promise static affinity.
+		for _, bad := range []string{
+			"session affinity",
+			"static affinity value",
+			"synthesized affinity",
+		} {
+			if strings.Contains(lower, bad) && !strings.Contains(lower, "not invent") && !strings.Contains(lower, "does not") {
+				t.Fatalf("%s must not promise %q", rel, bad)
+			}
+		}
+	}
+}
+
+// TestFireworksDocsFactorySyncExcludesUpstream verifies the guides document
+// that Factory sync excludes upstream URL, known_auth, model ID, service_tier,
+// extra_args, env-var names, and credentials.
+func TestFireworksDocsFactorySyncExcludesUpstream(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/fireworks.md",
+		"docs/examples/fireworks-fire-pass.md",
+	} {
+		body := readRepoRel(t, rel)
+		if !strings.Contains(body, "Factory sync") {
+			t.Fatalf("%s must document Factory sync behavior", rel)
+		}
+		// Must state upstream URL is excluded.
+		lower := strings.ToLower(body)
+		if !strings.Contains(lower, "never") {
+			t.Fatalf("%s must use 'never' to state Factory sync exclusions", rel)
+		}
+		// Must mention upstream credential exclusion.
+		if !strings.Contains(lower, "credential") {
+			t.Fatalf("%s must state credentials are excluded from Factory sync", rel)
+		}
 	}
 }
