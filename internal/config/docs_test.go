@@ -41,6 +41,7 @@ func readRepoRel(t *testing.T, rel string) string {
 func docExampleMarkdownFiles() []string {
 	return []string{
 		"docs/examples/anthropic.md",
+		"docs/examples/baseten.md",
 		"docs/examples/codex-oauth.md",
 		"docs/examples/deepseek.md",
 		"docs/examples/fireworks.md",
@@ -469,6 +470,7 @@ func TestDocsExamplePagesExistForKnownAuth(t *testing.T) {
 		"groq":                "examples/groq.md",
 		"fireworks":           "examples/fireworks.md",
 		"fireworks-fire-pass": "examples/fireworks-fire-pass.md",
+		"baseten":             "examples/baseten.md",
 		"zai":                 "examples/zai.md",
 		"zai-main-api":        "examples/zai.md",
 		"zai-coding-api":      "examples/zai.md",
@@ -1849,5 +1851,158 @@ func TestFireworksDocsFactorySyncExcludesDeterministic(t *testing.T) {
 		"the env-var name, or the upstream credential.\n"
 	if err := checkFactorySyncSectionExclusions(goodDoc); err != nil {
 		t.Fatalf("checkFactorySyncSectionExclusions must accept complete section: %v", err)
+	}
+}
+
+// --- VAL-BASETEN-017: Baseten registry and public artifacts stay synchronized ---
+
+// TestBasetenDocsFactorySyncExcludesUpstream verifies the Baseten Factory-sync
+// section explicitly documents that it excludes upstream secrets and metadata.
+func TestBasetenDocsFactorySyncExcludesUpstream(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	section := extractMarkdownSection(body, "Factory sync")
+	if section == "" {
+		t.Fatal("docs/examples/baseten.md must contain a '## Factory sync' section")
+	}
+	for _, marker := range []string{
+		"upstream URL",
+		"known_auth",
+		"upstream model",
+		"extra_args",
+		"env-var name",
+		"credential",
+	} {
+		if !strings.Contains(section, marker) {
+			t.Errorf("baseten.md Factory sync section must mention exclusion of %q", marker)
+		}
+	}
+}
+
+// TestBasetenDocsManualEntryGuaranteed verifies the Baseten guide documents
+// manual entry as always available.
+func TestBasetenDocsManualEntryGuaranteed(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	for _, want := range []string{
+		"manual",
+		"Manual",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("baseten.md must mention manual entry")
+		}
+	}
+}
+
+// TestBasetenDocsNoLiveValidationClaims verifies the Baseten guide does not
+// claim live provider validation.
+func TestBasetenDocsNoLiveValidationClaims(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	if err := checkNoProhibitedClaims(body); err != nil {
+		t.Fatalf("baseten.md: %v", err)
+	}
+}
+
+// TestBasetenDocsScopedToSharedModelAPI verifies the guide scopes the native
+// profile to shared Model APIs and directs custom deployments to custom endpoints.
+func TestBasetenDocsScopedToSharedModelAPI(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	for _, want := range []string{
+		"shared Model API",
+		"custom",
+		"dedicated",
+	} {
+		if !strings.Contains(strings.ToLower(body), strings.ToLower(want)) {
+			t.Errorf("baseten.md must mention %q", want)
+		}
+	}
+	// The native recipe must have known_auth: baseten and no base_url.
+	nativeSection := extractMarkdownSection(body, "Recipe")
+	if nativeSection == "" {
+		t.Fatal("baseten.md must contain a '## Recipe' section")
+	}
+	yamlBlocks := fencedBlocks(nativeSection, "yaml")
+	found := false
+	for _, block := range yamlBlocks {
+		if strings.Contains(block, "known_auth: baseten") && !strings.Contains(block, "base_url:") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("baseten.md native recipe must have known_auth: baseten and no base_url")
+	}
+}
+
+// TestBasetenDocsNativeAndCustomAreDistinct verifies the guide presents both
+// a native profile recipe (with known_auth: baseten) and a custom deployment
+// recipe (with explicit base_url/api_key_env and no known_auth).
+func TestBasetenDocsNativeAndCustomAreDistinct(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	// Custom deployment section must exist.
+	customSection := extractMarkdownSection(body, "Custom deployment recipe")
+	if customSection == "" {
+		t.Fatal("baseten.md must contain a '## Custom deployment recipe' section")
+	}
+	yamlBlocks := fencedBlocks(customSection, "yaml")
+	found := false
+	for _, block := range yamlBlocks {
+		if strings.Contains(block, "base_url:") && strings.Contains(block, "api_key_env:") && !strings.Contains(block, "known_auth: baseten") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("baseten.md custom deployment recipe must have base_url and api_key_env without known_auth: baseten")
+	}
+}
+
+// TestBasetenDocsAgentReadyScoped verifies the guide describes agent_ready as
+// configured/resolved metadata, not proof of universal model support.
+func TestBasetenDocsAgentReadyScoped(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	if !strings.Contains(body, "agent_ready") {
+		t.Fatal("baseten.md must mention agent_ready")
+	}
+	if !strings.Contains(strings.ToLower(body), "configured") || !strings.Contains(strings.ToLower(body), "model-dependent") {
+		t.Errorf("baseten.md must describe agent_ready as configured metadata and note model-dependence")
+	}
+}
+
+// TestBasetenEnvTemplateHasKey verifies the env template contains exactly one
+// empty BASETEN_API_KEY assignment.
+func TestBasetenEnvTemplateHasKey(t *testing.T) {
+	body := readRepoRel(t, ".env.local.example")
+	pattern := `BASETEN_API_KEY=""`
+	count := strings.Count(body, pattern)
+	if count != 1 {
+		t.Errorf("BASETEN_API_KEY empty assignment count = %d, want 1", count)
+	}
+}
+
+// TestBasetenDocsRegistrySynchronized verifies the Baseten registry tuple
+// matches the PROVIDERS.md matrix row.
+func TestBasetenDocsRegistrySynchronized(t *testing.T) {
+	ka, ok := LookupKnownAuth("baseten")
+	if !ok {
+		t.Fatal("baseten profile missing from registry")
+	}
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	for _, want := range []string{
+		ka.BaseURL,
+		ka.APIKeyEnv,
+		string(ka.UpstreamProtocol),
+		"generic-chat-completion-api",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("baseten.md must contain %q", want)
+		}
+	}
+}
+
+// TestBasetenDocsReadmeAndProviderLinks verify the README and docs/README.md
+// link to the Baseten example.
+func TestBasetenDocsReadmeAndProviderLinks(t *testing.T) {
+	for _, rel := range []string{"README.md", "docs/README.md"} {
+		body := readRepoRel(t, rel)
+		if !strings.Contains(body, "baseten.md") {
+			t.Errorf("%s must link to examples/baseten.md", rel)
+		}
 	}
 }
