@@ -12,6 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 )
 
@@ -65,7 +68,7 @@ func runStart(args []string) {
 	for i := 0; i < 30; i++ {
 		if pid, running := daemon.IsRunning(); running {
 			fmt.Printf("droid-proxy started (pid %d)\n", pid)
-			fmt.Printf("health: curl -s http://127.0.0.1:8787/health\n")
+			fmt.Printf("health: curl -s %s/health\n", listenURL(*configPath))
 			return
 		}
 		if err := child.Process.Signal(syscall.Signal(0)); err != nil {
@@ -297,4 +300,28 @@ func appendTailLine(lines []string, line string, n int) []string {
 		return lines
 	}
 	return append(lines, line)
+}
+
+// listenURL derives the proxy's listen URL from the config path for display.
+// It tries a full config load (which applies defaults and IPv6 bracket
+// serialization) and falls back to a minimal YAML parse.
+func listenURL(configPath string) string {
+	if cfg, err := config.Load(configPath); err == nil {
+		return config.FormatListenURL(cfg.Listen.Host, cfg.Listen.Port)
+	}
+	var lf struct {
+		Listen struct {
+			Host string `yaml:"host"`
+			Port int    `yaml:"port"`
+		} `yaml:"listen"`
+	}
+	if data, err := os.ReadFile(configPath); err == nil {
+		_ = yaml.Unmarshal(data, &lf)
+	}
+	host := lf.Listen.Host
+	port := lf.Listen.Port
+	if port == 0 {
+		port = config.DefaultListenPort
+	}
+	return config.FormatListenURL(host, port)
 }

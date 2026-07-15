@@ -84,11 +84,48 @@ func TestProxyBaseURL(t *testing.T) {
 	if err := os.WriteFile(custom, []byte("listen:\n  host: 0.0.0.0\n  port: 9999\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := proxyBaseURL(custom); got != "http://0.0.0.0:9999" {
-		t.Errorf("proxyBaseURL = %q", got)
+	got, zero := resolveListenURL(custom, loadConfigBestEffort(custom))
+	if zero {
+		t.Errorf("portIsZero = true, want false for explicit non-zero port")
 	}
-	if got := proxyBaseURL(filepath.Join(dir, "missing.yaml")); got != "http://127.0.0.1:8787" {
-		t.Errorf("proxyBaseURL default = %q", got)
+	if got != "http://0.0.0.0:9999" {
+		t.Errorf("resolveListenURL = %q", got)
+	}
+	got, _ = resolveListenURL(filepath.Join(dir, "missing.yaml"), loadConfigBestEffort(filepath.Join(dir, "missing.yaml")))
+	if got != "http://127.0.0.1:9787" {
+		t.Errorf("resolveListenURL default = %q", got)
+	}
+}
+
+func TestResolveListenURLIPv6Brackets(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("listen:\n  host: \"::1\"\n  port: 9787\nmodels:\n  - alias: x\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    upstream_model: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := loadConfigBestEffort(cfgPath)
+	got, zero := resolveListenURL(cfgPath, cfg)
+	if zero {
+		t.Errorf("portIsZero = true, want false")
+	}
+	if got != "http://[::1]:9787" {
+		t.Errorf("resolveListenURL IPv6 = %q, want http://[::1]:9787", got)
+	}
+}
+
+func TestResolveListenURLPortZero(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("listen:\n  port: 0\nmodels:\n  - alias: x\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    upstream_model: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := loadConfigBestEffort(cfgPath)
+	got, zero := resolveListenURL(cfgPath, cfg)
+	if !zero {
+		t.Errorf("portIsZero = false, want true for explicit port 0")
+	}
+	if got != "" {
+		t.Errorf("resolveListenURL for port 0 = %q, want empty", got)
 	}
 }
 

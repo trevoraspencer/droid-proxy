@@ -8,6 +8,18 @@ import (
 	"time"
 )
 
+// DefaultListenPort is the single exported source of truth for the proxy's
+// default listen port. Runtime defaulting, setup-generated configs, Factory
+// address projection, TUI fallback, daemon output, and all other compiled
+// default consumers must reference this constant rather than an independent
+// numeric literal.
+const DefaultListenPort = 9787
+
+// OldDefaultListenPort is the pre-migration default. It is referenced by the
+// migration component and the omitted-port startup coherence preflight to
+// detect Factory entries that still target the old origin.
+const OldDefaultListenPort = 8787
+
 type FactoryProvider string
 
 const (
@@ -138,6 +150,41 @@ type Config struct {
 	SourceModTime time.Time `yaml:"-"`
 
 	present map[string]bool `yaml:"-"`
+}
+
+// PortOmitted reports whether listen.port was absent from the source YAML.
+// When true, the port resolves to DefaultListenPort at runtime.
+func (c *Config) PortOmitted() bool {
+	return !c.wasPresent("listen.port")
+}
+
+// PortExplicitlyZero reports whether listen.port was present in the source
+// YAML with value 0. An explicit zero requests an OS-assigned ephemeral port
+// and must not be treated as an omitted port.
+func (c *Config) PortExplicitlyZero() bool {
+	return c.wasPresent("listen.port") && c.Listen.Port == 0
+}
+
+// HasPresence reports whether this config was parsed with presence tracking
+// (i.e. via Load or parse). Configs constructed from a partial fallback parse
+// have no presence information.
+func (c *Config) HasPresence() bool {
+	return c.present != nil
+}
+
+// FormatListenURL serializes a listen host and port into an http:// URL.
+// IPv6 loopback addresses (e.g. "::1") are wrapped in brackets per RFC 3986;
+// the brackets are URL serialization syntax, not part of the configured host
+// value.
+func FormatListenURL(host string, port int) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if strings.Contains(host, ":") {
+		return fmt.Sprintf("http://[%s]:%d", host, port)
+	}
+	return fmt.Sprintf("http://%s:%d", host, port)
 }
 
 type Listen struct {

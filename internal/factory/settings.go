@@ -34,7 +34,7 @@ type Entry struct {
 }
 
 // EntryFromModel builds a Factory entry from a configured model. baseURL is the
-// proxy listen address (e.g. http://127.0.0.1:8787) and apiKey is the value
+// proxy listen address (e.g. http://127.0.0.1:9787) and apiKey is the value
 // Droid sends (a placeholder unless the proxy enforces client_auth).
 func EntryFromModel(m *config.Model, baseURL, apiKey string) Entry {
 	maxOut := m.MaxOutputTokens
