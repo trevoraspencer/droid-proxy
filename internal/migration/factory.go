@@ -361,6 +361,15 @@ func skipJSONValue(dec *json.Decoder) error {
 	return nil
 }
 
+// DetectJSONDuplicates walks the entire JSON document and detects duplicate
+// member names at every object level. Returns a list of JSON path strings for
+// duplicate keys. This is shared between migration eligibility analysis and
+// the omitted-port Factory coherence preflight so both reject unsafe JSON
+// with identical semantics.
+func DetectJSONDuplicates(raw []byte) ([]string, error) {
+	return detectJSONDuplicates(raw)
+}
+
 // detectJSONDuplicates walks the entire JSON document and detects duplicate
 // member names at every object level. Returns a list of JSON path strings for
 // duplicate keys.

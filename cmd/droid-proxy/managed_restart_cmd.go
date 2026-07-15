@@ -7,6 +7,7 @@ import (
 
 	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 	"github.com/trevoraspencer/droid-proxy/internal/migration"
+	"github.com/trevoraspencer/droid-proxy/internal/version"
 )
 
 // attemptManagedMigration checks for trusted deferred provenance and performs
@@ -26,11 +27,39 @@ func attemptManagedMigration(configPath string, noMigratePort bool) {
 		return // cannot verify provenance without executable path
 	}
 
-	result, err := migration.AttemptDeferredMigration(migration.ManagedRestartOptions{
+	// Plan the migration first to determine eligibility and the
+	// destination port. We need the plan to know whether a destination
+	// reservation is required and what port to reserve.
+	plan, err := migration.PlanMigration(migration.PlanOptions{
+		ConfigPath: absPathOrOriginal(configPath),
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "droid-proxy: automatic migration planning warning: %v\n", err)
+		return
+	}
+
+	var reservation *migration.DestinationReservation
+	if plan.ConfigEligible && !plan.FactoryUnsafe && plan.HasChanges() {
+		// Reserve the destination port and hold it through the restart
+		// transition. A nil or transient check is not acceptable.
+		reservation, err = migration.ReserveDestination(plan.Host, plan.NewPort)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "droid-proxy: automatic migration refused: %v\n", err)
+			return
+		}
+		defer reservation.Close()
+	}
+
+	opts := migration.ManagedRestartOptions{
 		ConfigPath:          absPathOrOriginal(configPath),
 		InstalledBinaryPath: exe,
 		NoMigratePort:       noMigratePort,
-	})
+	}
+	if reservation != nil {
+		opts.DestinationChecker = reservation.HeldChecker()
+	}
+
+	result, err := migration.AttemptDeferredMigration(opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "droid-proxy: automatic migration warning: %v\n", err)
 		return
@@ -85,12 +114,34 @@ func recordUpdateProvenance(binaryPath, oldBinaryHash, configPath string) {
 		daemonExe = meta.Executable
 	}
 
+	// Record service definition identity for managed services, or
+	// background-daemon identity for background processes. Complete
+	// conditional provenance is required for validation.
+	var svcDefPath, svcDefHash string
+	switch serviceKind {
+	case "launchd":
+		svcDefPath = daemon.LaunchdPlistPath()
+	case "systemd":
+		svcDefPath = daemon.SystemdUnitPath()
+	}
+	if svcDefPath != "" {
+		svcDefHash = migration.ReadConfigHashForProvenance(svcDefPath)
+		if svcDefHash == "" {
+			// Service definition file doesn't exist or is unreadable;
+			// cannot establish complete provenance.
+			return
+		}
+	}
+
+	// Record binary versions.
+	installedVersion := version.ProductVersion()
+
 	if err := migration.RecordDeferredProvenance(
 		migration.StateRoot(),
 		binaryPath, oldBinaryHash, "",
-		binaryPath, newBinaryHash, "",
+		binaryPath, newBinaryHash, installedVersion,
 		configPath, configHash,
-		serviceKind, "", "",
+		serviceKind, svcDefPath, svcDefHash,
 		daemonPID, daemonExe,
 	); err != nil {
 		fmt.Fprintf(os.Stderr, "droid-proxy: could not record deferred migration provenance: %v\n", err)

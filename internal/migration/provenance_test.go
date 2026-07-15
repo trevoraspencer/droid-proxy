@@ -35,6 +35,9 @@ func makeProvenanceRecord(t *testing.T, stateRoot, oldBin, newBin, configPath st
 		ConfigPath:          configPath,
 		ConfigHash:          configHash,
 		CreatedAt:           "2025-01-01T00:00:00Z",
+		// Background-daemon conditional provenance: PID and executable.
+		BackgroundDaemonPID: 12345,
+		BackgroundDaemonExe: newBin,
 	}
 }
 
@@ -282,5 +285,119 @@ func TestProvenanceReplayRefused(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatal("expected nil after consumption")
+	}
+}
+
+func TestValidateProvenanceBackgroundDaemonRequiresIdentity(t *testing.T) {
+	stateRoot := t.TempDir()
+	oldBin := writeFakeBinary(t, filepath.Join(stateRoot, "old-bin"), "old-binary")
+	newBin := writeFakeBinary(t, filepath.Join(stateRoot, "new-bin"), "new-binary")
+	configPath := filepath.Join(stateRoot, "config.yaml")
+
+	rec := makeProvenanceRecord(t, stateRoot, oldBin, newBin, configPath)
+	// Remove background-daemon conditional identity.
+	rec.BackgroundDaemonPID = 0
+	rec.BackgroundDaemonExe = ""
+
+	err := ValidateProvenance(&rec, ProvenanceValidation{
+		InstalledBinaryPath: newBin,
+		ConfigPath:          configPath,
+	})
+	if err == nil {
+		t.Fatal("expected error for missing background-daemon identity")
+	}
+}
+
+func TestValidateProvenanceLaunchdRequiresServiceDef(t *testing.T) {
+	stateRoot := t.TempDir()
+	oldBin := writeFakeBinary(t, filepath.Join(stateRoot, "old-bin"), "old-binary")
+	newBin := writeFakeBinary(t, filepath.Join(stateRoot, "new-bin"), "new-binary")
+	configPath := filepath.Join(stateRoot, "config.yaml")
+	svcDef := filepath.Join(stateRoot, "agent.plist")
+	svcData := []byte(`<plist version="1.0"><dict><key>Label</key><string>com.droid-proxy</string></dict></plist>`)
+	os.WriteFile(svcDef, svcData, 0o600)
+
+	rec := makeProvenanceRecord(t, stateRoot, oldBin, newBin, configPath)
+	rec.ServiceKind = "launchd"
+	rec.ServiceDefPath = svcDef
+	rec.ServiceDefHash = sha256Hex(svcData)
+	rec.BackgroundDaemonPID = 0
+	rec.BackgroundDaemonExe = ""
+
+	err := ValidateProvenance(&rec, ProvenanceValidation{
+		InstalledBinaryPath: newBin,
+		ConfigPath:          configPath,
+	})
+	if err != nil {
+		t.Fatalf("expected valid launchd provenance with service def: %v", err)
+	}
+}
+
+func TestValidateProvenanceLaunchdMissingServiceDefRefuses(t *testing.T) {
+	stateRoot := t.TempDir()
+	oldBin := writeFakeBinary(t, filepath.Join(stateRoot, "old-bin"), "old-binary")
+	newBin := writeFakeBinary(t, filepath.Join(stateRoot, "new-bin"), "new-binary")
+	configPath := filepath.Join(stateRoot, "config.yaml")
+
+	rec := makeProvenanceRecord(t, stateRoot, oldBin, newBin, configPath)
+	rec.ServiceKind = "launchd"
+	// Missing service definition path and hash.
+	rec.ServiceDefPath = ""
+	rec.ServiceDefHash = ""
+	rec.BackgroundDaemonPID = 0
+	rec.BackgroundDaemonExe = ""
+
+	err := ValidateProvenance(&rec, ProvenanceValidation{
+		InstalledBinaryPath: newBin,
+		ConfigPath:          configPath,
+	})
+	if err == nil {
+		t.Fatal("expected error for launchd provenance without service definition")
+	}
+}
+
+func TestValidateProvenanceServiceDefHashMismatchRefuses(t *testing.T) {
+	stateRoot := t.TempDir()
+	oldBin := writeFakeBinary(t, filepath.Join(stateRoot, "old-bin"), "old-binary")
+	newBin := writeFakeBinary(t, filepath.Join(stateRoot, "new-bin"), "new-binary")
+	configPath := filepath.Join(stateRoot, "config.yaml")
+	svcDef := filepath.Join(stateRoot, "agent.plist")
+	svcData := []byte(`<plist version="1.0"><dict></dict></plist>`)
+	os.WriteFile(svcDef, svcData, 0o600)
+
+	rec := makeProvenanceRecord(t, stateRoot, oldBin, newBin, configPath)
+	rec.ServiceKind = "launchd"
+	rec.ServiceDefPath = svcDef
+	rec.ServiceDefHash = sha256Hex(svcData)
+	rec.BackgroundDaemonPID = 0
+	rec.BackgroundDaemonExe = ""
+
+	// Edit the service definition after record creation.
+	os.WriteFile(svcDef, []byte(`<plist version="1.0"><dict><key>changed</key></dict></plist>`), 0o600)
+
+	err := ValidateProvenance(&rec, ProvenanceValidation{
+		InstalledBinaryPath: newBin,
+		ConfigPath:          configPath,
+	})
+	if err == nil {
+		t.Fatal("expected error for changed service definition hash")
+	}
+}
+
+func TestValidateProvenanceUnknownServiceKindRefuses(t *testing.T) {
+	stateRoot := t.TempDir()
+	oldBin := writeFakeBinary(t, filepath.Join(stateRoot, "old-bin"), "old-binary")
+	newBin := writeFakeBinary(t, filepath.Join(stateRoot, "new-bin"), "new-binary")
+	configPath := filepath.Join(stateRoot, "config.yaml")
+
+	rec := makeProvenanceRecord(t, stateRoot, oldBin, newBin, configPath)
+	rec.ServiceKind = "unknown-kind"
+
+	err := ValidateProvenance(&rec, ProvenanceValidation{
+		InstalledBinaryPath: newBin,
+		ConfigPath:          configPath,
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown service kind")
 	}
 }

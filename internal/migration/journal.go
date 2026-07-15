@@ -99,7 +99,10 @@ func readJournal(path string) (*TransactionRecord, error) {
 }
 
 // listJournals reads all transaction journals from the state root, sorted by
-// ID (which encodes a timestamp prefix, so chronological order).
+// ID (which encodes a timestamp prefix, so chronological order). A malformed
+// or untrusted journal causes an error rather than being silently skipped,
+// so that migration, recovery, and rollback selection all fail closed when
+// state is corrupted.
 func listJournals(stateRoot string) ([]*TransactionRecord, error) {
 	txDir := filepath.Join(stateRoot, "transactions")
 	entries, err := os.ReadDir(txDir)
@@ -114,10 +117,14 @@ func listJournals(stateRoot string) ([]*TransactionRecord, error) {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		rec, err := readJournal(filepath.Join(txDir, entry.Name()))
+		jPath := filepath.Join(txDir, entry.Name())
+		// Verify journal file trust before reading.
+		if err := checkTargetTrust(jPath); err != nil {
+			return nil, fmt.Errorf("untrusted journal %s: %w", entry.Name(), err)
+		}
+		rec, err := readJournal(jPath)
 		if err != nil {
-			// Skip unparseable journals; they are handled by recovery.
-			continue
+			return nil, fmt.Errorf("malformed journal %s: %w", entry.Name(), err)
 		}
 		records = append(records, rec)
 	}

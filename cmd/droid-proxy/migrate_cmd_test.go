@@ -2,10 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 )
 
 func TestPrintMigratePortUsageAdvertisesAllForms(t *testing.T) {
@@ -178,8 +182,93 @@ func TestMigratePortDryRunReportNoSecrets(t *testing.T) {
 	}
 }
 
-// captureMigratePortOutputSafely runs migrate-port and captures output,
-// intercepting os.Exit calls.
+// TestMigratePortRefusesSameConfigRunningDaemon verifies that explicit
+// migration detects when a running daemon uses the same config, which causes
+// refusal with stop-and-retry guidance (VAL-PORT-005). We test
+// configUsesThisConfig directly because runMigratePortCommit calls os.Exit
+// on refusal.
+func TestMigratePortRefusesSameConfigRunningDaemon(t *testing.T) {
+	homeDir, configPath, _ := setupMigrationTestEnv(t)
+	_ = homeDir
+
+	configContent := "listen:\n  host: 127.0.0.1\n  port: 8787\nmodels:\n  - alias: m\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    upstream_model: m\n    base_url: http://u/v1\n    api_key_env: KEY\n"
+	os.WriteFile(configPath, []byte(configContent), 0o600)
+
+	// Simulate a running daemon that uses the same config.
+	absConfig, _ := filepath.Abs(configPath)
+	exe, _ := os.Executable()
+	droidProxyDir := filepath.Join(homeDir, ".droid-proxy")
+	os.MkdirAll(droidProxyDir, 0o700)
+
+	// Write PID file with current process PID (alive).
+	pid := os.Getpid()
+	pidStr := strings.TrimSpace(fmt.Sprintf("%d", pid))
+	os.WriteFile(filepath.Join(droidProxyDir, "droid-proxy.pid"), []byte(pidStr), 0o600)
+
+	// Write runtime metadata pointing to the same config.
+	meta := daemon.RuntimeMetadata{
+		PID:        pid,
+		Executable: exe,
+		ConfigPath: absConfig,
+	}
+	metaData, _ := json.MarshalIndent(meta, "", "  ")
+	os.WriteFile(filepath.Join(droidProxyDir, "runtime.json"), metaData, 0o600)
+
+	// configUsesThisConfig should detect the running daemon.
+	foundPID, inUse := configUsesThisConfig(configPath)
+	if !inUse {
+		t.Fatal("expected configUsesThisConfig to detect running daemon using same config")
+	}
+	if foundPID != pid {
+		t.Fatalf("found PID %d, want %d", foundPID, pid)
+	}
+
+	// Clean up daemon state.
+	os.Remove(filepath.Join(droidProxyDir, "droid-proxy.pid"))
+	os.Remove(filepath.Join(droidProxyDir, "runtime.json"))
+}
+
+// TestMigratePortAllowsDifferentConfigRunningDaemon verifies that explicit
+// migration proceeds when a running daemon uses a different config, leaving
+// the running daemon's config untouched (VAL-PORT-005).
+func TestMigratePortAllowsDifferentConfigRunningDaemon(t *testing.T) {
+	homeDir, configPath, _ := setupMigrationTestEnv(t)
+	_ = homeDir
+
+	configContent := "listen:\n  host: 127.0.0.1\n  port: 8787\nmodels:\n  - alias: m\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    upstream_model: m\n    base_url: http://u/v1\n    api_key_env: KEY\n"
+	os.WriteFile(configPath, []byte(configContent), 0o600)
+
+	// Simulate a running daemon that uses a DIFFERENT config.
+	otherConfig := filepath.Join(filepath.Dir(configPath), "other.yaml")
+	os.WriteFile(otherConfig, []byte("listen:\n  host: 127.0.0.1\n  port: 8787\n"), 0o600)
+
+	absOther, _ := filepath.Abs(otherConfig)
+	exe, _ := os.Executable()
+	droidProxyDir := filepath.Join(homeDir, ".droid-proxy")
+	os.MkdirAll(droidProxyDir, 0o700)
+
+	pid := os.Getpid()
+	pidStr := strings.TrimSpace(fmt.Sprintf("%d", pid))
+	os.WriteFile(filepath.Join(droidProxyDir, "droid-proxy.pid"), []byte(pidStr), 0o600)
+
+	meta := daemon.RuntimeMetadata{
+		PID:        pid,
+		Executable: exe,
+		ConfigPath: absOther,
+	}
+	metaData, _ := json.MarshalIndent(meta, "", "  ")
+	os.WriteFile(filepath.Join(droidProxyDir, "runtime.json"), metaData, 0o600)
+
+	// configUsesThisConfig should NOT detect the daemon (different config).
+	_, inUse := configUsesThisConfig(configPath)
+	if inUse {
+		t.Fatal("expected configUsesThisConfig to not detect different-config daemon")
+	}
+
+	// Clean up daemon state.
+	os.Remove(filepath.Join(droidProxyDir, "droid-proxy.pid"))
+	os.Remove(filepath.Join(droidProxyDir, "runtime.json"))
+}
 func captureMigratePortOutputSafely(args []string) (stdout, stderr string, exitCode int) {
 	oldStdout := os.Stdout
 	oldStderr := os.Stderr

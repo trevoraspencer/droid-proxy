@@ -41,6 +41,9 @@ func setupProvenanceForTest(t *testing.T, stateRoot, configPath, oldBin, newBin 
 		ConfigPath:          configPath,
 		ConfigHash:          configHash,
 		CreatedAt:           "2025-01-01T00:00:00Z",
+		// Background-daemon conditional provenance: PID and executable.
+		BackgroundDaemonPID: 12345,
+		BackgroundDaemonExe: newBin,
 	}
 	if err := WriteProvenance(stateRoot, rec); err != nil {
 		t.Fatal(err)

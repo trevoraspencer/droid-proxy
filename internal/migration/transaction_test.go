@@ -530,16 +530,15 @@ func TestRecoveryRefusesMalformedJournal(t *testing.T) {
 	malformedPath := filepath.Join(txDir, "20260101-120000-abc123.json")
 	os.WriteFile(malformedPath, []byte(`{bad json`), 0o600)
 
-	// listJournals should skip it silently.
-	records, err := listJournals(stateRoot)
-	if err != nil {
-		t.Fatal(err)
+	// listJournals must fail closed rather than silently skipping the
+	// malformed journal. Every malformed or untrusted journal block must
+	// cause migration, recovery, and rollback selection to refuse.
+	_, err := listJournals(stateRoot)
+	if err == nil {
+		t.Fatal("expected error for malformed journal, got nil")
 	}
-	// The malformed journal is skipped.
-	for _, r := range records {
-		if r.ID == "20260101-120000-abc123" {
-			t.Fatal("malformed journal should be skipped")
-		}
+	if !strings.Contains(err.Error(), "malformed journal") {
+		t.Fatalf("error should mention malformed journal: %v", err)
 	}
 }
 
@@ -1278,4 +1277,125 @@ func TestTransactionWithInjectedDestinationPort(t *testing.T) {
 
 	assertFileContains(t, configPath, "port: 8787")
 	assertFileContains(t, factoryPath, ":8787")
+}
+
+// --- Malformed/untrusted journal fail-closed ---
+
+// TestMalformedJournalBlocksCommit verifies that a malformed journal file
+// causes migration commit to fail rather than silently skipping the journal.
+func TestMalformedJournalBlocksCommit(t *testing.T) {
+	home, configPath, factoryPath := setupTxTestEnv(t)
+	writeTestConfig(t, configPath)
+	writeTestFactory(t, factoryPath)
+
+	stateRoot := filepath.Join(home, ".droid-proxy", "migration")
+	txDir := filepath.Join(stateRoot, "transactions")
+	os.MkdirAll(txDir, 0o700)
+
+	// Write a malformed journal file.
+	malformedPath := filepath.Join(txDir, "20250101-000000-abc123-0000000001.json")
+	os.WriteFile(malformedPath, []byte("{not valid json"), 0o600)
+
+	_, err := planAndCommit(t, configPath, factoryPath, TransactionOptions{})
+	if err == nil {
+		t.Fatal("expected error when malformed journal exists")
+	}
+	if !strings.Contains(err.Error(), "malformed journal") {
+		t.Fatalf("error should mention malformed journal: %v", err)
+	}
+
+	// Config should be unchanged.
+	assertFileContains(t, configPath, "port: 8787")
+}
+
+// TestMalformedJournalBlocksRecovery verifies that a malformed journal causes
+// explicit recovery to fail.
+func TestMalformedJournalBlocksRecovery(t *testing.T) {
+	home, _, _ := setupTxTestEnv(t)
+	stateRoot := filepath.Join(home, ".droid-proxy", "migration")
+	txDir := filepath.Join(stateRoot, "transactions")
+	os.MkdirAll(txDir, 0o700)
+
+	malformedPath := filepath.Join(txDir, "20250101-000000-abc123-0000000001.json")
+	os.WriteFile(malformedPath, []byte("not json at all"), 0o600)
+
+	_, err := RecoverIncomplete(TransactionOptions{StateRoot: stateRoot})
+	if err == nil {
+		t.Fatal("expected error for malformed journal during recovery")
+	}
+}
+
+// TestMalformedJournalBlocksRollbackSelection verifies that a malformed
+// journal causes rollback candidate selection to fail.
+func TestMalformedJournalBlocksRollbackSelection(t *testing.T) {
+	home, _, _ := setupTxTestEnv(t)
+	stateRoot := filepath.Join(home, ".droid-proxy", "migration")
+	txDir := filepath.Join(stateRoot, "transactions")
+	os.MkdirAll(txDir, 0o700)
+
+	malformedPath := filepath.Join(txDir, "20250101-000000-abc123-0000000001.json")
+	os.WriteFile(malformedPath, []byte("{bad"), 0o600)
+
+	_, err := SelectRollbackCandidates(stateRoot, "")
+	if err == nil {
+		t.Fatal("expected error for malformed journal during rollback selection")
+	}
+}
+
+// TestUntrustedJournalBlocksRecovery verifies that a symlinked journal file
+// is rejected during recovery.
+func TestUntrustedJournalBlocksRecovery(t *testing.T) {
+	home, _, _ := setupTxTestEnv(t)
+	stateRoot := filepath.Join(home, ".droid-proxy", "migration")
+	txDir := filepath.Join(stateRoot, "transactions")
+	os.MkdirAll(txDir, 0o700)
+
+	// Create a real file and a symlink to it in the transactions dir.
+	realFile := filepath.Join(home, "real.json")
+	os.WriteFile(realFile, []byte(`{"id":"test","status":"completed"}`), 0o600)
+	linkPath := filepath.Join(txDir, "20250101-000000-abc123-0000000001.json")
+	os.Symlink(realFile, linkPath)
+
+	_, err := RecoverIncomplete(TransactionOptions{StateRoot: stateRoot})
+	if err == nil {
+		t.Fatal("expected error for untrusted symlinked journal")
+	}
+}
+
+// TestCommitRejectsChangedTargetHash verifies that the transaction refuses to
+// commit when the target file's hash changes between planning and commit
+// (third hash), protecting user edits made after migration was planned.
+func TestCommitRejectsChangedTargetHash(t *testing.T) {
+	_, configPath, factoryPath := setupTxTestEnv(t)
+	writeTestConfig(t, configPath)
+	writeTestFactory(t, factoryPath)
+
+	// Plan the migration.
+	plan, err := PlanMigration(PlanOptions{
+		ConfigPath:  configPath,
+		FactoryPath: factoryPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a user edit after planning: modify the config.
+	if err := os.WriteFile(configPath, []byte("listen:\n  host: 127.0.0.1\n  port: 8787\n# user edited\nmodels:\n  - alias: m\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    upstream_model: m\n    base_url: http://u/v1\n    api_key_env: KEY\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit should fail because the config hash changed after planning.
+	_, err = CommitTransaction(plan, TransactionOptions{})
+	if err == nil {
+		t.Fatal("expected error for changed target hash after planning")
+	}
+	if !strings.Contains(err.Error(), "hash changed after planning") {
+		t.Fatalf("error should mention hash changed after planning: %v", err)
+	}
+
+	// Config should be unchanged (still has the user edit).
+	data, _ := os.ReadFile(configPath)
+	if !strings.Contains(string(data), "# user edited") {
+		t.Fatal("user edit was overwritten despite hash mismatch")
+	}
 }

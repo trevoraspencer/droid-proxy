@@ -119,6 +119,9 @@ type ProvenanceValidation struct {
 //   - the config path matches
 //   - the config file still has the pre-upgrade hash (no later edits)
 //   - the record fields are non-empty and internally consistent
+//   - conditional provenance for the service kind is complete:
+//   - launchd/systemd: service definition path and hash are present and match
+//   - background-daemon: daemon PID and executable are present
 //
 // Returns an error describing why the record is invalid, or nil if valid.
 func ValidateProvenance(rec *ProvenanceRecord, val ProvenanceValidation) error {
@@ -141,6 +144,29 @@ func ValidateProvenance(rec *ProvenanceRecord, val ProvenanceValidation) error {
 	}
 	if rec.ServiceKind == "" {
 		return fmt.Errorf("provenance record is missing service kind")
+	}
+
+	// Conditional provenance: service kind determines which identity
+	// fields are required.
+	switch rec.ServiceKind {
+	case "launchd", "systemd":
+		if rec.ServiceDefPath == "" || rec.ServiceDefHash == "" {
+			return fmt.Errorf("provenance record for %s is missing service definition identity", rec.ServiceKind)
+		}
+		// Revalidate: service definition hash must match current file.
+		svcHash, err := hashFile(rec.ServiceDefPath)
+		if err != nil {
+			return fmt.Errorf("cannot verify service definition: %w", err)
+		}
+		if svcHash != rec.ServiceDefHash {
+			return fmt.Errorf("provenance service definition hash mismatch (service definition changed after record creation)")
+		}
+	case "background-daemon":
+		if rec.BackgroundDaemonPID == 0 || rec.BackgroundDaemonExe == "" {
+			return fmt.Errorf("provenance record for background-daemon is missing daemon identity (pid and executable)")
+		}
+	default:
+		return fmt.Errorf("provenance record has unknown service kind %q", rec.ServiceKind)
 	}
 
 	// Revalidate: installed binary path must match.

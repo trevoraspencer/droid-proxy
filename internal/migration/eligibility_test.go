@@ -115,6 +115,25 @@ func TestAnalyzeConfigBytesRefusesMultipleDocuments(t *testing.T) {
 	}
 }
 
+func TestAnalyzeConfigBytesBlockScalarNotMultipleDocs(t *testing.T) {
+	// A "---" inside a literal block scalar (|) is content, not a document
+	// separator. The parser must not treat this as multiple documents.
+	raw := []byte("listen:\n  host: 127.0.0.1\n  port: 8787\ndescription: |\n  ---\n  This is not a separator\n")
+	a, _ := AnalyzeConfigBytes(raw, 8787, 9787)
+	if !a.Eligible {
+		t.Fatalf("expected eligible, but got refusal: %s", a.Reason)
+	}
+}
+
+func TestAnalyzeConfigBytesFoldedScalarNotMultipleDocs(t *testing.T) {
+	// A "---" inside a folded block scalar (>) is content.
+	raw := []byte("listen:\n  host: 127.0.0.1\n  port: 8787\nnotes: >\n  ---\n  folded content\n  still folded\n")
+	a, _ := AnalyzeConfigBytes(raw, 8787, 9787)
+	if !a.Eligible {
+		t.Fatalf("expected eligible for folded scalar, but got refusal: %s", a.Reason)
+	}
+}
+
 func TestAnalyzeConfigBytesNoopOmittedPort(t *testing.T) {
 	raw := []byte("listen:\n  host: 127.0.0.1\n")
 	a, _ := AnalyzeConfigBytes(raw, 8787, 9787)
@@ -151,13 +170,43 @@ func TestAnalyzeConfigBytesNoopExplicitZero(t *testing.T) {
 }
 
 func TestAnalyzeConfigBytesRefusesAliasPort(t *testing.T) {
+	// An alias node for listen.port must be refused, not silently accepted.
 	raw := []byte("defaults: &defs\n  port: 8787\nlisten:\n  host: 127.0.0.1\n  port: *defs.port\n")
-	// This YAML is invalid for yaml.v3 in this form, but let's test alias properly
-	raw = []byte("port_value: &pv\n  8787\nlisten:\n  host: 127.0.0.1\n  <<: {port: 8787}\n")
 	a, _ := AnalyzeConfigBytes(raw, 8787, 9787)
-	// Merge keys may or may not produce a standalone port node; check we don't
-	// silently accept ambiguous state.
-	_ = a
+	// yaml.v3 does not resolve aliases across separate anchors defined on
+	// nested keys like this. The port node is an AliasNode, which
+	// checkPortScalarSafety must refuse.
+	if a.Eligible {
+		t.Fatal("expected refusal for alias port scalar")
+	}
+}
+
+func TestAnalyzeConfigBytesMergeKeyPortIsNoopOrRefused(t *testing.T) {
+	// yaml.v3 Node-based parsing does NOT resolve merge keys (<<). A port
+	// under a merge key is not found as listen.port, so migration is a
+	// safe no-op. This test asserts that the merge-derived port is never
+	// silently migrated.
+	raw := []byte("defaults: &defs\n  port: 8787\nlisten:\n  host: 127.0.0.1\n  <<: *defs\n")
+	a, _ := AnalyzeConfigBytes(raw, 8787, 9787)
+	if a.Eligible {
+		t.Fatal("expected no-op or refusal for merge-derived port, not eligible")
+	}
+}
+
+func TestAnalyzeConfigBytesMergeKeyDoesNotSilentlyMigrate(t *testing.T) {
+	// A config where the port appears ONLY under a merge key must not be
+	// migrated. The rewrite must not touch this config.
+	raw := []byte("defaults: &defs\n  port: 8787\nlisten:\n  host: 127.0.0.1\n  <<: *defs\n")
+	a, _ := AnalyzeConfigBytes(raw, 8787, 9787)
+	if a.Eligible {
+		// If somehow eligible, verify the rewrite would fail or produce
+		// incorrect results - but this should never happen.
+		t.Fatal("merge-derived port must not be eligible for migration")
+	}
+	// The port should not be found as listen.port. This is a safe no-op.
+	if a.PortNode != nil {
+		t.Fatal("merge-derived port should not have a direct PortNode")
+	}
 }
 
 func TestAnalyzeConfigBytesRefusesAnchorPort(t *testing.T) {
@@ -460,5 +509,66 @@ func TestRewriteListenPortScalarIPv6Config(t *testing.T) {
 	}
 	if !strings.Contains(string(result), "host: '::1'") {
 		t.Fatalf("host not preserved: %s", result)
+	}
+}
+
+// TestRewriteListenPortScalarUTF8MultiByte verifies that YAML column positions
+// (which are rune-based) are correctly converted to byte offsets when
+// multi-byte UTF-8 characters appear on the port node's line before the
+// port value.
+func TestRewriteListenPortScalarUTF8MultiByte(t *testing.T) {
+	// Flow mapping with a multi-byte character ("café") before the port
+	// value. The YAML parser reports the port column as a rune count, so
+	// nodeByteOffset must account for the extra byte in é (2 bytes).
+	raw := []byte("listen: {host: 127.0.0.1, note: \"café\", port: 8787}\n")
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("yaml parse: %v", err)
+	}
+	root := doc.Content[0]
+	listen := findChild(root, "listen")
+	if listen == nil {
+		t.Fatal("listen node not found")
+	}
+	portNode := findChild(listen, "port")
+	if portNode == nil {
+		t.Fatal("port node not found")
+	}
+
+	result, err := RewriteListenPortScalar(raw, portNode, 8787, 9787)
+	if err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	expected := "listen: {host: 127.0.0.1, note: \"café\", port: 9787}\n"
+	if string(result) != expected {
+		t.Fatalf("result = %q, want %q", result, expected)
+	}
+	// Verify the multi-byte character is preserved.
+	if !strings.Contains(string(result), "café") {
+		t.Fatalf("multi-byte character not preserved: %s", result)
+	}
+}
+
+// TestRewriteListenPortScalarUTF8Comment verifies rewrite correctness when a
+// multi-byte comment appears on a line above the port scalar.
+func TestRewriteListenPortScalarUTF8Comment(t *testing.T) {
+	raw := []byte("# テスト config\nlisten:\n  host: 127.0.0.1\n  port: 8787\n")
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("yaml parse: %v", err)
+	}
+	root := doc.Content[0]
+	listen := findChild(root, "listen")
+	portNode := findChild(listen, "port")
+
+	result, err := RewriteListenPortScalar(raw, portNode, 8787, 9787)
+	if err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	if !strings.Contains(string(result), "port: 9787") {
+		t.Fatalf("port not changed: %s", result)
+	}
+	if !strings.Contains(string(result), "テスト") {
+		t.Fatalf("multi-byte comment not preserved: %s", result)
 	}
 }

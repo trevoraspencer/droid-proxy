@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/migration"
 )
 
 // PreflightResult reports whether an omitted-port start may proceed.
@@ -69,6 +70,19 @@ func CoherencePreflight(listenHost string, models []*config.Model, factoryPath s
 				"the selected Factory settings file is malformed and cannot be read; " +
 					"make listen.port explicit or run 'droid-proxy migrate-port' to resolve",
 			),
+		}, nil
+	}
+
+	// Detect duplicate JSON member names anywhere in the document, exactly
+	// like migration eligibility. Duplicate customModels, model, provider,
+	// or baseUrl members (including escaped-equivalent names) make the
+	// document unsafe and the preflight must refuse rather than relying on
+	// decoder last-key-wins semantics.
+	if dupes, err := migration.DetectJSONDuplicates(data); err != nil || len(dupes) > 0 {
+		return PreflightResult{
+			Allowed: false,
+			Reason: "the selected Factory settings file has duplicate member names and is unsafe; " +
+				"make listen.port explicit or run 'droid-proxy migrate-port' to resolve",
 		}, nil
 	}
 

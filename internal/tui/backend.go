@@ -26,12 +26,13 @@ import (
 // discovery, OAuth manager, and daemon controls together for the TUI. It holds
 // no UI state.
 type backend struct {
-	configPath  string
-	factoryPath string
-	baseURL     string
-	portIsZero  bool // true when listen.port is explicitly 0
-	factoryKey  string
-	manager     *oauth.Manager
+	configPath       string
+	factoryPath      string
+	baseURL          string
+	portIsZero       bool // true when listen.port is explicitly 0
+	factoryKey       string
+	manager          *oauth.Manager
+	migrationMessage string // sanitized message from the last restart migration
 }
 
 func newBackend(configPath string) *backend {
@@ -243,21 +244,77 @@ func (b *backend) restartHint() string {
 	return " Restart the proxy (r on the dashboard) to apply."
 }
 
+// consumeMigrationMessage returns and clears the sanitized migration message
+// from the last restartProxy call. Returns empty when no migration occurred.
+func (b *backend) consumeMigrationMessage() string {
+	msg := b.migrationMessage
+	b.migrationMessage = ""
+	return msg
+}
+
 // attemptDeferredMigration checks for trusted deferred upgrade provenance
 // and performs automatic migration if eligible. This is the verified
-// controlled-restart integration point for TUI 'r'.
-func (b *backend) attemptDeferredMigration() {
+// controlled-restart integration point for TUI 'r'. It returns a sanitized
+// message describing the migration outcome, or empty if no migration
+// occurred. Production managed restart paths must hold destination
+// protection through the coherent restart rather than passing a nil checker.
+func (b *backend) attemptDeferredMigration() string {
 	exe, err := os.Executable()
 	if err != nil {
-		return
+		return ""
 	}
 	if real, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = real
 	}
-	_, _ = migration.AttemptDeferredMigration(migration.ManagedRestartOptions{
+
+	// Plan the migration first to determine eligibility and the
+	// destination port.
+	plan, err := migration.PlanMigration(migration.PlanOptions{
+		ConfigPath: b.configPath,
+	})
+	if err != nil {
+		return ""
+	}
+
+	var reservation *migration.DestinationReservation
+	if plan.ConfigEligible && !plan.FactoryUnsafe && plan.HasChanges() {
+		// Reserve the destination port and hold it through the restart
+		// transition. A nil or transient check is not acceptable.
+		reservation, err = migration.ReserveDestination(plan.Host, plan.NewPort)
+		if err != nil {
+			return fmt.Sprintf("automatic migration refused: %v", err)
+		}
+		defer reservation.Close()
+	}
+
+	opts := migration.ManagedRestartOptions{
 		ConfigPath:          b.configPath,
 		InstalledBinaryPath: exe,
-	})
+	}
+	if reservation != nil {
+		opts.DestinationChecker = reservation.HeldChecker()
+	}
+
+	result, err := migration.AttemptDeferredMigration(opts)
+	if err != nil {
+		return fmt.Sprintf("automatic migration warning: %v", err)
+	}
+
+	switch result.Action {
+	case "migrated":
+		msg := "automatic port migration completed (listen.port 8787 -> 9787)."
+		if result.Result != nil {
+			msg += fmt.Sprintf(" transaction: %s", result.Result.ID)
+		}
+		return msg
+	case "skipped":
+		if result.Reason != "" {
+			return fmt.Sprintf("automatic port migration skipped: %s", result.Reason)
+		}
+		return ""
+	default:
+		return ""
+	}
 }
 
 // restartProxy restarts the proxy. With a managed service installed it goes
@@ -265,12 +322,18 @@ func (b *backend) attemptDeferredMigration() {
 // fight KeepAlive/Restart=always and race a second daemon onto the port.
 // TUI 'r' delegates to the verified controlled-restart path: it checks for
 // deferred upgrade provenance and performs automatic migration before
-// restarting.
+// restarting. Migration results are propagated as actionable messages.
 func (b *backend) restartProxy() error {
 	// Verified controlled restart: check for deferred provenance and
 	// perform automatic migration if eligible. This is the only path
-	// through which automatic migration runs.
-	b.attemptDeferredMigration()
+	// through which automatic migration runs. The result message is
+	// propagated so TUI restart failures are actionable.
+	migrationMsg := b.attemptDeferredMigration()
+	if migrationMsg != "" {
+		b.migrationMessage = migrationMsg
+	} else {
+		b.migrationMessage = ""
+	}
 
 	if serviceInstalled() {
 		if err := restartService(); err != nil {

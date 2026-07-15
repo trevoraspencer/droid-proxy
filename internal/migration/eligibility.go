@@ -2,6 +2,7 @@ package migration
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -64,7 +65,10 @@ func AnalyzeConfigBytes(raw []byte, oldPort, newPort int) (*ConfigAnalysis, erro
 		return analysis, nil
 	}
 
-	// Check for multiple YAML documents.
+	// Check for multiple YAML documents using the parser, not naive text
+	// matching. A "---" inside a block scalar (literal | or folded >) is
+	// content, not a document separator; only the parser knows the
+	// difference.
 	if hasMultipleDocuments(raw) {
 		analysis.Reason = "config contains multiple YAML documents; migration requires a single document"
 		return analysis, nil
@@ -256,16 +260,27 @@ func sourceHasDecimalPort(raw []byte, portNode *yaml.Node, port int) bool {
 }
 
 // hasMultipleDocuments checks whether the raw YAML contains more than one
-// document (separated by `---`).
+// document. It uses a yaml.Decoder to count documents rather than naive text
+// matching, so "---" inside block scalars (literal | or folded >) is correctly
+// treated as content rather than a document separator.
 func hasMultipleDocuments(raw []byte) bool {
+	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
 	count := 0
-	for _, line := range strings.Split(string(raw), "\n") {
-		trimmed := strings.TrimRight(line, "\r")
-		if trimmed == "---" || strings.HasPrefix(trimmed, "--- ") {
-			count++
+	for {
+		var node yaml.Node
+		if err := dec.Decode(&node); err != nil {
+			if err == io.EOF {
+				break
+			}
+			// Parse error: let the earlier unmarshal handle reporting.
+			break
+		}
+		count++
+		if count > 1 {
+			return true
 		}
 	}
-	return count > 0
+	return count > 1
 }
 
 // sanitizeYAMLError strips any file path references from a YAML parse error.

@@ -53,7 +53,10 @@ func RewriteListenPortScalar(raw []byte, portNode *yaml.Node, oldPort, newPort i
 }
 
 // nodeByteOffset converts a 1-indexed YAML line/column position into a 0-indexed
-// byte offset in the raw document.
+// byte offset in the raw document. YAML line/column positions are rune-based
+// (character counts), not byte counts, so multi-byte UTF-8 characters on the
+// target line before the column position must be accounted for when computing
+// the byte offset.
 func nodeByteOffset(raw []byte, line, col int) (int64, error) {
 	if line < 1 || col < 1 {
 		return 0, fmt.Errorf("invalid line/column: %d/%d", line, col)
@@ -62,11 +65,39 @@ func nodeByteOffset(raw []byte, line, col int) (int64, error) {
 	currentLine := 1
 	for _, b := range raw {
 		if currentLine == line {
-			targetCol := col - 1 // convert to 0-indexed
-			if int(offset)+targetCol > len(raw) {
-				return 0, fmt.Errorf("column %d exceeds line %d length", col, line)
+			// We are on the target line. Column is 1-indexed and
+			// rune-based. Count runes from the line start to find the
+			// correct byte offset, handling multi-byte UTF-8.
+			lineStart := offset
+			lineBytes := raw[lineStart:]
+			// Find the end of the line (or end of document).
+			lineEnd := int64(len(raw))
+			for i, b := range lineBytes {
+				if b == '\n' {
+					lineEnd = lineStart + int64(i)
+					break
+				}
 			}
-			return offset + int64(targetCol), nil
+			targetCol := col - 1 // convert to 0-indexed rune count
+			runeCount := 0
+			bytePos := lineStart
+			for bytePos < lineEnd {
+				if runeCount == targetCol {
+					return bytePos, nil
+				}
+				// Advance one UTF-8 rune.
+				r := rune(lineBytes[bytePos-lineStart])
+				size := 1
+				if r >= 0x80 {
+					_, size = decodeRune(lineBytes[bytePos-lineStart:])
+				}
+				bytePos += int64(size)
+				runeCount++
+			}
+			if runeCount == targetCol {
+				return bytePos, nil
+			}
+			return 0, fmt.Errorf("column %d exceeds line %d length (runes: %d)", col, line, runeCount)
 		}
 		offset++
 		if b == '\n' {
@@ -74,6 +105,34 @@ func nodeByteOffset(raw []byte, line, col int) (int64, error) {
 		}
 	}
 	return 0, fmt.Errorf("line %d not found in document", line)
+}
+
+// decodeRune decodes the first UTF-8 rune in b and returns the rune and its
+// byte size. This mirrors utf8.DecodeRune but is inlined to avoid importing
+// unicode/utf8 in this performance-sensitive path.
+func decodeRune(b []byte) (rune, int) {
+	if len(b) == 0 {
+		return 0, 0
+	}
+	c := b[0]
+	if c < 0x80 {
+		return rune(c), 1
+	}
+	if c < 0xC2 {
+		return 0xFFFD, 1
+	}
+	var size int
+	if c < 0xE0 {
+		size = 2
+	} else if c < 0xF0 {
+		size = 3
+	} else {
+		size = 4
+	}
+	if size > len(b) {
+		return 0xFFFD, 1
+	}
+	return 0xFFFD, size // exact rune value is irrelevant for offset calculation
 }
 
 func isDigitByte(b byte) bool {

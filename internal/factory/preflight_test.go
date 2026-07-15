@@ -199,6 +199,54 @@ func TestCoherencePreflightMalformedJSONRefuses(t *testing.T) {
 	}
 }
 
+func TestCoherencePreflightDuplicateTopLevelMembersRefuses(t *testing.T) {
+	dir := t.TempDir()
+	// Duplicate top-level customModels: last-key-wins would parse this
+	// without error, but duplicate members are unsafe.
+	body := `{"customModels":[],"customModels":[{"model":"m","provider":"generic-chat-completion-api","baseUrl":"http://127.0.0.1:8787"}]}`
+	p := writeSettings(t, dir, body)
+	models := []*config.Model{
+		{Alias: "m", FactoryProvider: config.FactoryProviderGeneric},
+	}
+	res, err := CoherencePreflight("127.0.0.1", models, p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Allowed {
+		t.Fatal("expected refusal for duplicate top-level customModels, got Allowed=true")
+	}
+}
+
+func TestCoherencePreflightDuplicateIdentityFieldsRefuses(t *testing.T) {
+	dir := t.TempDir()
+	// Duplicate model field within a customModels entry.
+	body := `{"customModels":[{"model":"m","model":"m","provider":"generic-chat-completion-api","baseUrl":"http://127.0.0.1:8787"}]}`
+	p := writeSettings(t, dir, body)
+	models := []*config.Model{
+		{Alias: "m", FactoryProvider: config.FactoryProviderGeneric},
+	}
+	res, err := CoherencePreflight("127.0.0.1", models, p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Allowed {
+		t.Fatal("expected refusal for duplicate model field, got Allowed=true")
+	}
+}
+
+func TestCoherencePreflightNullCustomModelsAllowed(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"customModels":null}`
+	p := writeSettings(t, dir, body)
+	res, err := CoherencePreflight("127.0.0.1", nil, p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Allowed {
+		t.Fatalf("expected Allowed=true for null customModels, got refusal: %s", res.Reason)
+	}
+}
+
 func TestCoherencePreflightEmptyHostDefaultsToIPv4(t *testing.T) {
 	dir := t.TempDir()
 	models := []*config.Model{

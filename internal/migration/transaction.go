@@ -249,11 +249,22 @@ func prepareTarget(displayPath, absPath, stateRoot, txID, name string, originalD
 
 // commitTarget writes the staged content to the target path, preserving the
 // original file mode and ownership. It rechecks the target identity (regular,
-// user-owned) before writing.
+// user-owned) and verifies that the current file hash still matches the
+// expected old hash before writing. If the file was edited between planning
+// and commit (third hash), the commit refuses to overwrite the user's edit.
 func commitTarget(t *TargetRecord) error {
 	// Recheck trust before writing.
 	if err := checkTargetTrust(t.Path); err != nil {
 		return err
+	}
+	// Recheck that the target still has the expected old hash. If the
+	// file changed after planning, refuse to overwrite the user's edit.
+	currentHash, err := hashFile(t.Path)
+	if err != nil {
+		return fmt.Errorf("recheck target hash %s: %w", t.Path, err)
+	}
+	if currentHash != t.OldHash {
+		return fmt.Errorf("target %s has unexpected content (hash changed after planning); manual intervention required; backup at %s", t.Path, t.BackupPath)
 	}
 	// Read staged content.
 	stagedData, err := os.ReadFile(t.StagedPath)
