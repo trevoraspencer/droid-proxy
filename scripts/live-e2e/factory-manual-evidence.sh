@@ -29,7 +29,7 @@ rows=(
   print -r -- "# Factory Droid Manual Evidence"
   print -r -- ""
   print -r -- "- Run id: $LIVE_E2E_RUN_ID"
-  print -r -- "- Proxy base URL: http://127.0.0.1:8787"
+  print -r -- "- Proxy base URL: $LIVE_E2E_PROXY_URL"
   print -r -- "- Settings template has already pointed custom models at droid-proxy when the final runner reaches this step."
   print -r -- ""
   print -r -- "For each model, select the Factory Droid custom model and run both prompts."

@@ -198,7 +198,7 @@ func TestWorkflowValidation_FactorySettingsExamplesDriveRuntimeEndpoints(t *test
 	for _, example := range settings {
 		t.Run(example.File, func(t *testing.T) {
 			for _, cm := range example.CustomModels {
-				if cm.BaseURL != "http://127.0.0.1:8787" || strings.Contains(cm.APIKey, "sk-") {
+				if cm.BaseURL != "http://127.0.0.1:9787" || strings.Contains(cm.APIKey, "sk-") {
 					t.Fatalf("unsafe Factory settings example: %+v", cm)
 				}
 				for path, body := range modelBodies {

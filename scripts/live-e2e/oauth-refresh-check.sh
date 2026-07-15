@@ -11,7 +11,7 @@ ensure_proxy_health
 require_cmd jq
 require_cmd shasum
 
-API_BASE="http://127.0.0.1:8787"
+API_BASE="$LIVE_E2E_PROXY_URL"
 
 token_hash() {
   local file="$1"

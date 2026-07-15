@@ -26,10 +26,10 @@ pgrep -fl 'droid-proxy|cursor-proxy' \
   | tee "$LIVE_E2E_RUN_DIR/processes.before.txt" || true
 
 lsof -nP -iTCP -sTCP:LISTEN \
-  | rg 'droid-proxy|cursor-proxy|:8787|:1455|:56121|:8000|:11434' \
+  | rg "droid-proxy|cursor-proxy|:${LIVE_E2E_PROXY_PORT}|:1455|:56121|:8000|:11434" \
   | tee "$LIVE_E2E_RUN_DIR/listeners.before.txt" || true
 
-for port in 8787 1455 56121; do
+for port in "$LIVE_E2E_PROXY_PORT" 1455 56121; do
   if assert_port_free "$port"; then
     info "Port $port is free"
   else

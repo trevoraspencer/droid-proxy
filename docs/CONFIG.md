@@ -72,7 +72,7 @@ models:                  # required, non-empty
 | key | type | default | description |
 |---|---|---|---|
 | `host` | string | `127.0.0.1` | Bind host. Use `0.0.0.0` to expose beyond localhost. |
-| `port` | int | `8787` | TCP port. |
+| `port` | int | `9787` | TCP port. Use `droid-proxy migrate-port` to migrate an explicit `8787` config. |
 
 ## `server`
 

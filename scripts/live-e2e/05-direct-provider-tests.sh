@@ -9,7 +9,7 @@ cd "$LIVE_E2E_REPO_ROOT"
 load_local_env
 ensure_proxy_health
 
-API_BASE="http://127.0.0.1:8787"
+API_BASE="$LIVE_E2E_PROXY_URL"
 MODELS_OUT="$LIVE_E2E_RUN_DIR/models.before-direct-tests.json"
 
 if ! curl -fsS \

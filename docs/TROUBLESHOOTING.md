@@ -7,28 +7,32 @@ reports and how to read them.
 
 ## `localhost` shows a different server (or nothing) while the proxy is healthy
 
-droid-proxy binds **IPv4 loopback only** (`127.0.0.1:8787` by default). macOS
+droid-proxy binds **IPv4 loopback only** (`127.0.0.1:9787` by default). macOS
 resolves `localhost` to the IPv6 address `::1` first, so any process listening
-on `[::1]:8787` silently captures every `localhost:8787` request while the
+on `[::1]:9787` silently captures every `localhost:9787` request while the
 proxy keeps serving normally on `127.0.0.1`.
 
-Known port squatters on 8787:
+The default port was moved from `8787` to `9787` to avoid conflicts with other
+local tools. Known port squatters on the **old** default `8787` (historical
+context — these tools still use `8787`, which is why droid-proxy moved away
+from it):
 
 - **Cursor's MCP OAuth loopback** — Cursor binds a temporary OAuth callback
   server on port 8787 whenever it (re)connects to remote MCP servers that use
   OAuth. It comes and goes with Cursor restarts and token refreshes.
 - **`wrangler dev`** — Cloudflare's dev server defaults to port 8787.
+- **Dask** — the Dask dashboard can occupy `8787` by default.
 
 What to do:
 
 - Always health-check with the IPv4 address, never `localhost`:
 
   ```bash
-  curl -s http://127.0.0.1:8787/health
+  curl -s http://127.0.0.1:9787/health
   ```
 
 - `droid-proxy doctor` probes both stacks and prints
-  `warning: a different server is listening on [::1]:8787` when a squatter is
+  `warning: a different server is listening on [::1]:9787` when a squatter is
   present, and flags a hard `health probe: issue:` when something other than
   droid-proxy answers on the configured address itself.
 - Factory settings written by `droid-proxy config` already use
@@ -36,6 +40,9 @@ What to do:
 - To avoid the collision entirely, move the proxy: change `listen.port` in
   `config.yaml`, run `droid-proxy restart`, then re-sync Factory settings
   (`droid-proxy config`, `S` on the dashboard) so `baseUrl` follows the port.
+- If you are still on the old default `8787`, run
+  `droid-proxy migrate-port --config <path>` (see
+  [docs/UPGRADE.md](UPGRADE.md) for the port migration guide).
 
 ## Factory shows a model, but requests fail with "model not configured"
 
@@ -81,8 +88,8 @@ droid-proxy doctor --config config.yaml --env-file .env.local
 
 ```bash
 droid-proxy status
-curl -s http://127.0.0.1:8787/health
-curl -s http://127.0.0.1:8787/v1/models | jq '.data[].id'
+curl -s http://127.0.0.1:9787/health
+curl -s http://127.0.0.1:9787/v1/models | jq '.data[].id'
 droid-proxy logs -n 100
 ```
 

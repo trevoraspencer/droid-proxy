@@ -26,8 +26,8 @@ make build | tee "$LIVE_E2E_RUN_DIR/make-build.txt"
 stop_proxy_from_pid_file
 stop_matching_live_proxies
 
-if ! assert_port_free 8787; then
-  fail "port 8787 is already in use"
+if ! assert_port_free "$LIVE_E2E_PROXY_PORT"; then
+  fail "port $LIVE_E2E_PROXY_PORT is already in use"
 fi
 
 info "Starting droid-proxy with $LIVE_E2E_CONFIG and $LIVE_E2E_ENV_FILE"
@@ -47,7 +47,7 @@ ensure_proxy_health
 curl -sS \
   --connect-timeout "$LIVE_E2E_CURL_CONNECT_TIMEOUT" \
   --max-time "$LIVE_E2E_CURL_MAX_TIME" \
-  "http://127.0.0.1:8787/v1/models" \
+  "${LIVE_E2E_PROXY_URL}/v1/models" \
   | tee "$LIVE_E2E_RUN_DIR/models.json" \
   | jq '.data[] | {id, factory_provider, upstream_protocol, agent_ready}'
 

@@ -1,5 +1,11 @@
 # GPT-5.6 reasoning controls patch spec
 
+> **Historical document.** This spec was written before the default-port
+> migration from `8787` to `9787`. The port statements below reflect the
+> repository state at the time and are retained for historical accuracy.
+> The current repository default is `9787`; see
+> [docs/UPGRADE.md](UPGRADE.md) for the port migration guide.
+
 ## Baseline and problem
 
 This patch targets post-PR #25 `main` at `d8e89f7`. Proxy request forwarding

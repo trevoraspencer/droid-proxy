@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Default listen port migrated from `8787` to `9787` to avoid conflicts with
+  Cursor MCP OAuth loopback, `wrangler dev`, Dask, and other tools that
+  occupy `8787`. New and omitted-port configs resolve to `127.0.0.1:9787`.
+  Existing explicit ports are preserved. `droid-proxy migrate-port` provides
+  dry-run, commit, and rollback for explicit `8787` configs; verified managed
+  upgrades may auto-migrate. See [docs/UPGRADE.md](docs/UPGRADE.md) for the
+  full migration guide.
 - `capabilities.factory_reasoning_effort` metadata and Factory settings sync
   support so GPT-5.6 and Grok 4.5 custom models expose reasoning controls in
   Droid while Grok Build and Composer remove stale reasoning metadata.

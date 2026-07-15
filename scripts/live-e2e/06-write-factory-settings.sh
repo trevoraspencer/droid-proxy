@@ -51,7 +51,7 @@ fireworks_entry="$(jq -n \
     model: $model,
     displayName: $displayName,
     provider: "generic-chat-completion-api",
-    baseUrl: "http://127.0.0.1:8787",
+    baseUrl: "${LIVE_E2E_PROXY_URL}",
     apiKey: "not-required-when-client-auth-disabled",
     maxOutputTokens: $maxOutputTokens
   }')"
@@ -81,8 +81,8 @@ chmod 600 "$SETTINGS" 2>/dev/null || true
 jq '.customModels[]? | {model, displayName, provider, baseUrl, maxOutputTokens}' "$SETTINGS" \
   | tee "$LIVE_E2E_RUN_DIR/factory-models.after.json"
 
-if jq -e '.customModels[]? | select((.baseUrl // "") | test("127\\.0\\.0\\.1|localhost"; "i")) | select((.baseUrl // "") | test(":8787"; "i") | not)' "$SETTINGS" >/dev/null; then
-  fail "$SETTINGS contains localhost custom model baseUrl not pointing at droid-proxy (:8787)"
+if jq -e --arg port ":${LIVE_E2E_PROXY_PORT}" '.customModels[]? | select((.baseUrl // "") | test("127\\.0\\.0\\.1|localhost"; "i")) | select((.baseUrl // "") | test($port; "i") | not)' "$SETTINGS" >/dev/null; then
+  fail "$SETTINGS contains localhost custom model baseUrl not pointing at droid-proxy (:${LIVE_E2E_PROXY_PORT})"
 fi
 
 info "Factory Droid settings updated at $SETTINGS"

@@ -40,7 +40,7 @@ models:
       "model": "kimi-k2",
       "displayName": "Kimi K2 (Moonshot)",
       "provider": "generic-chat-completion-api",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 128000
     }
@@ -59,7 +59,7 @@ export MOONSHOT_API_KEY=sk-...
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/chat/completions \
+curl -sS http://127.0.0.1:9787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "kimi-k2",

@@ -48,11 +48,15 @@ typeset -g LIVE_E2E_CURRENT_RUN_ENV="${LIVE_E2E_CURRENT_RUN_ENV:-$LIVE_E2E_RUN_D
 typeset -g LIVE_E2E_CURL_CONNECT_TIMEOUT="${LIVE_E2E_CURL_CONNECT_TIMEOUT:-10}"
 typeset -g LIVE_E2E_CURL_MAX_TIME="${LIVE_E2E_CURL_MAX_TIME:-300}"
 typeset -g LIVE_E2E_STREAM_MAX_TIME="${LIVE_E2E_STREAM_MAX_TIME:-600}"
+typeset -g LIVE_E2E_PROXY_HOST="${LIVE_E2E_PROXY_HOST:-127.0.0.1}"
+typeset -g LIVE_E2E_PROXY_PORT="${LIVE_E2E_PROXY_PORT:-9787}"
+typeset -g LIVE_E2E_PROXY_URL="http://${LIVE_E2E_PROXY_HOST}:${LIVE_E2E_PROXY_PORT}"
 
 export LIVE_E2E_SCRIPT_DIR LIVE_E2E_REPO_ROOT LIVE_E2E_BASE_DIR LIVE_E2E_RUN_ID
 export LIVE_E2E_RUN_DIR LIVE_E2E_RESULTS_NDJSON LIVE_E2E_CONFIG LIVE_E2E_ENV_FILE
 export LIVE_E2E_PROXY_PID_FILE LIVE_E2E_PROXY_LOG LIVE_E2E_CURRENT_RUN_ENV
 export LIVE_E2E_CURL_CONNECT_TIMEOUT LIVE_E2E_CURL_MAX_TIME LIVE_E2E_STREAM_MAX_TIME
+export LIVE_E2E_PROXY_HOST LIVE_E2E_PROXY_PORT LIVE_E2E_PROXY_URL
 
 mkdir -p "$LIVE_E2E_RUN_DIR"
 mkdir -p "$LIVE_E2E_BASE_DIR"
@@ -74,6 +78,9 @@ write_current_run_env() {
     print -r -- "export LIVE_E2E_CURL_CONNECT_TIMEOUT=${(q)LIVE_E2E_CURL_CONNECT_TIMEOUT}"
     print -r -- "export LIVE_E2E_CURL_MAX_TIME=${(q)LIVE_E2E_CURL_MAX_TIME}"
     print -r -- "export LIVE_E2E_STREAM_MAX_TIME=${(q)LIVE_E2E_STREAM_MAX_TIME}"
+    print -r -- "export LIVE_E2E_PROXY_HOST=${(q)LIVE_E2E_PROXY_HOST}"
+    print -r -- "export LIVE_E2E_PROXY_PORT=${(q)LIVE_E2E_PROXY_PORT}"
+    print -r -- "export LIVE_E2E_PROXY_URL=${(q)LIVE_E2E_PROXY_URL}"
   } > "$LIVE_E2E_CURRENT_RUN_ENV"
 }
 
@@ -278,8 +285,8 @@ ensure_proxy_health() {
   curl -sS \
     --connect-timeout "$LIVE_E2E_CURL_CONNECT_TIMEOUT" \
     --max-time "$LIVE_E2E_CURL_MAX_TIME" \
-    "http://127.0.0.1:8787/health" > "$LIVE_E2E_RUN_DIR/health.json" \
-    || fail "proxy is not healthy on http://127.0.0.1:8787"
+    "${LIVE_E2E_PROXY_URL}/health" > "$LIVE_E2E_RUN_DIR/health.json" \
+    || fail "proxy is not healthy on ${LIVE_E2E_PROXY_URL}"
 }
 
 token_auth_dir() {

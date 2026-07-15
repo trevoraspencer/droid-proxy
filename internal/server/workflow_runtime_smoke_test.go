@@ -167,7 +167,7 @@ func exampleDerivedRuntimeSmokeConfigYAML(t *testing.T, upstreamURL string) stri
 		t.Fatal(err)
 	}
 	text := string(raw)
-	text = strings.Replace(text, "  port: 8787", "  port: 0", 1)
+	text = strings.Replace(text, "  port: 9787", "  port: 0", 1)
 	text = strings.Replace(text, `base_url: "https://api.deepseek.com/v1"`, `base_url: `+upstreamURL, 1)
 	if strings.Contains(text, "known_auth: deepseek") {
 		text = strings.Replace(text, "    known_auth: deepseek", fmt.Sprintf("    base_url: %s\n    api_key_env: DEEPSEEK_API_KEY", upstreamURL), 1)

@@ -214,7 +214,7 @@ This only applies to Codex OAuth — xAI OAuth is always single-account.
       "model": "gpt-5.6",
       "displayName": "GPT-5.6 Sol (Codex OAuth)",
       "provider": "openai",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 128000,
       "reasoningEffort": "max"
@@ -234,7 +234,7 @@ This only applies to Codex OAuth — xAI OAuth is always single-account.
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "gpt-5.6",
@@ -250,7 +250,7 @@ curl -sS http://127.0.0.1:8787/v1/responses \
 ./droid-proxy auth logout  codex user@example.com
 ```
 
-Check the model is logged in: `curl -s http://127.0.0.1:8787/v1/models | jq
+Check the model is logged in: `curl -s http://127.0.0.1:9787/v1/models | jq
 '.data[] | select(.oauth_auth) | {id, oauth_auth}'`. See
 [OAUTH.md](../OAUTH.md#managing-accounts) for the full reference.
 For pool-level readiness, run `./droid-proxy auth pool --config config.yaml`;

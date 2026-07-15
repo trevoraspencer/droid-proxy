@@ -15,7 +15,7 @@ import (
 
 // healthProbe is one GET /health attempt against a loopback address.
 type healthProbe struct {
-	Addr    string // host:port the probe targeted, e.g. "127.0.0.1:8787" or "[::1]:8787"
+	Addr    string // host:port the probe targeted, e.g. "127.0.0.1:9787" or "[::1]:9787"
 	OK      bool   // something answered HTTP
 	Service string // "service" field of the /health JSON; empty for foreign responders
 	Version string
