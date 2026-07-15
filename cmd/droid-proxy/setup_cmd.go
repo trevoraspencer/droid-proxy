@@ -34,6 +34,10 @@ func runSetup(args []string) {
 			fmt.Fprintf(os.Stderr, "droid-proxy setup error: %v\n", err)
 			os.Exit(1)
 		}
+		// setup --service cannot infer upgrade provenance, but if deferred
+		// provenance from a prior upgrade exists, consume it through the
+		// controlled transaction before starting the service.
+		attemptManagedMigration(res.Path, false)
 		if err := daemon.InstallService(res.Path); err != nil {
 			fmt.Fprintf(os.Stderr, "droid-proxy setup error: %v\n", err)
 			os.Exit(1)

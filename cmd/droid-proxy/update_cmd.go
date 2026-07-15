@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/trevoraspencer/droid-proxy/internal/daemon"
+	"github.com/trevoraspencer/droid-proxy/internal/migration"
 	updater "github.com/trevoraspencer/droid-proxy/internal/update"
 )
 
@@ -52,6 +53,13 @@ func runUpdate(args []string) {
 		}
 	}
 
+	// Capture the old binary hash before the update replaces it, for
+	// deferred provenance recording on the --no-restart path.
+	oldBinaryHash := ""
+	if !*dryRun {
+		oldBinaryHash = readBinaryHashQuietly(binary)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	res, err := updater.Run(ctx, updater.Options{
@@ -75,7 +83,26 @@ func runUpdate(args []string) {
 	if *noMigratePort {
 		fmt.Println("automatic port migration skipped for this invocation (--no-migrate-port).")
 	}
-	if running && !*noRestart {
+	if *noRestart {
+		// Binary-only upgrade: record deferred provenance so the next
+		// verified controlled restart can perform the deferred migration.
+		// The old service keeps running on its current port.
+		if res.Built && oldBinaryHash != "" {
+			configForProvenance := defaultConfigPath()
+			if haveMeta && meta.ConfigPath != "" {
+				configForProvenance = meta.ConfigPath
+			}
+			recordUpdateProvenance(binary, oldBinaryHash, configForProvenance)
+		}
+	} else if running {
+		// Direct restart path (pre-migration source updater behavior):
+		// check for deferred provenance from a prior --no-restart upgrade
+		// before restarting. This is a verified controlled restart.
+		configForMigration := defaultConfigPath()
+		if haveMeta && meta.ConfigPath != "" {
+			configForMigration = meta.ConfigPath
+		}
+		attemptManagedMigration(configForMigration, *noMigratePort)
 		if err := restartAfterUpdate(binary, meta, haveMeta); err != nil {
 			fmt.Fprintf(os.Stderr, "droid-proxy restart error: %v\n", err)
 			os.Exit(1)
@@ -165,4 +192,11 @@ func restartAfterUpdate(binary string, meta daemon.RuntimeMetadata, haveMeta boo
 		fmt.Println(trimmed)
 	}
 	return nil
+}
+
+// readBinaryHashQuietly reads the SHA-256 hash of a binary file, returning
+// empty string on error. Used to capture the pre-upgrade binary hash for
+// deferred provenance recording.
+func readBinaryHashQuietly(path string) string {
+	return migration.ReadBinaryHashForProvenance(path)
 }

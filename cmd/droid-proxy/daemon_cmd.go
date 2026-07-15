@@ -154,6 +154,10 @@ func runRestart(args []string) {
 		// restart. The read-only omitted-port startup preflight remains
 		// enforced. Explicit migrate-port is unaffected.
 	}
+	// Verified controlled restart: check for deferred upgrade provenance
+	// and perform automatic migration if eligible. This is the only path
+	// through which automatic migration runs.
+	attemptManagedMigration(*configPath, *noMigratePort)
 	if err := restartProxy(*configPath, *envFile); err != nil {
 		fmt.Fprintf(os.Stderr, "droid-proxy restart error: %v\n", err)
 		os.Exit(1)
@@ -211,6 +215,10 @@ func runService(args []string) {
 			fmt.Fprintf(os.Stderr, "droid-proxy service install error: %v\n", err)
 			os.Exit(1)
 		}
+		// service install cannot infer upgrade provenance, but if deferred
+		// provenance from a prior upgrade exists, consume it through the
+		// controlled transaction before starting the service.
+		attemptManagedMigration(*configPath, false)
 		if err := daemon.InstallService(*configPath); err != nil {
 			fmt.Fprintf(os.Stderr, "droid-proxy service install error: %v\n", err)
 			os.Exit(1)

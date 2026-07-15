@@ -47,6 +47,16 @@ func runServer(configPath, envFile string, foreground bool) error {
 		return fmt.Errorf("config: %w", err)
 	}
 
+	// Every process start that would apply the new 9787 default to a config
+	// with no explicit listen.port performs a read-only coherence preflight
+	// before binding. This applies to direct foreground and background starts,
+	// launchd/systemd login-time starts, crash recovery, setup/service starts,
+	// and verified or unverified restarts. The automatic-migration opt-out
+	// does not disable this preflight.
+	if err := omittedPortPreflight(cfg); err != nil {
+		return err
+	}
+
 	if foreground {
 		daemon.CleanStalePID()
 		if err := daemon.WritePID(); err != nil {

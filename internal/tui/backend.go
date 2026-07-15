@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/trevoraspencer/droid-proxy/internal/configedit"
 	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 	"github.com/trevoraspencer/droid-proxy/internal/factory"
+	"github.com/trevoraspencer/droid-proxy/internal/migration"
 	"github.com/trevoraspencer/droid-proxy/internal/oauth"
 	"github.com/trevoraspencer/droid-proxy/internal/providerapi"
 	"github.com/trevoraspencer/droid-proxy/internal/secrets"
@@ -241,10 +243,35 @@ func (b *backend) restartHint() string {
 	return " Restart the proxy (r on the dashboard) to apply."
 }
 
+// attemptDeferredMigration checks for trusted deferred upgrade provenance
+// and performs automatic migration if eligible. This is the verified
+// controlled-restart integration point for TUI 'r'.
+func (b *backend) attemptDeferredMigration() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real
+	}
+	_, _ = migration.AttemptDeferredMigration(migration.ManagedRestartOptions{
+		ConfigPath:          b.configPath,
+		InstalledBinaryPath: exe,
+	})
+}
+
 // restartProxy restarts the proxy. With a managed service installed it goes
 // through the service manager — stopping the process directly would only
 // fight KeepAlive/Restart=always and race a second daemon onto the port.
+// TUI 'r' delegates to the verified controlled-restart path: it checks for
+// deferred upgrade provenance and performs automatic migration before
+// restarting.
 func (b *backend) restartProxy() error {
+	// Verified controlled restart: check for deferred provenance and
+	// perform automatic migration if eligible. This is the only path
+	// through which automatic migration runs.
+	b.attemptDeferredMigration()
+
 	if serviceInstalled() {
 		if err := restartService(); err != nil {
 			return err

@@ -76,6 +76,19 @@ func runMigratePortCommit(configPath string, dryRun bool) {
 		return
 	}
 
+	// If a running droid-proxy daemon or managed service uses this config,
+	// refuse before mutation with stop-and-retry guidance. Explicit migration
+	// must never commit files while leaving the runtime on the old port.
+	if plan.ConfigEligible {
+		if pid, inUse := configUsesThisConfig(configPath); inUse {
+			fmt.Fprintf(os.Stderr, "droid-proxy migrate-port: refusing because a running proxy (pid %d) uses this config.\n", pid)
+			fmt.Fprintf(os.Stderr, "  Stop it first with 'droid-proxy stop', then retry:\n")
+			fmt.Fprintf(os.Stderr, "    droid-proxy migrate-port --config %s\n", configPath)
+			fmt.Fprintf(os.Stderr, "  Then restart: droid-proxy start --config %s\n", configPath)
+			os.Exit(1)
+		}
+	}
+
 	if err := migration.CommitPlan(plan); err != nil {
 		fmt.Fprintf(os.Stderr, "droid-proxy migrate-port error: %v\n", err)
 		os.Exit(1)
