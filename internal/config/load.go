@@ -50,21 +50,11 @@ func parse(raw []byte) (*Config, error) {
 		if err := HydrateModel(m); err != nil {
 			return nil, err
 		}
-		normalizeModelExtraArgs(m)
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
-}
-
-func normalizeModelExtraArgs(m *Model) {
-	if m == nil || m.ExtraArgs == nil {
-		return
-	}
-	if tier, ok := m.ExtraArgs["service_tier"].(string); ok && strings.EqualFold(strings.TrimSpace(tier), "fast") {
-		m.ExtraArgs["service_tier"] = "priority"
-	}
 }
 
 func collectPresence(root *yaml.Node) map[string]bool {
