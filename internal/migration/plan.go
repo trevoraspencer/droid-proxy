@@ -162,44 +162,17 @@ func PlanMigration(opts PlanOptions) (*Plan, error) {
 	return plan, nil
 }
 
-// CommitPlan applies the migration plan by rewriting eligible config and
-// Factory files. It preserves file modes and ownership. If the Factory state
-// is unsafe, it aborts before writing either target.
+// CommitPlan applies the migration plan through the transaction layer: it
+// creates immutable backups, writes a durable journal, stages and validates
+// outputs, commits targets in order with journaled progress, and marks the
+// transaction complete. It preserves file modes and ownership. If the Factory
+// state is unsafe, it aborts before writing either target.
 func CommitPlan(plan *Plan) error {
-	if plan.FactoryUnsafe {
-		return fmt.Errorf("aborting: %s", plan.FactoryReason)
+	result, err := CommitTransaction(plan, TransactionOptions{})
+	if err != nil {
+		return err
 	}
-	if !plan.HasChanges() {
-		return nil
-	}
-
-	// Rewrite config if eligible.
-	if plan.ConfigEligible && plan.configAnalysis != nil && plan.configAnalysis.PortNode != nil {
-		newConfig, err := RewriteListenPortScalar(
-			plan.configRaw,
-			plan.configAnalysis.PortNode,
-			plan.OldPort,
-			plan.NewPort,
-		)
-		if err != nil {
-			return fmt.Errorf("rewrite config: %w", err)
-		}
-		if err := writeFilePreservingMode(plan.ConfigPath, newConfig); err != nil {
-			return fmt.Errorf("write config: %w", err)
-		}
-	}
-
-	// Rewrite Factory entries if eligible.
-	if len(plan.FactoryChanges) > 0 && plan.factoryRaw != nil {
-		newFactory, err := RewriteFactory(plan.factoryRaw, plan.FactoryChanges)
-		if err != nil {
-			return fmt.Errorf("rewrite factory: %w", err)
-		}
-		if err := writeFilePreservingMode(plan.FactoryPath, newFactory); err != nil {
-			return fmt.Errorf("write factory: %w", err)
-		}
-	}
-
+	_ = result
 	return nil
 }
 

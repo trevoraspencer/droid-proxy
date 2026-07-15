@@ -154,6 +154,7 @@ func TestPlanMigrationUnsafeFactoryAborts(t *testing.T) {
 
 func TestCommitPlanRewritesConfigAndFactory(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
 	configContent := "listen:\n  host: 127.0.0.1\n  port: 8787\nmodels:\n  - alias: m\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    upstream_model: m\n    base_url: http://u/v1\n    api_key_env: KEY\n"
 	configPath := writeConfigFile(t, dir, "config.yaml", configContent)
 	factoryContent := `{"customModels":[{"model":"m","provider":"generic-chat-completion-api","baseUrl":"http://127.0.0.1:8787"}]}`
@@ -192,6 +193,7 @@ func TestCommitPlanRewritesConfigAndFactory(t *testing.T) {
 
 func TestCommitPlanPreservesMode(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
 	configPath := writeConfigFile(t, dir, "config.yaml",
 		"listen:\n  host: 127.0.0.1\n  port: 8787\nmodels:\n  - alias: m\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    upstream_model: m\n    base_url: http://u/v1\n    api_key_env: KEY\n")
 	// Set stricter permissions.
@@ -219,6 +221,7 @@ func TestCommitPlanPreservesMode(t *testing.T) {
 
 func TestCommitPlanRefusesUnsafeFactory(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
 	configPath := writeConfigFile(t, dir, "config.yaml",
 		"listen:\n  host: 127.0.0.1\n  port: 8787\nmodels:\n  - alias: m\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    upstream_model: m\n    base_url: http://u/v1\n    api_key_env: KEY\n")
 	factoryPath := writeFactoryFile(t, dir, `{bad json`)
@@ -242,6 +245,7 @@ func TestCommitPlanRefusesUnsafeFactory(t *testing.T) {
 
 func TestCommitPlanNoChangesIsNoop(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
 	configPath := writeConfigFile(t, dir, "config.yaml", "listen:\n  host: 127.0.0.1\n  port: 9787\n")
 
 	plan, _ := PlanMigration(PlanOptions{
@@ -258,6 +262,7 @@ func TestCommitPlanNoChangesIsNoop(t *testing.T) {
 
 func TestCommitPlanConfigOnlyMigration(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
 	configPath := writeConfigFile(t, dir, "config.yaml",
 		"listen:\n  host: 127.0.0.1\n  port: 8787\nmodels:\n  - alias: m\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    upstream_model: m\n    base_url: http://u/v1\n    api_key_env: KEY\n")
 	// No Factory file.
@@ -287,6 +292,7 @@ func TestCommitPlanConfigOnlyMigration(t *testing.T) {
 
 func TestPlanMigrationWithInjectedPorts(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
 	configPath := writeConfigFile(t, dir, "config.yaml", "listen:\n  host: 127.0.0.1\n  port: 8787\nmodels:\n  - alias: m\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    upstream_model: m\n    base_url: http://u/v1\n    api_key_env: KEY\n")
 	factoryPath := writeFactoryFile(t, dir, `{"customModels":[{"model":"m","provider":"generic-chat-completion-api","baseUrl":"http://127.0.0.1:8787"}]}`)
 
