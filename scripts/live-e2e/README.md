@@ -95,8 +95,13 @@ availability remains account/plan dependent.
   testable jq program `merge-custom-models.jq`.
 - **Proxy cleanup is scoped by default.** `01-clean-old-proxies.sh` terminates
   only processes whose executable basename is exactly `droid-proxy`/`cursor-proxy`
-  **or** that own a proxy port (9787/1455/56121); it never matches by a substring
-  in a command line, and it never kills the current shell or its ancestors.
-  Selection logic is the testable `select-proxy-kills.zsh`. To restore the old
-  broad behavior (`pkill -f 'droid-proxy|cursor-proxy'`, which can hit any
-  process with that string anywhere in its argv), set `LIVE_E2E_FORCE_KILL=1`.
+  **or** that own an OAuth callback port (1455/56121). The main proxy port
+  (9787) is **not** used for kill selection because it defaults to the
+  operator's live port; the proxy process is positively identified by binary
+  basename and PID file instead. Port 9787 appears only in read-only listener
+  snapshots, never as a cleanup selector. The script never matches by a
+  substring in a command line, and it never kills the current shell or its
+  ancestors. Selection logic is the testable `select-proxy-kills.zsh`. To
+  restore the old broad behavior (`pkill -f 'droid-proxy|cursor-proxy'`, which
+  can hit any process with that string anywhere in its argv), set
+  `LIVE_E2E_FORCE_KILL=1`.
