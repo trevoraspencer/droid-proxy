@@ -572,3 +572,44 @@ func TestRewriteListenPortScalarUTF8Comment(t *testing.T) {
 		t.Fatalf("multi-byte comment not preserved: %s", result)
 	}
 }
+
+// TestNodeByteOffsetInvalidUTF8Sequence verifies that nodeByteOffset uses
+// unicode/utf8.DecodeRune width semantics for invalid UTF-8 sequences.
+// 0xE0 is a valid 3-byte leading byte, but 0x41 ('A') is not a valid
+// continuation byte. The standard library treats this as RuneError with
+// size 1 (advancing one byte), while a leading-byte-only decoder would
+// erroneously advance 3 bytes and skip valid content.
+func TestNodeByteOffsetInvalidUTF8Sequence(t *testing.T) {
+	raw := []byte{0xE0, 'A', 'B', 'C', '\n'}
+	// Column 1 (rune 0) = invalid byte at offset 0.
+	// Column 2 (rune 1) = 'A' at offset 1 (size-1 advance per utf8).
+	offset, err := nodeByteOffset(raw, 1, 2)
+	if err != nil {
+		t.Fatalf("nodeByteOffset: %v", err)
+	}
+	if offset != 1 {
+		t.Fatalf("offset = %d, want 1; invalid UTF-8 sequence must advance 1 byte per unicode/utf8 (not 3 bytes from leading byte alone)", offset)
+	}
+	if raw[offset] != 'A' {
+		t.Fatalf("byte at offset %d is %q, want 'A'", offset, raw[offset])
+	}
+}
+
+// TestNodeByteOffsetInvalidUTF8HighByte verifies that a byte in the 0xF8-0xFF
+// range (never a valid UTF-8 leading byte) advances exactly one byte,
+// matching unicode/utf8.DecodeRune rather than the 4-byte width a
+// leading-byte-only heuristic would produce.
+func TestNodeByteOffsetInvalidUTF8HighByte(t *testing.T) {
+	raw := []byte{0xFF, 'X', 'Y', 'Z', '\n'}
+	// Column 2 (rune 1) should be 'X' at offset 1.
+	offset, err := nodeByteOffset(raw, 1, 2)
+	if err != nil {
+		t.Fatalf("nodeByteOffset: %v", err)
+	}
+	if offset != 1 {
+		t.Fatalf("offset = %d, want 1; byte 0xFF must count as 1 rune per unicode/utf8", offset)
+	}
+	if raw[offset] != 'X' {
+		t.Fatalf("byte at offset %d is %q, want 'X'", offset, raw[offset])
+	}
+}

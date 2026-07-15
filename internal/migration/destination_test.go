@@ -106,3 +106,54 @@ func TestNilReservationHeldChecker(t *testing.T) {
 		t.Fatal("nil reservation's held checker should fail")
 	}
 }
+
+// TestHeldCheckerRejectsWrongHost verifies that HeldChecker rejects any host
+// different from the reserved host, proving the reservation is bound to its
+// exact owned address.
+func TestHeldCheckerRejectsWrongHost(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().(*net.TCPAddr)
+	l.Close()
+
+	reservation, err := ReserveDestination("127.0.0.1", addr.Port)
+	if err != nil {
+		t.Fatalf("ReserveDestination: %v", err)
+	}
+	defer reservation.Close()
+
+	checker := reservation.HeldChecker()
+	// Correct host and port must pass.
+	if err := checker("127.0.0.1", addr.Port); err != nil {
+		t.Fatalf("checker rejected matching host/port: %v", err)
+	}
+	// Wrong host must fail.
+	if err := checker("localhost", addr.Port); err == nil {
+		t.Fatal("checker must reject a host different from the reserved host")
+	}
+}
+
+// TestHeldCheckerRejectsWrongPort verifies that HeldChecker rejects any port
+// different from the reserved port.
+func TestHeldCheckerRejectsWrongPort(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().(*net.TCPAddr)
+	l.Close()
+
+	reservation, err := ReserveDestination("127.0.0.1", addr.Port)
+	if err != nil {
+		t.Fatalf("ReserveDestination: %v", err)
+	}
+	defer reservation.Close()
+
+	checker := reservation.HeldChecker()
+	// Wrong port must fail even with the correct host.
+	if err := checker("127.0.0.1", addr.Port+1); err == nil {
+		t.Fatal("checker must reject a port different from the reserved port")
+	}
+}

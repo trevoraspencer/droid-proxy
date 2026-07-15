@@ -165,6 +165,12 @@ func ValidateProvenance(rec *ProvenanceRecord, val ProvenanceValidation) error {
 		if rec.BackgroundDaemonPID == 0 || rec.BackgroundDaemonExe == "" {
 			return fmt.Errorf("provenance record for background-daemon is missing daemon identity (pid and executable)")
 		}
+		// Revalidate: the recorded executable must still exist on disk,
+		// symmetric with how launchd/systemd revalidates the service
+		// definition file hash.
+		if _, err := os.Stat(rec.BackgroundDaemonExe); err != nil {
+			return fmt.Errorf("provenance background-daemon executable is no longer accessible: %w", err)
+		}
 	default:
 		return fmt.Errorf("provenance record has unknown service kind %q", rec.ServiceKind)
 	}

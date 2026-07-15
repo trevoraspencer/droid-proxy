@@ -3,7 +3,6 @@ package config
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -1159,182 +1158,16 @@ func TestDocsLiveE2eCleanupDocsMatchCode(t *testing.T) {
 }
 
 // --- VAL-CROSS-016: Bootstrap idempotency and versioned tool readiness ---
-
-// bootstrapInitPath deterministically resolves the current mission bootstrap
-// script. It never uses ambient mission globbing and never silently skips.
-// It checks, in order: the DROID_PROXY_MISSION_INIT env var, then a marker
-// file inside the known bootstrap root. If neither yields a valid path, the
-// test calling this helper fails immediately.
-func bootstrapInitPath(t *testing.T) string {
-	t.Helper()
-
-	// 1. Deterministic env var (set when init.sh is sourced).
-	if p := os.Getenv("DROID_PROXY_MISSION_INIT"); p != "" {
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			t.Fatalf("resolve DROID_PROXY_MISSION_INIT %q: %v", p, err)
-		}
-		if info, err := os.Stat(abs); err != nil || info.IsDir() {
-			t.Fatalf("DROID_PROXY_MISSION_INIT does not point to a regular file: %s", abs)
-		}
-		return abs
-	}
-
-	// 2. Marker file written by init.sh into its isolated bootstrap root.
-	bootstrapRoot := os.Getenv("DROID_PROXY_BOOTSTRAP_ROOT")
-	if bootstrapRoot == "" {
-		bootstrapRoot = "/tmp/droid-proxy-mission-bootstrap"
-	}
-	markerPath := filepath.Join(bootstrapRoot, "init-source")
-	raw, err := os.ReadFile(markerPath)
-	if err != nil {
-		t.Fatalf("bootstrap fixture unavailable: DROID_PROXY_MISSION_INIT is unset and marker %s is unreadable: %v\n"+
-			"Run the mission init.sh first; this assertion may not be silently skipped.", markerPath, err)
-	}
-	p := strings.TrimSpace(string(raw))
-	if p == "" {
-		t.Fatalf("bootstrap marker %s is empty; init.sh must write its path", markerPath)
-	}
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		t.Fatalf("resolve marker path %q: %v", p, err)
-	}
-	if info, err := os.Stat(abs); err != nil || info.IsDir() {
-		t.Fatalf("bootstrap marker points to non-existent or non-regular file: %s", abs)
-	}
-	return abs
-}
-
-// runBootstrapIsolated executes the bootstrap script under an independent
-// temporary root and returns its stdout.
-func runBootstrapIsolated(t *testing.T, initPath, repo, label string) string {
-	t.Helper()
-	isolatedRoot := filepath.Join(t.TempDir(), "bootstrap-"+label)
-	cmd := exec.Command("bash", initPath)
-	cmd.Env = append(os.Environ(),
-		"DROID_PROXY_REPO_ROOT="+repo,
-		"DROID_PROXY_BOOTSTRAP_ROOT="+isolatedRoot,
-	)
-	var stdout strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = nil
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("bootstrap execution %s failed: %v\nstdout: %s", label, err, stdout.String())
-	}
-	return stdout.String()
-}
-
-// parseBootstrapProjection extracts the deterministic Go, gitleaks, and
-// Tuistory version lines from bootstrap stdout.
-func parseBootstrapProjection(t *testing.T, output string) string {
-	t.Helper()
-	var goLine, gitleaksLine, tuistoryLine string
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(line, "go: "):
-			goLine = line
-		case strings.HasPrefix(line, "gitleaks: "):
-			gitleaksLine = line
-		case strings.HasPrefix(line, "tuistory: "):
-			tuistoryLine = line
-		}
-	}
-	if goLine == "" || gitleaksLine == "" || tuistoryLine == "" {
-		t.Fatalf("bootstrap output is missing version projections:\n%s", output)
-	}
-	return goLine + "\n" + gitleaksLine + "\n" + tuistoryLine
-}
-
-// TestBootstrapDeterministicExecution selects the current mission bootstrap
-// deterministically (never via ambient globbing or silent skip), executes it
-// twice under independent isolated roots, and asserts that both runs produce
-// identical Go/gitleaks/Tuistory projections with the exact expected versions.
-func TestBootstrapDeterministicExecution(t *testing.T) {
-	initPath := bootstrapInitPath(t)
-
-	// Verify script content for isolation and version requirements.
-	content, err := os.ReadFile(initPath)
-	if err != nil {
-		t.Fatalf("read init.sh: %v", err)
-	}
-	script := string(content)
-	if !strings.Contains(script, "DROID_PROXY_BOOTSTRAP_ROOT") {
-		t.Fatal("init.sh must support DROID_PROXY_BOOTSTRAP_ROOT for isolated double execution")
-	}
-	if !strings.Contains(script, "/tmp/droid-proxy-mission-bootstrap") {
-		t.Fatal("init.sh must default to the expected bootstrap root pattern")
-	}
-	if !strings.Contains(script, `export HOME="`) {
-		t.Fatal("init.sh must override HOME to an isolated temporary root")
-	}
-	if !strings.Contains(script, "go.mod") {
-		t.Fatal("init.sh must verify Go version from go.mod")
-	}
-	if !strings.Contains(script, "8.24.2") {
-		t.Fatal("init.sh must verify gitleaks 8.24.2")
-	}
-	if !strings.Contains(script, "0.10.1") {
-		t.Fatal("init.sh must verify Tuistory 0.10.1")
-	}
-
-	// Execute the bootstrap twice under independent roots.
-	repo := repoRoot(t)
-	run1 := runBootstrapIsolated(t, initPath, repo, "run-1")
-	run2 := runBootstrapIsolated(t, initPath, repo, "run-2")
-
-	// Parse and compare deterministic projections (mismatch coverage).
-	proj1 := parseBootstrapProjection(t, run1)
-	proj2 := parseBootstrapProjection(t, run2)
-	if proj1 != proj2 {
-		t.Fatalf("bootstrap projections differ between isolated runs (must be deterministic):\n"+
-			"run-1:\n%s\nrun-2:\n%s", proj1, proj2)
-	}
-
-	// Assert exact expected versions.
-	if !strings.Contains(proj1, "go1.26.4") {
-		t.Fatalf("bootstrap must report go1.26.4, got: %s", proj1)
-	}
-	if !strings.Contains(proj1, "8.24.2") {
-		t.Fatalf("bootstrap must report gitleaks 8.24.2, got: %s", proj1)
-	}
-	if !strings.Contains(proj1, "tuistory/0.10.1") {
-		t.Fatalf("bootstrap must report tuistory/0.10.1, got: %s", proj1)
-	}
-}
-
-// TestBootstrapRefusesBadRepoRoot proves the bootstrap refuses (exits non-zero)
-// when its repo root lacks go.mod, rather than silently proceeding.
-func TestBootstrapRefusesBadRepoRoot(t *testing.T) {
-	initPath := bootstrapInitPath(t)
-	badRoot := t.TempDir()
-	isolatedRoot := filepath.Join(t.TempDir(), "bad-bootstrap")
-	cmd := exec.Command("bash", initPath)
-	cmd.Env = append(os.Environ(),
-		"DROID_PROXY_REPO_ROOT="+badRoot,
-		"DROID_PROXY_BOOTSTRAP_ROOT="+isolatedRoot,
-	)
-	if err := cmd.Run(); err == nil {
-		t.Fatal("bootstrap must refuse (non-zero exit) when repo root lacks go.mod")
-	}
-}
-
-// TestBootstrapRefusesMissingFixture proves the deterministic selection helper
-// fails (not skips) when no fixture is available. This is the refusal coverage
-// required by the contract: a missing fixture must never produce a silent pass.
-func TestBootstrapRefusesMissingFixture(t *testing.T) {
-	// Simulate an environment where neither the env var nor the marker exists.
-	missingPath := filepath.Join(t.TempDir(), "nonexistent-init.sh")
-	if _, err := os.Stat(missingPath); err == nil {
-		t.Fatal("expected stat error for a non-existent fixture path")
-	}
-	// If DROID_PROXY_MISSION_INIT pointed here, bootstrapInitPath would fail.
-	// Verify the assertion contract: a bad path must not silently pass.
-	badMarker := filepath.Join(t.TempDir(), "no-marker-root", "init-source")
-	if _, err := os.ReadFile(badMarker); err == nil {
-		t.Fatal("expected read error for a non-existent marker file")
-	}
-}
+//
+// Mission-local executable bootstrap validation (TestBootstrapDeterministicExecution,
+// TestBootstrapRefusesBadRepoRoot) lives in bootstrap_mission_test.go behind the
+// "mission_bootstrap" build tag so that ordinary `go test ./...` in clean CI does
+// not require /tmp mission markers. The mission gate runs:
+//   go test -tags=mission_bootstrap ./internal/config/...
+// to execute those tests explicitly.
+//
+// The error-returning resolver and its missing-fixture test are in
+// bootstrap_resolver_test.go and run as part of ordinary `go test ./...`.
 
 func TestDocsGoModVersionMatchesBootstrap(t *testing.T) {
 	mod := readRepoFile(t, "go.mod")

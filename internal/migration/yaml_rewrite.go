@@ -3,6 +3,7 @@ package migration
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -85,12 +86,10 @@ func nodeByteOffset(raw []byte, line, col int) (int64, error) {
 				if runeCount == targetCol {
 					return bytePos, nil
 				}
-				// Advance one UTF-8 rune.
-				r := rune(lineBytes[bytePos-lineStart])
-				size := 1
-				if r >= 0x80 {
-					_, size = decodeRune(lineBytes[bytePos-lineStart:])
-				}
+				// Advance one UTF-8 rune using the standard library so
+				// that invalid-sequence width semantics match utf8.DecodeRune
+				// exactly (RuneError with size 1 for invalid bytes).
+				_, size := utf8.DecodeRune(raw[bytePos:])
 				bytePos += int64(size)
 				runeCount++
 			}
@@ -105,34 +104,6 @@ func nodeByteOffset(raw []byte, line, col int) (int64, error) {
 		}
 	}
 	return 0, fmt.Errorf("line %d not found in document", line)
-}
-
-// decodeRune decodes the first UTF-8 rune in b and returns the rune and its
-// byte size. This mirrors utf8.DecodeRune but is inlined to avoid importing
-// unicode/utf8 in this performance-sensitive path.
-func decodeRune(b []byte) (rune, int) {
-	if len(b) == 0 {
-		return 0, 0
-	}
-	c := b[0]
-	if c < 0x80 {
-		return rune(c), 1
-	}
-	if c < 0xC2 {
-		return 0xFFFD, 1
-	}
-	var size int
-	if c < 0xE0 {
-		size = 2
-	} else if c < 0xF0 {
-		size = 3
-	} else {
-		size = 4
-	}
-	if size > len(b) {
-		return 0xFFFD, 1
-	}
-	return 0xFFFD, size // exact rune value is irrelevant for offset calculation
 }
 
 func isDigitByte(b byte) bool {

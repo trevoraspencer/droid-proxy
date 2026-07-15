@@ -171,6 +171,10 @@ func AttemptDeferredMigration(opts ManagedRestartOptions) (*ManagedRestartResult
 // installedBinaryPath and installedBinaryHash describe the newly installed
 // binary. configPath and configHash identify the canonical config.
 // serviceKind is "launchd", "systemd", or "background-daemon".
+//
+// For background-daemon provenance, both backgroundDaemonPID and
+// backgroundDaemonExe must be present; an incomplete identity is refused
+// so that no partial provenance record is created.
 func RecordDeferredProvenance(
 	stateRoot string,
 	oldBinaryPath, oldBinaryHash, oldBinaryVersion string,
@@ -179,6 +183,11 @@ func RecordDeferredProvenance(
 	serviceKind, serviceDefPath, serviceDefHash string,
 	backgroundDaemonPID int, backgroundDaemonExe string,
 ) error {
+	if serviceKind == "background-daemon" {
+		if backgroundDaemonPID == 0 || backgroundDaemonExe == "" {
+			return fmt.Errorf("incomplete background-daemon provenance: missing runtime metadata (pid or executable); no provenance record created")
+		}
+	}
 	rec := ProvenanceRecord{
 		OldBinaryPath:          oldBinaryPath,
 		OldBinaryHash:          oldBinaryHash,

@@ -13,6 +13,8 @@ import (
 // passing a nil DestinationChecker.
 type DestinationReservation struct {
 	listener net.Listener
+	host     string
+	port     int
 }
 
 // ReserveDestination attempts to bind a TCP listener on host:port. If
@@ -26,17 +28,22 @@ func ReserveDestination(host string, port int) (*DestinationReservation, error) 
 	if err != nil {
 		return nil, fmt.Errorf("destination %s is not available: %w", addr, err)
 	}
-	return &DestinationReservation{listener: l}, nil
+	return &DestinationReservation{listener: l, host: host, port: port}, nil
 }
 
 // HeldChecker returns a DestinationChecker function suitable for
 // ManagedRestartOptions.DestinationChecker. It verifies the reservation is
-// still held (the listener has not been closed or stolen). A nil checker
-// is never returned by production callers.
+// still held (the listener has not been closed or stolen) and that the
+// requested host and port exactly match the reservation it owns. A nil
+// checker is never returned by production callers.
 func (r *DestinationReservation) HeldChecker() func(string, int) error {
 	return func(host string, port int) error {
 		if r == nil || r.listener == nil {
 			return fmt.Errorf("destination reservation was not held")
+		}
+		if host != r.host || port != r.port {
+			return fmt.Errorf("destination check host/port %s:%d does not match reserved %s:%d",
+				host, port, r.host, r.port)
 		}
 		return nil
 	}

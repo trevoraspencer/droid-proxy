@@ -401,3 +401,75 @@ func TestValidateProvenanceUnknownServiceKindRefuses(t *testing.T) {
 		t.Fatal("expected error for unknown service kind")
 	}
 }
+
+// TestValidateProvenanceBackgroundDaemonExeMissing verifies that validation
+// fails closed when the recorded background-daemon executable no longer
+// exists on disk. This is symmetric with how launchd/systemd revalidates
+// the service definition file hash.
+func TestValidateProvenanceBackgroundDaemonExeMissing(t *testing.T) {
+	stateRoot := t.TempDir()
+	oldBin := writeFakeBinary(t, filepath.Join(stateRoot, "old-bin"), "old-binary")
+	newBin := writeFakeBinary(t, filepath.Join(stateRoot, "new-bin"), "new-binary")
+	configPath := filepath.Join(stateRoot, "config.yaml")
+
+	rec := makeProvenanceRecord(t, stateRoot, oldBin, newBin, configPath)
+
+	// Remove the executable after record creation.
+	os.Remove(rec.BackgroundDaemonExe)
+
+	err := ValidateProvenance(&rec, ProvenanceValidation{
+		InstalledBinaryPath: newBin,
+		ConfigPath:          configPath,
+	})
+	if err == nil {
+		t.Fatal("expected error when background-daemon executable is missing")
+	}
+}
+
+// TestRecordDeferredProvenanceRefusesIncompleteBackgroundDaemon verifies
+// that RecordDeferredProvenance refuses to create a record when the
+// background-daemon identity is incomplete (missing PID or executable).
+// No partial provenance record should be written.
+func TestRecordDeferredProvenanceRefusesIncompleteBackgroundDaemon(t *testing.T) {
+	stateRoot := t.TempDir()
+	oldBin := writeFakeBinary(t, filepath.Join(stateRoot, "old-bin"), "old-binary")
+	newBin := writeFakeBinary(t, filepath.Join(stateRoot, "new-bin"), "new-binary")
+	configPath := filepath.Join(stateRoot, "config.yaml")
+	configData := []byte("listen:\n  port: 8787\n")
+	os.WriteFile(configPath, configData, 0o600)
+
+	// Missing PID.
+	err := RecordDeferredProvenance(
+		stateRoot,
+		oldBin, sha256Hex([]byte("old-binary")), "",
+		newBin, sha256Hex([]byte("new-binary")), "v1",
+		configPath, sha256Hex(configData),
+		"background-daemon", "", "",
+		0, newBin, // PID missing
+	)
+	if err == nil {
+		t.Fatal("expected error for missing background-daemon PID")
+	}
+
+	// Missing executable.
+	err = RecordDeferredProvenance(
+		stateRoot,
+		oldBin, sha256Hex([]byte("old-binary")), "",
+		newBin, sha256Hex([]byte("new-binary")), "v1",
+		configPath, sha256Hex(configData),
+		"background-daemon", "", "",
+		12345, "", // executable missing
+	)
+	if err == nil {
+		t.Fatal("expected error for missing background-daemon executable")
+	}
+
+	// Verify no provenance record was written.
+	rec, readErr := ReadProvenance(stateRoot)
+	if readErr != nil {
+		t.Fatalf("ReadProvenance: %v", readErr)
+	}
+	if rec != nil {
+		t.Fatal("no provenance record should be created for incomplete background-daemon identity")
+	}
+}
