@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -646,11 +648,22 @@ func TestFireworks_NonStreamingRelaysByteForByte(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	// Body must be byte-for-byte identical (after trimming whitespace from fixture).
-	expected := strings.TrimSpace(fixtureBody)
-	if got := strings.TrimSpace(w.Body.String()); got != expected {
-		t.Errorf("response body mismatch:\nwant=%s\ngot =%s", expected, got)
+
+	// VAL-FIREWORKS-013: Body must be byte-for-byte identical to the fixture.
+	// Use exact raw-byte equality AND SHA-256 hash equality so that any
+	// leading, trailing, or internal byte mutation fails the test.
+	fixtureBytes := []byte(fixtureBody)
+	if !bytes.Equal(w.Body.Bytes(), fixtureBytes) {
+		t.Errorf("response body raw-byte mismatch:\nwant(hex)=%s\ngot (hex)=%s",
+			hex.EncodeToString(fixtureBytes), hex.EncodeToString(w.Body.Bytes()))
 	}
+	fixtureHash := sha256.Sum256(fixtureBytes)
+	respHash := sha256.Sum256(w.Body.Bytes())
+	if fixtureHash != respHash {
+		t.Errorf("response body SHA-256 mismatch:\nwant=%s\ngot =%s",
+			hex.EncodeToString(fixtureHash[:]), hex.EncodeToString(respHash[:]))
+	}
+
 	// Status unchanged.
 	// Content-Type must be application/json.
 	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
@@ -667,12 +680,56 @@ func TestFireworks_NonStreamingRelaysByteForByte(t *testing.T) {
 			t.Errorf("response header %s = %q, want %q", k, got, v)
 		}
 	}
-	// Verify perf_metrics relayed exactly.
+	// Verify perf_metrics relayed exactly with hyphenated keys.
 	perfKeys := gjson.Get(w.Body.String(), "perf_metrics").Map()
 	for _, key := range []string{"prompt-tokens", "cached-prompt-tokens", "server-time-to-first-token", "server-processing-time"} {
 		if _, ok := perfKeys[key]; !ok {
 			t.Errorf("perf_metrics missing key %s", key)
 		}
+	}
+}
+
+// TestFireworks_NonStreamingRelayDetectsByteMutation proves that any leading,
+// trailing, or internal response-byte mutation fails the exact-byte relay test.
+// This is the negative control for VAL-FIREWORKS-013.
+func TestFireworks_NonStreamingRelayDetectsByteMutation(t *testing.T) {
+	t.Setenv("FIREWORKS_API_KEY", "fw_key")
+
+	model := fwModel("fw-relay-mut", "fireworks", "accounts/fireworks/models/relay-mut", nil)
+
+	originalBody := `{"id":"x","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}]}`
+	originalHash := sha256.Sum256([]byte(originalBody))
+
+	mutations := []struct {
+		name string
+		body string
+	}{
+		{"trailing_newline", originalBody + "\n"},
+		{"leading_space", " " + originalBody},
+		{"trailing_space", originalBody + " "},
+		{"internal_whitespace", `{"id":"x", "choices":[]}`}, // space after colon
+		{"byte_change", `{"id":"y","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}]}`},
+	}
+
+	for _, mt := range mutations {
+		t.Run(mt.name, func(t *testing.T) {
+			ta := newFireworksTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+				jsonRespond(w, http.StatusOK, mt.body, nil)
+			}, model)
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+				strings.NewReader(`{"model":"fw-relay-mut","messages":[]}`))
+			ta.engine.ServeHTTP(w, req)
+
+			mutHash := sha256.Sum256(w.Body.Bytes())
+			if mutHash == originalHash {
+				t.Errorf("mutation %q produced the same SHA-256 as the original; mutation not detected", mt.name)
+			}
+			if bytes.Equal(w.Body.Bytes(), []byte(originalBody)) {
+				t.Errorf("mutation %q produced byte-identical output; mutation not detected", mt.name)
+			}
+		})
 	}
 }
 
@@ -1088,14 +1145,24 @@ func TestFireworks_ResponseHeaders_Filtered(t *testing.T) {
 	model := fwModel("fw-rhdr", "fireworks", "accounts/fireworks/models/rh", nil)
 
 	ta := newFireworksTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
-		// Safe documented Fireworks headers + unsafe headers.
+		// Safe documented Fireworks headers + generic request-ID positive control.
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("fireworks-prompt-tokens", "50")
+		w.Header().Set("fireworks-cached-prompt-tokens", "20")
+		w.Header().Set("fireworks-server-time-to-first-token", "0.08")
 		w.Header().Set("X-Ratelimit-Limit-Tokens-Minute", "30000")
-		// Unsafe headers that must be removed.
+		w.Header().Set("X-Request-ID", "req-generic-123") // generic safe request-ID
+		// Unsafe headers that must be removed by the proxy's FilterHeaders.
+		// Note: Go's HTTP transport strips Connection, Transfer-Encoding,
+		// Keep-Alive, and connection-nominated headers before the proxy sees
+		// the response. The headers below survive Go's transport and are
+		// filtered by the proxy's own header filter.
 		w.Header().Set("Set-Cookie", "secret=session")
-		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Content-Encoding", "br") // decompression-derived, not auto-handled by Go
+		// Gateway-identifying prefixes.
 		w.Header().Set("X-Litellm-Version", "1.0")
+		w.Header().Set("X-Portkey-Request-Id", "pk-123")
+		w.Header().Set("Helicone-Id", "hc-456")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"id":"x","choices":[]}`))
 	}, model)
@@ -1104,22 +1171,173 @@ func TestFireworks_ResponseHeaders_Filtered(t *testing.T) {
 	ta.engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
 		strings.NewReader(`{"model":"fw-rhdr","messages":[]}`)))
 
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	// Safe documented Fireworks headers preserved exactly.
+	safeHeaders := map[string]string{
+		"fireworks-prompt-tokens":              "50",
+		"fireworks-cached-prompt-tokens":       "20",
+		"fireworks-server-time-to-first-token": "0.08",
+		"X-Ratelimit-Limit-Tokens-Minute":      "30000",
+		"X-Request-ID":                         "req-generic-123",
+	}
+	for k, v := range safeHeaders {
+		if got := w.Header().Get(k); got != v {
+			t.Errorf("safe response header %s = %q, want %q", k, got, v)
+		}
+	}
+
+	// Unsafe headers removed by the proxy's filter.
+	unsafeHeaders := []string{
+		"Set-Cookie",
+		"Content-Encoding",
+		"X-Litellm-Version",
+		"X-Portkey-Request-Id",
+		"Helicone-Id",
+	}
+	for _, h := range unsafeHeaders {
+		if got := w.Header().Get(h); got != "" {
+			t.Errorf("unsafe response header %s leaked: %q", h, got)
+		}
+	}
+}
+
+// TestFireworks_FilterHeaders_RemovesHopByHopAndConnectionScoped proves
+// directly that the proxy's FilterHeaders function removes cookies, hop-by-hop
+// headers, connection-nominated headers, decompression-derived headers, and
+// gateway-identifying prefixes while preserving safe metadata. This covers the
+// header categories that Go's HTTP transport already strips before the proxy
+// sees them; FilterHeaders is the proxy's own safety net for these cases.
+func TestFireworks_FilterHeaders_RemovesHopByHopAndConnectionScoped(t *testing.T) {
+	src := http.Header{}
+	// Safe metadata.
+	src.Set("fireworks-prompt-tokens", "100")
+	src.Set("fireworks-cached-prompt-tokens", "40")
+	src.Set("X-Ratelimit-Limit-Tokens-Minute", "60000")
+	src.Set("X-Request-ID", "generic-req-id")
+	// Unsafe: cookies.
+	src.Set("Set-Cookie", "session=leaked")
+	// Unsafe: hop-by-hop.
+	src.Set("Connection", "keep-alive")
+	src.Set("Keep-Alive", "timeout=5")
+	src.Set("Transfer-Encoding", "chunked")
+	src.Set("Proxy-Authenticate", "Basic realm=x")
+	src.Set("Proxy-Authorization", "Basic dXNlcjpwYXNz")
+	src.Set("Te", "trailers")
+	src.Set("Trailer", "X-Foo")
+	src.Set("Upgrade", "h2c")
+	src.Set("Content-Length", "42")
+	src.Set("Content-Encoding", "gzip")
+	// Unsafe: connection-nominated.
+	src.Set("Connection", "keep-alive, X-Custom-Named")
+	src.Set("X-Custom-Named", "conn-scoped-val")
+	// Unsafe: gateway prefixes.
+	src.Set("X-Litellm-Version", "1.0")
+	src.Set("X-Portkey-Id", "pk-1")
+	src.Set("Helicone-Request-Id", "hc-1")
+	src.Set("Cf-Aig-Status", "blocked")
+	src.Set("X-Kong-Proxy-Latency", "123")
+	src.Set("X-Bt-Trace-Id", "bt-1")
+
+	filtered := upstream.FilterHeaders(src)
+
 	// Safe headers preserved.
-	if got := w.Header().Get("fireworks-prompt-tokens"); got != "50" {
-		t.Errorf("fireworks-prompt-tokens = %q, want 50", got)
+	for k, v := range map[string]string{
+		"fireworks-prompt-tokens":         "100",
+		"fireworks-cached-prompt-tokens":  "40",
+		"X-Ratelimit-Limit-Tokens-Minute": "60000",
+		"X-Request-ID":                    "generic-req-id",
+	} {
+		if got := filtered.Get(k); got != v {
+			t.Errorf("FilterHeaders dropped safe header %s: got %q, want %q", k, got, v)
+		}
 	}
-	if got := w.Header().Get("X-Ratelimit-Limit-Tokens-Minute"); got != "30000" {
-		t.Errorf("X-Ratelimit-Limit-Tokens-Minute = %q, want 30000", got)
+
+	// All unsafe headers removed.
+	removed := []string{
+		"Set-Cookie", "Connection", "Keep-Alive", "Transfer-Encoding",
+		"Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer",
+		"Upgrade", "Content-Length", "Content-Encoding",
+		"X-Custom-Named",
+		"X-Litellm-Version", "X-Portkey-Id", "Helicone-Request-Id",
+		"Cf-Aig-Status", "X-Kong-Proxy-Latency", "X-Bt-Trace-Id",
 	}
-	// Unsafe headers removed.
-	if got := w.Header().Get("Set-Cookie"); got != "" {
-		t.Errorf("Set-Cookie leaked: %q", got)
+	for _, h := range removed {
+		if got := filtered.Get(h); got != "" {
+			t.Errorf("FilterHeaders kept unsafe header %s: %q", h, got)
+		}
 	}
-	if got := w.Header().Get("Connection"); got != "" {
-		t.Errorf("Connection leaked: %q", got)
+}
+
+// TestFireworks_ErrorResponseHeaders_Filtered proves that unsafe error-response
+// headers (cookies, connection-scoped, hop-by-hop, decompression-derived, and
+// gateway-prefixed) are removed while allowed metadata (documented fireworks-*
+// performance headers, X-Ratelimit-Limit-Tokens-*, Retry-After, and a generic
+// request-ID) remains on upstream error responses. This is the error-path
+// coverage for VAL-FIREWORKS-017.
+func TestFireworks_ErrorResponseHeaders_Filtered(t *testing.T) {
+	t.Setenv("FIREWORKS_API_KEY", "fw_key")
+
+	model := fwModel("fw-errhdr", "fireworks", "accounts/fireworks/models/errhdr", nil)
+
+	ta := newFireworksTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		// Safe documented Fireworks headers + generic request-ID + Retry-After.
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("fireworks-prompt-tokens", "80")
+		w.Header().Set("X-Ratelimit-Limit-Tokens-Minute", "10000")
+		w.Header().Set("X-Request-ID", "req-err-generic-456")
+		w.Header().Set("Retry-After", "60")
+		// Unsafe headers that must be removed even on error responses.
+		w.Header().Set("Set-Cookie", "session=leaked-on-error")
+		w.Header().Set("Connection", "keep-alive, X-Conn-Scoped")
+		w.Header().Set("X-Conn-Scoped", "error-conn-value")
+		w.Header().Set("Transfer-Encoding", "chunked")
+		w.Header().Set("Content-Encoding", "br")
+		w.Header().Set("Keep-Alive", "timeout=5")
+		w.Header().Set("X-Litellm-Version", "2.0")
+		w.Header().Set("X-Portkey-Status", "error")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit_error"}}`))
+	}, model)
+
+	w := httptest.NewRecorder()
+	ta.engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"fw-errhdr","messages":[]}`)))
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", w.Code)
 	}
-	if got := w.Header().Get("X-Litellm-Version"); got != "" {
-		t.Errorf("gateway-identifying header X-Litellm-Version leaked: %q", got)
+
+	// Safe headers preserved on error response.
+	safeHeaders := map[string]string{
+		"fireworks-prompt-tokens":         "80",
+		"X-Ratelimit-Limit-Tokens-Minute": "10000",
+		"X-Request-ID":                    "req-err-generic-456",
+		"Retry-After":                     "60",
+	}
+	for k, v := range safeHeaders {
+		if got := w.Header().Get(k); got != v {
+			t.Errorf("safe error-response header %s = %q, want %q", k, got, v)
+		}
+	}
+
+	// Unsafe headers removed from error response.
+	unsafeHeaders := []string{
+		"Set-Cookie",
+		"Connection",
+		"X-Conn-Scoped",
+		"Transfer-Encoding",
+		"Content-Encoding",
+		"Keep-Alive",
+		"X-Litellm-Version",
+		"X-Portkey-Status",
+	}
+	for _, h := range unsafeHeaders {
+		if got := w.Header().Get(h); got != "" {
+			t.Errorf("unsafe error-response header %s leaked: %q", h, got)
+		}
 	}
 }
 
