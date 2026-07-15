@@ -20,11 +20,11 @@ func (m model) loadCmd() tea.Cmd {
 	}
 }
 
-func (m model) discoverCmd(sel providerChoice, key string) tea.Cmd {
+func (m model) discoverCmd(sel providerChoice, key string, generation int) tea.Cmd {
 	be := m.be
 	return func() tea.Msg {
 		ids, err := be.discover(sel.ka, sel.ka.BaseURL, key)
-		return discoverMsg{ids: ids, err: err}
+		return discoverMsg{ids: ids, err: err, generation: generation}
 	}
 }
 
@@ -84,12 +84,18 @@ func (m model) startAddFlow() (tea.Model, tea.Cmd) {
 }
 
 func (m model) beginDiscover() (tea.Model, tea.Cmd) {
+	m.discoverGeneration++
+	gen := m.discoverGeneration
 	m.screen = screenDiscover
 	key := os.Getenv(strings.TrimSpace(m.sel.ka.APIKeyEnv))
-	return m, tea.Batch(m.spin.Tick, m.discoverCmd(m.sel, key))
+	return m, tea.Batch(m.spin.Tick, m.discoverCmd(m.sel, key, gen))
 }
 
 func (m model) onDiscover(msg discoverMsg) (tea.Model, tea.Cmd) {
+	// Ignore stale discovery results from a cancelled or superseded request.
+	if msg.generation != m.discoverGeneration {
+		return m, nil
+	}
 	m.pickCursor = 0
 	if msg.err != nil || len(msg.ids) == 0 {
 		m.buildForm()

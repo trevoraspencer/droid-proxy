@@ -16,6 +16,8 @@ func (m model) View() string {
 		return m.viewAddProvider()
 	case screenAddKey:
 		return m.viewAddKey()
+	case screenServingPath:
+		return m.viewServingPath()
 	case screenDiscover:
 		return m.viewDiscover()
 	case screenPickModel:
@@ -156,6 +158,23 @@ func (m model) viewDiscover() string {
 	b.WriteString(m.header("Adding " + m.sel.label))
 	b.WriteString(m.spin.View() + " querying provider for available models...\n\n")
 	b.WriteString(helpStyle.Render("esc cancel"))
+	return b.String()
+}
+
+func (m model) viewServingPath() string {
+	var b strings.Builder
+	b.WriteString(m.header(m.sel.label + " — choose a serving path"))
+	paths := fireworksServingPaths()
+	for i, p := range paths {
+		cursor := "  "
+		label := p.label + "  " + subtleStyle.Render(p.desc)
+		if i == m.provCursor {
+			cursor = cursorStyle.Render("> ")
+			label = selectedStyle.Render(p.label) + "  " + subtleStyle.Render(p.desc)
+		}
+		b.WriteString(fmt.Sprintf("%s%s\n", cursor, label))
+	}
+	b.WriteString("\n" + helpStyle.Render("enter select  ↑/↓ move  esc back"))
 	return b.String()
 }
 

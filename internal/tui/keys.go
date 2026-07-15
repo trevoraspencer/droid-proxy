@@ -85,8 +85,36 @@ func (m model) keyAddProvider(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) afterProviderChosen() (tea.Model, tea.Cmd) {
+	m.servingPath = ""
 	switch m.sel.kind {
 	case pkKnown:
+		// Fireworks Standard has serving paths (Standard, Priority, Fast).
+		if m.sel.ka.Name == "fireworks" {
+			if m.be.keyEnvSet(m.sel.ka.APIKeyEnv) {
+				return m.showServingPath()
+			}
+			m.beginKeyInput(m.sel.ka.APIKeyEnv, false)
+			return m, nil
+		}
+		// Static discovery profiles (e.g. Fire Pass) show curated catalog.
+		if m.sel.ka.DiscoveryPolicy == config.DiscoveryStatic {
+			if m.sel.ka.NoAuth || m.be.keyEnvSet(m.sel.ka.APIKeyEnv) {
+				return m.showStaticCatalog()
+			}
+			m.beginKeyInput(m.sel.ka.APIKeyEnv, false)
+			return m, nil
+		}
+		// Manual-only profiles skip discovery entirely.
+		if m.sel.ka.DiscoveryPolicy == config.DiscoveryManual {
+			if m.sel.ka.NoAuth || m.be.keyEnvSet(m.sel.ka.APIKeyEnv) {
+				m.buildForm()
+				m.screen = screenForm
+				return m, textinput.Blink
+			}
+			m.beginKeyInput(m.sel.ka.APIKeyEnv, false)
+			return m, nil
+		}
+		// Default: remote best-effort discovery.
 		if m.sel.ka.NoAuth || m.be.keyEnvSet(m.sel.ka.APIKeyEnv) {
 			return m.beginDiscover()
 		}
@@ -144,17 +172,84 @@ func (m model) keyAddKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := m.be.setKey(env, val); err != nil {
 			return m, func() tea.Msg { return actionDoneMsg{err: err} }
 		}
-		return m.beginDiscover()
+		return m.afterKeySaved()
 	}
 	var cmd tea.Cmd
 	m.keyInput, cmd = m.keyInput.Update(msg)
 	return m, cmd
 }
 
+// afterKeySaved routes to the correct next step after a credential write
+// completes during the add-model flow.
+func (m model) afterKeySaved() (tea.Model, tea.Cmd) {
+	if m.sel.ka.Name == "fireworks" {
+		return m.showServingPath()
+	}
+	if m.sel.ka.DiscoveryPolicy == config.DiscoveryStatic {
+		return m.showStaticCatalog()
+	}
+	if m.sel.ka.DiscoveryPolicy == config.DiscoveryManual {
+		m.buildForm()
+		m.screen = screenForm
+		return m, textinput.Blink
+	}
+	return m.beginDiscover()
+}
+
+func (m model) showServingPath() (tea.Model, tea.Cmd) {
+	m.provCursor = 0
+	m.screen = screenServingPath
+	return m, nil
+}
+
+func (m model) showStaticCatalog() (tea.Model, tea.Cmd) {
+	m.pickCursor = 0
+	m.pickItems = catalogPickItems(m.sel.ka.StaticModels)
+	m.screen = screenPickModel
+	return m, nil
+}
+
+func (m model) showFastCatalog() (tea.Model, tea.Cmd) {
+	m.pickCursor = 0
+	m.pickItems = catalogPickItems(config.FireworksFastCatalog())
+	m.screen = screenPickModel
+	return m, nil
+}
+
+func (m model) keyServingPath(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	paths := fireworksServingPaths()
+	switch msg.String() {
+	case "esc":
+		m.servingPath = ""
+		m.screen = screenAddProvider
+	case "up", "k":
+		if m.provCursor > 0 {
+			m.provCursor--
+		}
+	case "down", "j":
+		if m.provCursor < len(paths)-1 {
+			m.provCursor++
+		}
+	case "enter":
+		path := paths[m.provCursor]
+		m.servingPath = path.id
+		if path.id == "fast" {
+			return m.showFastCatalog()
+		}
+		// Standard and Priority use remote best-effort discovery.
+		return m.beginDiscover()
+	}
+	return m, nil
+}
+
 func (m model) keyPickModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		m.screen = screenAddProvider
+		if m.servingPath != "" {
+			m.screen = screenServingPath
+		} else {
+			m.screen = screenAddProvider
+		}
 	case "up", "k":
 		if m.pickCursor > 0 {
 			m.pickCursor--
@@ -250,7 +345,11 @@ func (m model) formValue(key string) string {
 func (m model) keyForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		m.screen = screenDashboard
+		if m.servingPath != "" {
+			m.screen = screenServingPath
+		} else {
+			m.screen = screenDashboard
+		}
 		return m, nil
 	case "tab", "down":
 		m.focusForm(m.formCursor + 1)
@@ -339,6 +438,10 @@ func (m model) buildModelFromForm() (*config.Model, error) {
 		built.KnownAuth = m.sel.ka.Name
 		built.FactoryProvider = factoryProviderFor(m.sel.ka.UpstreamProtocol)
 		built.UpstreamProtocol = m.sel.ka.UpstreamProtocol
+		// Fireworks Priority serving path adds service_tier: priority.
+		if m.servingPath == "priority" {
+			built.ExtraArgs = map[string]any{"service_tier": "priority"}
+		}
 	case pkCustom:
 		base := m.formValue("base_url")
 		keyEnv := m.formValue("api_key_env")

@@ -466,6 +466,7 @@ func TestDocsExamplePagesExistForKnownAuth(t *testing.T) {
 		"kimi":                "examples/kimi.md",
 		"groq":                "examples/groq.md",
 		"fireworks":           "examples/fireworks.md",
+		"fireworks-fire-pass": "examples/fireworks-fire-pass.md",
 		"zai":                 "examples/zai.md",
 		"zai-main-api":        "examples/zai.md",
 		"zai-coding-api":      "examples/zai.md",
