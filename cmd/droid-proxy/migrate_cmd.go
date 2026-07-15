@@ -62,16 +62,15 @@ func runMigratePortCommit(configPath string, dryRun bool) {
 		os.Exit(1)
 	}
 
-	if !plan.HasChanges() {
-		if !plan.ConfigEligible && plan.ConfigReason != "" {
-			fmt.Printf("no eligible migration: %s\n", plan.ConfigReason)
-		} else {
-			fmt.Println("no eligible migration changes.")
-		}
-		return
-	}
-
 	if dryRun {
+		// Dry-run never mutates recovery state or files.
+		if !plan.HasChanges() {
+			if !plan.ConfigEligible && plan.ConfigReason != "" {
+				fmt.Printf("no eligible migration: %s\n", plan.ConfigReason)
+			} else {
+				fmt.Println("no eligible migration changes.")
+			}
+		}
 		fmt.Println("dry-run: no files written.")
 		return
 	}
@@ -89,14 +88,29 @@ func runMigratePortCommit(configPath string, dryRun bool) {
 		}
 	}
 
-	if err := migration.CommitPlan(plan); err != nil {
+	// Non-dry-run: always acquire the trusted lock. Even when the plan is a
+	// no-op (config already at the new port), this recovers and finalizes a
+	// matching interrupted transaction whose targets are already all-new.
+	result, err := migration.CommitPlan(plan)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "droid-proxy migrate-port error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("migration complete: listen.port %d -> %d\n", plan.OldPort, plan.NewPort)
-	if len(plan.FactoryChanges) > 0 {
-		fmt.Printf("updated %d Factory entry/entries\n", len(plan.FactoryChanges))
+	switch result.Action {
+	case "migrated":
+		fmt.Printf("migration complete: listen.port %d -> %d\n", plan.OldPort, plan.NewPort)
+		if len(plan.FactoryChanges) > 0 {
+			fmt.Printf("updated %d Factory entry/entries\n", len(plan.FactoryChanges))
+		}
+	case "recovered":
+		fmt.Printf("recovered interrupted migration transaction %s: listen.port %d -> %d\n", result.ID, plan.OldPort, plan.NewPort)
+	default:
+		if !plan.ConfigEligible && plan.ConfigReason != "" {
+			fmt.Printf("no eligible migration: %s\n", plan.ConfigReason)
+		} else {
+			fmt.Println("no eligible migration changes.")
+		}
 	}
 }
 

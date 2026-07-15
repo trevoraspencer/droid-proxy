@@ -81,11 +81,28 @@ func AnalyzeConfigBytes(raw []byte, oldPort, newPort int) (*ConfigAnalysis, erro
 		return analysis, nil
 	}
 
+	// Reject duplicate top-level listen keys before any plan or rewrite.
+	if countKeys(root, "listen") > 1 {
+		analysis.Reason = "config has duplicate top-level 'listen' keys; migration requires an unambiguous mapping"
+		return analysis, nil
+	}
+
 	listenNode := findChild(root, "listen")
 	if listenNode == nil || listenNode.Kind != yaml.MappingNode {
 		// No listen block or listen is not a mapping. This is a no-op
 		// (omitted port), not a refusal.
 		analysis.Reason = "config has no listen mapping; no explicit port to migrate"
+		return analysis, nil
+	}
+
+	// Reject duplicate host and port keys within the listen mapping before
+	// any plan or rewrite.
+	if countKeys(listenNode, "host") > 1 {
+		analysis.Reason = "listen mapping has duplicate 'host' keys; migration requires an unambiguous mapping"
+		return analysis, nil
+	}
+	if countKeys(listenNode, "port") > 1 {
+		analysis.Reason = "listen mapping has duplicate 'port' keys; migration requires an unambiguous mapping"
 		return analysis, nil
 	}
 
@@ -188,6 +205,22 @@ func findChild(mapping *yaml.Node, key string) *yaml.Node {
 		}
 	}
 	return nil
+}
+
+// countKeys returns the number of times key appears in a mapping node. A count
+// greater than one indicates duplicate YAML mapping keys, which make the
+// document ambiguous and unsafe for exact-byte migration.
+func countKeys(mapping *yaml.Node, key string) int {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return 0
+	}
+	count := 0
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			count++
+		}
+	}
+	return count
 }
 
 // mappingNode returns the root mapping node from a document node.

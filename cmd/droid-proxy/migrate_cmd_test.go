@@ -182,6 +182,96 @@ func TestMigratePortDryRunReportNoSecrets(t *testing.T) {
 	}
 }
 
+func TestMigratePortNoopRecoversInterruptedJournal(t *testing.T) {
+	homeDir, configPath, factoryPath := setupMigrationTestEnv(t)
+	_ = homeDir
+
+	// Write an eligible config with port 8787.
+	configContent := "listen:\n  host: 127.0.0.1\n  port: 8787\nmodels:\n  - alias: m\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    upstream_model: m\n    base_url: http://u/v1\n    api_key_env: KEY\n"
+	os.WriteFile(configPath, []byte(configContent), 0o600)
+	factoryContent := `{"customModels":[{"model":"m","provider":"generic-chat-completion-api","baseUrl":"http://127.0.0.1:8787"}]}`
+	os.WriteFile(factoryPath, []byte(factoryContent), 0o600)
+
+	// Complete a migration to get the config to 9787.
+	stdout, _, _ := captureMigratePortOutputSafely([]string{"--config", configPath})
+	if !strings.Contains(stdout, "complete") {
+		t.Fatalf("expected migration complete:\n%s", stdout)
+	}
+
+	// Simulate a crash: find the completed journal and reset its status
+	// to in_progress, so both targets are all-new but journal is unfinalized.
+	stateRoot := filepath.Join(homeDir, ".droid-proxy", "migration")
+	txDir := filepath.Join(stateRoot, "transactions")
+	entries, err := os.ReadDir(txDir)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("expected journal files: err=%v, entries=%d", err, len(entries))
+	}
+	for _, entry := range entries {
+		jPath := filepath.Join(txDir, entry.Name())
+		data, err := os.ReadFile(jPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Mutate the status field to in_progress.
+		modified := strings.Replace(string(data), `"completed"`, `"in_progress"`, 1)
+		if err := os.WriteFile(jPath, []byte(modified), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Now run migrate-port again. The plan is a no-op (config already at 9787),
+	// but the non-dry-run invocation should recover the interrupted journal.
+	stdout2, _, _ := captureMigratePortOutputSafely([]string{"--config", configPath})
+	if !strings.Contains(stdout2, "recovered") {
+		t.Fatalf("expected recovery output for no-op with interrupted journal:\n%s", stdout2)
+	}
+
+	// Journal should now be completed.
+	for _, entry := range entries {
+		jPath := filepath.Join(txDir, entry.Name())
+		data, _ := os.ReadFile(jPath)
+		if !strings.Contains(string(data), `"completed"`) {
+			t.Fatalf("journal %s should be completed after recovery:\n%s", entry.Name(), data)
+		}
+	}
+}
+
+func TestMigratePortDryRunDoesNotRecover(t *testing.T) {
+	homeDir, configPath, factoryPath := setupMigrationTestEnv(t)
+	_ = homeDir
+
+	// Write an eligible config with port 8787.
+	configContent := "listen:\n  host: 127.0.0.1\n  port: 8787\nmodels:\n  - alias: m\n    factory_provider: generic-chat-completion-api\n    upstream_protocol: openai-chat\n    upstream_model: m\n    base_url: http://u/v1\n    api_key_env: KEY\n"
+	os.WriteFile(configPath, []byte(configContent), 0o600)
+	factoryContent := `{"customModels":[{"model":"m","provider":"generic-chat-completion-api","baseUrl":"http://127.0.0.1:8787"}]}`
+	os.WriteFile(factoryPath, []byte(factoryContent), 0o600)
+
+	// Complete a migration.
+	_, _, _ = captureMigratePortOutputSafely([]string{"--config", configPath})
+
+	// Reset journal to in_progress.
+	stateRoot := filepath.Join(homeDir, ".droid-proxy", "migration")
+	txDir := filepath.Join(stateRoot, "transactions")
+	entries, _ := os.ReadDir(txDir)
+	for _, entry := range entries {
+		jPath := filepath.Join(txDir, entry.Name())
+		data, _ := os.ReadFile(jPath)
+		modified := strings.Replace(string(data), `"completed"`, `"in_progress"`, 1)
+		os.WriteFile(jPath, []byte(modified), 0o600)
+	}
+
+	// Dry-run must NOT recover the journal.
+	_, _, _ = captureMigratePortOutputSafely([]string{"--dry-run", "--config", configPath})
+
+	for _, entry := range entries {
+		jPath := filepath.Join(txDir, entry.Name())
+		data, _ := os.ReadFile(jPath)
+		if !strings.Contains(string(data), `"in_progress"`) {
+			t.Fatalf("dry-run should not recover journal %s; it should still be in_progress:\n%s", entry.Name(), data)
+		}
+	}
+}
+
 // TestMigratePortRefusesSameConfigRunningDaemon verifies that explicit
 // migration detects when a running daemon uses the same config, which causes
 // refusal with stop-and-retry guidance (VAL-PORT-005). We test

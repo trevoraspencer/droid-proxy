@@ -613,3 +613,59 @@ func TestNodeByteOffsetInvalidUTF8HighByte(t *testing.T) {
 		t.Fatalf("byte at offset %d is %q, want 'X'", offset, raw[offset])
 	}
 }
+
+// --- Duplicate YAML key detection (VAL-PORT-014) ---
+
+func TestAnalyzeConfigBytesRefusesDuplicateTopLevelListen(t *testing.T) {
+	// Two top-level listen keys: ambiguous, must refuse before any plan.
+	raw := []byte("listen:\n  host: 127.0.0.1\n  port: 8787\nlisten:\n  host: 127.0.0.1\n  port: 9787\n")
+	a, _ := AnalyzeConfigBytes(raw, 8787, 9787)
+	if a.Eligible {
+		t.Fatal("expected refusal for duplicate top-level listen keys")
+	}
+	if !strings.Contains(a.Reason, "duplicate") || !strings.Contains(a.Reason, "listen") {
+		t.Fatalf("reason should mention duplicate listen: %s", a.Reason)
+	}
+}
+
+func TestAnalyzeConfigBytesRefusesDuplicateListenHost(t *testing.T) {
+	// Two host keys under listen: ambiguous, must refuse.
+	raw := []byte("listen:\n  host: 127.0.0.1\n  host: localhost\n  port: 8787\n")
+	a, _ := AnalyzeConfigBytes(raw, 8787, 9787)
+	if a.Eligible {
+		t.Fatal("expected refusal for duplicate listen.host keys")
+	}
+	if !strings.Contains(a.Reason, "duplicate") || !strings.Contains(a.Reason, "host") {
+		t.Fatalf("reason should mention duplicate host: %s", a.Reason)
+	}
+}
+
+func TestAnalyzeConfigBytesRefusesDuplicateListenPort(t *testing.T) {
+	// Two port keys under listen: ambiguous, must refuse.
+	raw := []byte("listen:\n  host: 127.0.0.1\n  port: 8787\n  port: 9787\n")
+	a, _ := AnalyzeConfigBytes(raw, 8787, 9787)
+	if a.Eligible {
+		t.Fatal("expected refusal for duplicate listen.port keys")
+	}
+	if !strings.Contains(a.Reason, "duplicate") || !strings.Contains(a.Reason, "port") {
+		t.Fatalf("reason should mention duplicate port: %s", a.Reason)
+	}
+}
+
+func TestDuplicateTopLevelListenPreventsPlan(t *testing.T) {
+	// The refusal must happen before any plan, target write, service action,
+	// or DNS work. PlanMigration should report the config as not eligible.
+	dir := t.TempDir()
+	cfgPath := writeConfigFile(t, dir, "config.yaml",
+		"listen:\n  host: 127.0.0.1\n  port: 8787\nlisten:\n  host: 127.0.0.1\n  port: 9787\n")
+	plan, err := PlanMigration(PlanOptions{ConfigPath: cfgPath, FactoryPath: filepath.Join(dir, "nonexistent.json")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.ConfigEligible {
+		t.Fatal("plan should not be eligible for duplicate listen keys")
+	}
+	if !strings.Contains(plan.ConfigReason, "duplicate") {
+		t.Fatalf("plan reason should mention duplicate: %s", plan.ConfigReason)
+	}
+}

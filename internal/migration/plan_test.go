@@ -168,7 +168,7 @@ func TestCommitPlanRewritesConfigAndFactory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := CommitPlan(plan); err != nil {
+	if _, err := CommitPlan(plan); err != nil {
 		t.Fatal(err)
 	}
 
@@ -205,7 +205,7 @@ func TestCommitPlanPreservesMode(t *testing.T) {
 		ConfigPath:  configPath,
 		FactoryPath: factoryPath,
 	})
-	if err := CommitPlan(plan); err != nil {
+	if _, err := CommitPlan(plan); err != nil {
 		t.Fatal(err)
 	}
 
@@ -231,7 +231,7 @@ func TestCommitPlanRefusesUnsafeFactory(t *testing.T) {
 		FactoryPath: factoryPath,
 	})
 
-	err := CommitPlan(plan)
+	_, err := CommitPlan(plan)
 	if err == nil {
 		t.Fatal("expected error for unsafe factory")
 	}
@@ -255,7 +255,7 @@ func TestCommitPlanNoChangesIsNoop(t *testing.T) {
 	if plan.HasChanges() {
 		t.Fatal("expected no changes")
 	}
-	if err := CommitPlan(plan); err != nil {
+	if _, err := CommitPlan(plan); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -273,7 +273,7 @@ func TestCommitPlanConfigOnlyMigration(t *testing.T) {
 	if !plan.ConfigEligible {
 		t.Fatalf("config not eligible: %s", plan.ConfigReason)
 	}
-	if err := CommitPlan(plan); err != nil {
+	if _, err := CommitPlan(plan); err != nil {
 		t.Fatal(err)
 	}
 
@@ -316,7 +316,7 @@ func TestPlanMigrationWithInjectedPorts(t *testing.T) {
 		t.Fatalf("new origin = %s", plan.FactoryChanges[0].NewOrigin)
 	}
 
-	if err := CommitPlan(plan); err != nil {
+	if _, err := CommitPlan(plan); err != nil {
 		t.Fatal(err)
 	}
 

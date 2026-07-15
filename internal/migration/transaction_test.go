@@ -1399,3 +1399,222 @@ func TestCommitRejectsChangedTargetHash(t *testing.T) {
 		t.Fatal("user edit was overwritten despite hash mismatch")
 	}
 }
+
+// --- Staged file cleanup tests (VAL-PORT-016, VAL-PORT-023) ---
+
+// stagedFilesInStateRoot returns all *.staged files in the state root.
+func stagedFilesInStateRoot(t *testing.T, stateRoot string) []string {
+	t.Helper()
+	var found []string
+	err := filepath.Walk(stateRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".staged") {
+			found = append(found, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return found
+}
+
+func TestStagedFilesRemovedAfterCompletedTransaction(t *testing.T) {
+	home, configPath, factoryPath := setupTxTestEnv(t)
+	writeTestConfig(t, configPath)
+	writeTestFactory(t, factoryPath)
+
+	_, err := planAndCommit(t, configPath, factoryPath, TransactionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stateRoot := filepath.Join(home, ".droid-proxy", "migration")
+	staged := stagedFilesInStateRoot(t, stateRoot)
+	if len(staged) != 0 {
+		t.Fatalf("expected no .staged files after completed transaction, found %d: %v", len(staged), staged)
+	}
+
+	// Backups and journal should still exist.
+	backupDir := filepath.Join(stateRoot, "backups")
+	entries, _ := os.ReadDir(backupDir)
+	if len(entries) == 0 {
+		t.Fatal("expected backup directories to exist after completed transaction")
+	}
+	txDir := filepath.Join(stateRoot, "transactions")
+	txEntries, _ := os.ReadDir(txDir)
+	if len(txEntries) == 0 {
+		t.Fatal("expected journal to exist after completed transaction")
+	}
+}
+
+func TestStagedFilesRemovedAfterRollback(t *testing.T) {
+	home, configPath, factoryPath := setupTxTestEnv(t)
+	writeTestConfig(t, configPath)
+	writeTestFactory(t, factoryPath)
+
+	// Complete a migration.
+	_, err := planAndCommit(t, configPath, factoryPath, TransactionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Rollback.
+	cands, _ := FindRollbackCandidates(configPath)
+	if len(cands) != 1 {
+		t.Fatalf("expected 1 rollback candidate, got %d", len(cands))
+	}
+	if err := RollbackTransaction(cands[0]); err != nil {
+		t.Fatal(err)
+	}
+
+	stateRoot := filepath.Join(home, ".droid-proxy", "migration")
+	staged := stagedFilesInStateRoot(t, stateRoot)
+	if len(staged) != 0 {
+		t.Fatalf("expected no .staged files after rollback, found %d: %v", len(staged), staged)
+	}
+}
+
+func TestStagedFilesRemovedAfterAbortRecovery(t *testing.T) {
+	home, configPath, factoryPath := setupTxTestEnv(t)
+	writeTestConfig(t, configPath)
+	writeTestFactory(t, factoryPath)
+
+	// Start a migration that gets interrupted before any commit (all-old).
+	_, _ = planAndCommit(t, configPath, factoryPath, TransactionOptions{
+		FaultHook: func(phase string) error {
+			if phase == "before_destination_check" {
+				return fmt.Errorf("interrupted")
+			}
+			return nil
+		},
+	})
+
+	stateRoot := filepath.Join(home, ".droid-proxy", "migration")
+	// Before recovery, staged files should exist (needed for recovery).
+	preStaged := stagedFilesInStateRoot(t, stateRoot)
+	if len(preStaged) == 0 {
+		t.Fatal("expected staged files to exist during in-progress state")
+	}
+
+	// Recover (aborts because all targets are old).
+	_, err := RecoverIncomplete(TransactionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// After abort recovery, staged files should be cleaned up.
+	postStaged := stagedFilesInStateRoot(t, stateRoot)
+	if len(postStaged) != 0 {
+		t.Fatalf("expected no .staged files after abort recovery, found %d: %v", len(postStaged), postStaged)
+	}
+}
+
+func TestStagedFilesRetainedDuringInProgressForRecovery(t *testing.T) {
+	home, configPath, factoryPath := setupTxTestEnv(t)
+	writeTestConfig(t, configPath)
+	writeTestFactory(t, factoryPath)
+
+	// Interrupt after config commit, before factory commit (split state).
+	_, _ = planAndCommit(t, configPath, factoryPath, TransactionOptions{
+		FaultHook: func(phase string) error {
+			if phase == "before_factory_commit" {
+				return fmt.Errorf("interrupted")
+			}
+			return nil
+		},
+	})
+
+	stateRoot := filepath.Join(home, ".droid-proxy", "migration")
+	// During in-progress (split), staged files should be retained for recovery.
+	staged := stagedFilesInStateRoot(t, stateRoot)
+	// The factory staged file should still exist (needed to complete recovery).
+	if len(staged) == 0 {
+		// Recovery from split should still work because the journal references
+		// staged paths. But after split-forward recovery, they'll be cleaned.
+		// If there are none, that's acceptable only if recovery already ran.
+		// But we expect them to be present before explicit recovery.
+		t.Fatal("expected at least one staged file during in-progress split state")
+	}
+}
+
+func TestStagedFilesWithSecretsCleanedUpAfterCompletion(t *testing.T) {
+	home, configPath, factoryPath := setupTxTestEnv(t)
+	writeTestConfigWithSecret(t, configPath)
+	writeTestFactoryWithSecret(t, factoryPath)
+
+	_, err := planAndCommit(t, configPath, factoryPath, TransactionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stateRoot := filepath.Join(home, ".droid-proxy", "migration")
+	staged := stagedFilesInStateRoot(t, stateRoot)
+	if len(staged) != 0 {
+		t.Fatalf("expected no .staged files (which may contain secrets) after completion, found: %v", staged)
+	}
+}
+
+// --- No-op finalization tests (VAL-PORT-017) ---
+
+func TestNoopPlanRecoversAllNewInterruptedJournal(t *testing.T) {
+	home, configPath, factoryPath := setupTxTestEnv(t)
+	writeTestConfig(t, configPath)
+	writeTestFactory(t, factoryPath)
+
+	// Complete a migration but simulate a crash after commit before
+	// journal finalization (after_commit fault).
+	_, _ = planAndCommit(t, configPath, factoryPath, TransactionOptions{
+		FaultHook: func(phase string) error {
+			if phase == "after_commit" {
+				return fmt.Errorf("crash before finalization")
+			}
+			return nil
+		},
+	})
+
+	// Both targets are now all-new, but journal is still in_progress.
+	stateRoot := filepath.Join(home, ".droid-proxy", "migration")
+	records, _ := listJournals(stateRoot)
+	if len(records) != 1 {
+		t.Fatalf("expected 1 journal, got %d", len(records))
+	}
+	if records[0].Status != StatusInProgress {
+		t.Fatalf("expected in_progress journal, got %s", records[0].Status)
+	}
+
+	// Now create a no-op plan (config is already at 9787).
+	plan, err := PlanMigration(PlanOptions{
+		ConfigPath:  configPath,
+		FactoryPath: factoryPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.HasChanges() {
+		t.Fatal("expected no-op plan since config is already migrated")
+	}
+
+	// CommitPlan should still recover the interrupted journal.
+	result, err := CommitPlan(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Action != "recovered" {
+		t.Fatalf("expected recovered action, got %s", result.Action)
+	}
+
+	// Journal should now be completed.
+	records2, _ := listJournals(stateRoot)
+	found := false
+	for _, r := range records2 {
+		if r.Status == StatusCompleted {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected at least one completed journal after no-op recovery")
+	}
+}

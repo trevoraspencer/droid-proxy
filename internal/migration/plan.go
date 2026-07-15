@@ -167,13 +167,12 @@ func PlanMigration(opts PlanOptions) (*Plan, error) {
 // outputs, commits targets in order with journaled progress, and marks the
 // transaction complete. It preserves file modes and ownership. If the Factory
 // state is unsafe, it aborts before writing either target.
-func CommitPlan(plan *Plan) error {
-	result, err := CommitTransaction(plan, TransactionOptions{})
-	if err != nil {
-		return err
-	}
-	_ = result
-	return nil
+//
+// Even when the plan has no changes (no-op), a non-dry-run invocation
+// acquires the trusted lock and recovers any matching interrupted transaction
+// before returning a no-op result.
+func CommitPlan(plan *Plan) (*TransactionResult, error) {
+	return CommitTransaction(plan, TransactionOptions{})
 }
 
 // writeFilePreservingMode writes data to path, preserving the existing file's

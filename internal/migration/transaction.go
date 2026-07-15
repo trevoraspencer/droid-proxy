@@ -167,6 +167,7 @@ func CommitTransaction(plan *Plan, opts TransactionOptions) (*TransactionResult,
 			rec.Status = StatusAborted
 			rec.AbortedAt = nowISO()
 			_ = writeJournal(stateRoot, rec)
+			cleanupStagedFiles(rec)
 			return nil, fmt.Errorf("destination unavailable: %w", err)
 		}
 	}
@@ -209,6 +210,10 @@ func CommitTransaction(plan *Plan, opts TransactionOptions) (*TransactionResult,
 	if err := writeJournal(stateRoot, rec); err != nil {
 		return nil, fmt.Errorf("mark complete: %w", err)
 	}
+
+	// Terminal state: remove staged full-file intermediates. Immutable
+	// backups and the journal are retained.
+	cleanupStagedFiles(rec)
 
 	return &TransactionResult{ID: txID, Action: "migrated"}, nil
 }
@@ -314,6 +319,19 @@ func checkTargetTrust(absPath string) error {
 	return nil
 }
 
+// cleanupStagedFiles removes all *.staged full-file intermediates from a
+// transaction record's targets. It is called after a terminal state
+// (completed, rolled-back, or safely aborted) so that secret-bearing staged
+// data does not persist beyond what is necessary for recovery. Immutable
+// backups and the journal are always retained.
+func cleanupStagedFiles(rec *TransactionRecord) {
+	for _, t := range rec.targets() {
+		if t.StagedPath != "" {
+			os.Remove(t.StagedPath)
+		}
+	}
+}
+
 // recoverIncompleteLocked scans for in-progress transactions and recovers
 // them to a coherent state. Must be called with the lock held.
 func recoverIncompleteLocked(stateRoot string, opts TransactionOptions) (*TransactionResult, error) {
@@ -374,6 +392,8 @@ func recoverOne(stateRoot string, rec *TransactionRecord) (*TransactionResult, e
 		if err := writeJournal(stateRoot, rec); err != nil {
 			return nil, err
 		}
+		// Terminal state: clean up staged intermediates.
+		cleanupStagedFiles(rec)
 		return &TransactionResult{Action: "no-op"}, nil
 	}
 
@@ -390,6 +410,8 @@ func recoverOne(stateRoot string, rec *TransactionRecord) (*TransactionResult, e
 		if err := writeJournal(stateRoot, rec); err != nil {
 			return nil, err
 		}
+		// Terminal state: clean up staged intermediates.
+		cleanupStagedFiles(rec)
 		return &TransactionResult{ID: rec.ID, Action: "recovered"}, nil
 	}
 
@@ -478,6 +500,8 @@ func recoverSplitForward(stateRoot string, rec *TransactionRecord, configState, 
 	if err := writeJournal(stateRoot, rec); err != nil {
 		return nil, err
 	}
+	// Terminal state: clean up staged intermediates.
+	cleanupStagedFiles(rec)
 	return &TransactionResult{ID: rec.ID, Action: "recovered"}, nil
 }
 
@@ -591,6 +615,9 @@ func RollbackTransactionImpl(candidate RollbackCandidate, opts TransactionOption
 	if err := writeJournal(stateRoot, rec); err != nil {
 		return fmt.Errorf("mark rolled back: %w", err)
 	}
+
+	// Terminal state: clean up staged intermediates.
+	cleanupStagedFiles(rec)
 
 	return nil
 }
