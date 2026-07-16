@@ -11,7 +11,7 @@ import (
 
 func TestParseModelIDsOpenAIShape(t *testing.T) {
 	body := []byte(`{"object":"list","data":[{"id":"gpt-4o"},{"id":"gpt-4o-mini"}]}`)
-	got, err := parseModelIDs(body)
+	got, err := parseModelIDs(body, ListOptions{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestParseModelIDsOpenAIShape(t *testing.T) {
 
 func TestParseModelIDsModelsShape(t *testing.T) {
 	body := []byte(`{"models":[{"name":"llama3"},{"id":"mistral"}]}`)
-	got, err := parseModelIDs(body)
+	got, err := parseModelIDs(body, ListOptions{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestParseModelIDsModelsShape(t *testing.T) {
 
 func TestParseModelIDsBareArray(t *testing.T) {
 	body := []byte(`["a","b","a"]`)
-	got, err := parseModelIDs(body)
+	got, err := parseModelIDs(body, ListOptions{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestParseModelIDsBareArray(t *testing.T) {
 
 func TestParseModelIDsBareObjectArray(t *testing.T) {
 	body := []byte(`[{"id":"b"},{"id":"a"},{"name":"c"}]`)
-	got, err := parseModelIDs(body)
+	got, err := parseModelIDs(body, ListOptions{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestParseModelIDsBareObjectArray(t *testing.T) {
 
 func TestParseModelIDsUnrecognizedShape(t *testing.T) {
 	for _, body := range []string{`{"foo":1}`, `42`, ``, `   `} {
-		if _, err := parseModelIDs([]byte(body)); err == nil {
+		if _, err := parseModelIDs([]byte(body), ListOptions{}); err == nil {
 			t.Errorf("expected error for %q", body)
 		}
 	}

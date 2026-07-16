@@ -28,6 +28,16 @@ type ListOptions struct {
 	AuthHeader   string
 	AuthScheme   string
 	ExtraHeaders map[string]string
+	// IDField is the JSON field name for model IDs in the discovery response.
+	// Empty means "id" (the OpenAI-compatible default). Set to "model_name"
+	// for providers like DeepInfra whose catalog uses a different field.
+	IDField string
+	// TypeField is the JSON field name for type-based filtering. Empty means
+	// no type filtering.
+	TypeField string
+	// TypeValue is the required exact value for TypeField. Only records whose
+	// field matches exactly are retained.
+	TypeValue string
 }
 
 // ListModels performs GET {baseURL}/models and returns the discovered model
@@ -94,7 +104,7 @@ func ListModelsWithOptions(ctx context.Context, opts ListOptions) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	ids, err := parseModelIDs(body)
+	ids, err := parseModelIDs(body, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -147,20 +157,50 @@ func readLimitedModelsBody(r io.Reader) ([]byte, error) {
 
 // parseModelIDs handles the common shapes: {"data":[{"id":...}]} (OpenAI),
 // {"models":[{"id"|"name":...}]}, and a bare array of objects or strings.
-func parseModelIDs(body []byte) ([]string, error) {
+// When opts specifies IDField, TypeField, and TypeValue, it uses those to
+// extract IDs and apply exact type filtering (e.g. DeepInfra's bare-array
+// model_name/reported_type contract).
+func parseModelIDs(body []byte, opts ListOptions) ([]string, error) {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
 		return nil, fmt.Errorf("empty response")
 	}
 
+	idField := strings.TrimSpace(opts.IDField)
+	typeField := strings.TrimSpace(opts.TypeField)
+	typeValue := strings.TrimSpace(opts.TypeValue)
+
 	type modelObj struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID           string `json:"id"`
+		Name         string `json:"name"`
+		ModelName    string `json:"model_name"`
+		ReportedType string `json:"reported_type"`
 	}
 	pick := func(objs []modelObj) []string {
 		var out []string
 		for _, o := range objs {
-			if id := strings.TrimSpace(firstNonEmpty(o.ID, o.Name)); id != "" {
+			// Type filtering: when configured, retain only exact matches.
+			if typeField != "" && typeValue != "" {
+				var actual string
+				switch typeField {
+				case "reported_type":
+					actual = o.ReportedType
+				}
+				if actual != typeValue {
+					continue
+				}
+			}
+			// ID extraction: use the configured field or fall back to id/name.
+			var id string
+			switch idField {
+			case "model_name":
+				id = o.ModelName
+			case "name":
+				id = o.Name
+			default:
+				id = firstNonEmpty(o.ID, o.Name)
+			}
+			if id = strings.TrimSpace(id); id != "" {
 				out = append(out, id)
 			}
 		}
