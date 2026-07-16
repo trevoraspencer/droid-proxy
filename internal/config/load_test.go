@@ -20,7 +20,7 @@ func TestLoad_MinimalValidDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Listen.Host != "127.0.0.1" || cfg.Listen.Port != 8787 {
+	if cfg.Listen.Host != "127.0.0.1" || cfg.Listen.Port != DefaultListenPort {
 		t.Fatalf("listen defaults wrong: %+v", cfg.Listen)
 	}
 	if cfg.Server.RequestBodyMaxBytes != 10<<20 {
@@ -1555,5 +1555,107 @@ models:
 				t.Fatalf("expected error containing %q, got: %v", tc.wantErr, err)
 			}
 		})
+	}
+}
+
+func TestDefaultListenPortValue(t *testing.T) {
+	if DefaultListenPort != 9787 {
+		t.Fatalf("DefaultListenPort = %d, want 9787", DefaultListenPort)
+	}
+	if OldDefaultListenPort != 8787 {
+		t.Fatalf("OldDefaultListenPort = %d, want 8787", OldDefaultListenPort)
+	}
+}
+
+func TestPortOmitted(t *testing.T) {
+	cfg, err := parse([]byte(`
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !cfg.PortOmitted() {
+		t.Fatal("PortOmitted = false, want true for omitted listen.port")
+	}
+	if cfg.PortExplicitlyZero() {
+		t.Fatal("PortExplicitlyZero = true, want false for omitted port")
+	}
+	if cfg.Listen.Port != DefaultListenPort {
+		t.Fatalf("omitted port resolved to %d, want %d", cfg.Listen.Port, DefaultListenPort)
+	}
+}
+
+func TestPortExplicitlyZero(t *testing.T) {
+	cfg, err := parse([]byte(`
+listen:
+  port: 0
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if cfg.PortOmitted() {
+		t.Fatal("PortOmitted = true, want false for explicit port 0")
+	}
+	if !cfg.PortExplicitlyZero() {
+		t.Fatal("PortExplicitlyZero = false, want true for explicit port 0")
+	}
+	if cfg.Listen.Port != 0 {
+		t.Fatalf("explicit port 0 overwritten to %d", cfg.Listen.Port)
+	}
+}
+
+func TestPortExplicitNonZero(t *testing.T) {
+	cfg, err := parse([]byte(`
+listen:
+  port: 9999
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if cfg.PortOmitted() {
+		t.Fatal("PortOmitted = true, want false for explicit port 9999")
+	}
+	if cfg.PortExplicitlyZero() {
+		t.Fatal("PortExplicitlyZero = true, want false for explicit port 9999")
+	}
+	if cfg.Listen.Port != 9999 {
+		t.Fatalf("explicit port overwritten to %d", cfg.Listen.Port)
+	}
+}
+
+func TestFormatListenURL(t *testing.T) {
+	cases := []struct {
+		host string
+		port int
+		want string
+	}{
+		{"127.0.0.1", 9787, "http://127.0.0.1:9787"},
+		{"localhost", 9787, "http://localhost:9787"},
+		{"::1", 9787, "http://[::1]:9787"},
+		{"", 9787, "http://127.0.0.1:9787"},
+		{"127.0.0.1", 0, "http://127.0.0.1:0"},
+	}
+	for _, tc := range cases {
+		got := FormatListenURL(tc.host, tc.port)
+		if got != tc.want {
+			t.Errorf("FormatListenURL(%q, %d) = %q, want %q", tc.host, tc.port, got, tc.want)
+		}
 	}
 }

@@ -15,7 +15,7 @@ See [CLI.md](CLI.md) for start/stop/logs. Per-provider setup:
 
 ```bash
 ./droid-proxy status
-curl -s http://127.0.0.1:8787/health
+curl -s http://127.0.0.1:9787/health
 # {"service":"droid-proxy","status":"ok","version":"..."}
 ```
 
@@ -24,7 +24,7 @@ If health fails, check `./droid-proxy logs` or `~/.droid-proxy/stderr.log`.
 ## 1. Models list
 
 ```bash
-curl -s http://127.0.0.1:8787/v1/models | jq '.data[] | {id, factory_provider, upstream_protocol, agent_ready}'
+curl -s http://127.0.0.1:9787/v1/models | jq '.data[] | {id, factory_provider, upstream_protocol, agent_ready}'
 ```
 
 Every configured alias should appear with fields matching `config.yaml`.
@@ -33,7 +33,7 @@ For OAuth models, confirm an account is logged in via the `oauth_auth` object
 (`missing_auth: false`, `active_count > 0`):
 
 ```bash
-curl -s http://127.0.0.1:8787/v1/models | jq '.data[] | select(.oauth_auth) | {id, oauth_auth}'
+curl -s http://127.0.0.1:9787/v1/models | jq '.data[] | select(.oauth_auth) | {id, oauth_auth}'
 ```
 
 ## 2. Chat completions (DeepSeek example)
@@ -43,7 +43,7 @@ Requires `deepseek-v4-flash` in config and `DEEPSEEK_API_KEY` set.
 Non-streaming:
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/chat/completions \
+curl -sS http://127.0.0.1:9787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "deepseek-v4-flash",
@@ -55,7 +55,7 @@ curl -sS http://127.0.0.1:8787/v1/chat/completions \
 Streaming:
 
 ```bash
-curl -sS -N http://127.0.0.1:8787/v1/chat/completions \
+curl -sS -N http://127.0.0.1:9787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "deepseek-v4-flash",
@@ -69,7 +69,7 @@ You should see `data: {...}` chunks ending with `data: [DONE]`.
 ## 3. Tool calls (DeepSeek)
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/chat/completions \
+curl -sS http://127.0.0.1:9787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "deepseek-v4-flash",
@@ -92,7 +92,7 @@ The response should include a `tool_calls` array.
 Requires `claude-sonnet-4-5-20250929` (or your Anthropic alias) in config:
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/messages \
+curl -sS http://127.0.0.1:9787/v1/messages \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "claude-sonnet-4-5-20250929",
@@ -104,7 +104,7 @@ curl -sS http://127.0.0.1:8787/v1/messages \
 ## 5. count_tokens
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/messages/count_tokens \
+curl -sS http://127.0.0.1:9787/v1/messages/count_tokens \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "claude-sonnet-4-5-20250929",
@@ -117,7 +117,7 @@ curl -sS http://127.0.0.1:8787/v1/messages/count_tokens \
 Requires `gpt-4o` (or your OpenAI Responses alias) in config:
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "gpt-4o",
@@ -130,7 +130,7 @@ upstream should emit incremental delta events and close each item before
 `response.completed`:
 
 ```bash
-curl -sS -N http://127.0.0.1:8787/v1/responses \
+curl -sS -N http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "<openai-chat-backed-responses-alias>",
@@ -150,7 +150,7 @@ model in config. Skip if you only use API-key providers.
 Codex example:
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "gpt-5.6",
@@ -179,7 +179,7 @@ availability remains account/plan dependent.
 xAI examples:
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "grok-4.5",
@@ -190,7 +190,7 @@ curl -sS http://127.0.0.1:8787/v1/responses \
 ```
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "grok-build-0.1",
@@ -199,7 +199,7 @@ curl -sS http://127.0.0.1:8787/v1/responses \
 ```
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "grok-composer-2.5-fast",
@@ -208,7 +208,7 @@ curl -sS http://127.0.0.1:8787/v1/responses \
 ```
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "grok-4.3",
@@ -235,7 +235,7 @@ With `trace_requests: true` in config and a test API key:
 set -a && source .env.local && set +a
 ./droid-proxy --config config.yaml 2> /tmp/proxy.log &
 sleep 1
-curl -sS http://127.0.0.1:8787/v1/chat/completions \
+curl -sS http://127.0.0.1:9787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}' >/dev/null
 grep -q 'sk-' /tmp/proxy.log && echo "LEAK!" || echo "OK"
@@ -257,5 +257,5 @@ Workflow validation uses local fake upstreams and does not require provider API
 keys. The runtime smoke test
 (`TestWorkflowValidation_RuntimeSmokeBinaryStartReadinessShutdownCleanup` in
 `internal/server/workflow_runtime_smoke_test.go`) builds and exercises a real
-binary against fake upstreams; it requires port **8787** to be free (stop a
+binary against fake upstreams; it requires port **9787** to be free (stop a
 running daemon first).

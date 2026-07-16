@@ -42,7 +42,7 @@ models:
       "model": "deepseek-v4-pro",
       "displayName": "DeepSeek V4 Pro (Fireworks)",
       "provider": "generic-chat-completion-api",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 128000
     }
@@ -61,7 +61,7 @@ export FIREWORKS_API_KEY=fw_...
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/chat/completions \
+curl -sS http://127.0.0.1:9787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "deepseek-v4-pro",

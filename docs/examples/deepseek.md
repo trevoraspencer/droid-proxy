@@ -61,7 +61,7 @@ See [PROVIDERS.md](../PROVIDERS.md) for tier details.
       "model": "deepseek-v4-flash",
       "displayName": "DeepSeek V4 Flash (DeepSeek)",
       "provider": "generic-chat-completion-api",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 128000
     }
@@ -87,7 +87,7 @@ set -a && source .env.local && set +a
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/chat/completions \
+curl -sS http://127.0.0.1:9787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "deepseek-v4-flash",

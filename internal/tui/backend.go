@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/trevoraspencer/droid-proxy/internal/configedit"
 	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 	"github.com/trevoraspencer/droid-proxy/internal/factory"
+	"github.com/trevoraspencer/droid-proxy/internal/migration"
 	"github.com/trevoraspencer/droid-proxy/internal/oauth"
 	"github.com/trevoraspencer/droid-proxy/internal/providerapi"
 	"github.com/trevoraspencer/droid-proxy/internal/secrets"
@@ -24,19 +26,23 @@ import (
 // discovery, OAuth manager, and daemon controls together for the TUI. It holds
 // no UI state.
 type backend struct {
-	configPath  string
-	factoryPath string
-	baseURL     string
-	factoryKey  string
-	manager     *oauth.Manager
+	configPath       string
+	factoryPath      string
+	baseURL          string
+	portIsZero       bool // true when listen.port is explicitly 0
+	factoryKey       string
+	manager          *oauth.Manager
+	migrationMessage string // sanitized message from the last restart migration
 }
 
 func newBackend(configPath string) *backend {
 	cfg := loadConfigBestEffort(configPath)
+	url, portIsZero := resolveListenURL(configPath, cfg)
 	return &backend{
 		configPath:  configPath,
 		factoryPath: factory.DefaultSettingsPath(),
-		baseURL:     proxyBaseURL(configPath),
+		baseURL:     url,
+		portIsZero:  portIsZero,
 		factoryKey:  factoryAPIKey(cfg),
 		manager:     oauth.NewManager(cfg),
 	}
@@ -146,6 +152,9 @@ func (b *backend) factoryModels() map[string]bool {
 
 // syncFactory upserts the given models into settings.json.
 func (b *backend) syncFactory(models []*config.Model) error {
+	if b.portIsZero {
+		return fmt.Errorf("cannot sync to Factory: listen.port is explicitly 0; set a stable explicit port in the config before syncing")
+	}
 	settings, err := factory.Load(b.factoryPath)
 	if err != nil {
 		return err
@@ -235,10 +244,97 @@ func (b *backend) restartHint() string {
 	return " Restart the proxy (r on the dashboard) to apply."
 }
 
+// consumeMigrationMessage returns and clears the sanitized migration message
+// from the last restartProxy call. Returns empty when no migration occurred.
+func (b *backend) consumeMigrationMessage() string {
+	msg := b.migrationMessage
+	b.migrationMessage = ""
+	return msg
+}
+
+// attemptDeferredMigration checks for trusted deferred upgrade provenance
+// and performs automatic migration if eligible. This is the verified
+// controlled-restart integration point for TUI 'r'. It returns a sanitized
+// message describing the migration outcome, or empty if no migration
+// occurred. Production managed restart paths must hold destination
+// protection through the coherent restart rather than passing a nil checker.
+func (b *backend) attemptDeferredMigration() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real
+	}
+
+	// Plan the migration first to determine eligibility and the
+	// destination port.
+	plan, err := migration.PlanMigration(migration.PlanOptions{
+		ConfigPath: b.configPath,
+	})
+	if err != nil {
+		return ""
+	}
+
+	var reservation *migration.DestinationReservation
+	if plan.ConfigEligible && !plan.FactoryUnsafe && plan.HasChanges() {
+		// Reserve the destination port and hold it through the restart
+		// transition. A nil or transient check is not acceptable.
+		reservation, err = migration.ReserveDestination(plan.Host, plan.NewPort)
+		if err != nil {
+			return fmt.Sprintf("automatic migration refused: %v", err)
+		}
+		defer reservation.Close()
+	}
+
+	opts := migration.ManagedRestartOptions{
+		ConfigPath:          b.configPath,
+		InstalledBinaryPath: exe,
+	}
+	if reservation != nil {
+		opts.DestinationChecker = reservation.HeldChecker()
+	}
+
+	result, err := migration.AttemptDeferredMigration(opts)
+	if err != nil {
+		return fmt.Sprintf("automatic migration warning: %v", err)
+	}
+
+	switch result.Action {
+	case "migrated":
+		msg := "automatic port migration completed (listen.port 8787 -> 9787)."
+		if result.Result != nil {
+			msg += fmt.Sprintf(" transaction: %s", result.Result.ID)
+		}
+		return msg
+	case "skipped":
+		if result.Reason != "" {
+			return fmt.Sprintf("automatic port migration skipped: %s", result.Reason)
+		}
+		return ""
+	default:
+		return ""
+	}
+}
+
 // restartProxy restarts the proxy. With a managed service installed it goes
 // through the service manager — stopping the process directly would only
 // fight KeepAlive/Restart=always and race a second daemon onto the port.
+// TUI 'r' delegates to the verified controlled-restart path: it checks for
+// deferred upgrade provenance and performs automatic migration before
+// restarting. Migration results are propagated as actionable messages.
 func (b *backend) restartProxy() error {
+	// Verified controlled restart: check for deferred provenance and
+	// perform automatic migration if eligible. This is the only path
+	// through which automatic migration runs. The result message is
+	// propagated so TUI restart failures are actionable.
+	migrationMsg := b.attemptDeferredMigration()
+	if migrationMsg != "" {
+		b.migrationMessage = migrationMsg
+	} else {
+		b.migrationMessage = ""
+	}
+
 	if serviceInstalled() {
 		if err := restartService(); err != nil {
 			return err
@@ -276,25 +372,77 @@ func (b *backend) restartProxy() error {
 	return fmt.Errorf("timed out waiting for proxy to start")
 }
 
-func proxyBaseURL(configPath string) string {
-	var lf struct {
-		Listen struct {
-			Host string `yaml:"host"`
-			Port int    `yaml:"port"`
-		} `yaml:"listen"`
+// resolveListenURL computes the proxy's listen URL for Factory sync. It
+// distinguishes an omitted port (defaults to config.DefaultListenPort) from
+// an explicit port 0 (returns an empty URL and portIsZero=true so the caller
+// can refuse the sync).
+func resolveListenURL(configPath string, cfg *config.Config) (url string, portIsZero bool) {
+	// When a full config load succeeded, presence tracking is reliable.
+	if cfg != nil && cfg.HasPresence() {
+		if cfg.PortExplicitlyZero() {
+			return "", true
+		}
+		if cfg.PortOmitted() {
+			return config.FormatListenURL(cfg.Listen.Host, config.DefaultListenPort), false
+		}
+		return config.FormatListenURL(cfg.Listen.Host, cfg.Listen.Port), false
 	}
-	if data, err := os.ReadFile(configPath); err == nil {
-		_ = yaml.Unmarshal(data, &lf)
+	// Best-effort fallback: parse just the listen block with presence tracking.
+	host, port, portPresent := parseListenBlock(configPath)
+	if portPresent && port == 0 {
+		return "", true
 	}
-	host := lf.Listen.Host
-	if strings.TrimSpace(host) == "" {
-		host = "127.0.0.1"
-	}
-	port := lf.Listen.Port
 	if port == 0 {
-		port = 8787
+		port = config.DefaultListenPort
 	}
-	return fmt.Sprintf("http://%s:%d", host, port)
+	return config.FormatListenURL(host, port), false
+}
+
+// parseListenBlock reads a config file and extracts listen.host and listen.port
+// with presence tracking for the port field. It never fails; missing or
+// malformed values default to zero values.
+func parseListenBlock(configPath string) (host string, port int, portPresent bool) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", 0, false
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return "", 0, false
+	}
+	n := &root
+	if n.Kind == yaml.DocumentNode && len(n.Content) > 0 {
+		n = n.Content[0]
+	}
+	if n.Kind != yaml.MappingNode {
+		return "", 0, false
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value != "listen" {
+			continue
+		}
+		listenNode := n.Content[i+1]
+		if listenNode.Kind != yaml.MappingNode {
+			break
+		}
+		for j := 0; j+1 < len(listenNode.Content); j += 2 {
+			key := listenNode.Content[j].Value
+			val := listenNode.Content[j+1]
+			switch key {
+			case "host":
+				host = val.Value
+			case "port":
+				portPresent = true
+				var p int
+				if val.Kind == yaml.ScalarNode {
+					_ = yaml.Unmarshal([]byte(val.Value), &p)
+				}
+				port = p
+			}
+		}
+		break
+	}
+	return host, port, portPresent
 }
 
 func loadConfigBestEffort(path string) *config.Config {

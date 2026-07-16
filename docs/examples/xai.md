@@ -42,7 +42,7 @@ models:
       "model": "grok-3",
       "displayName": "Grok 3 (xAI)",
       "provider": "generic-chat-completion-api",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 128000
     }
@@ -61,7 +61,7 @@ export XAI_API_KEY=xai-...
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/chat/completions \
+curl -sS http://127.0.0.1:9787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "grok-3",

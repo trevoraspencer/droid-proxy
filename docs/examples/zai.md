@@ -82,7 +82,7 @@ models:
       "model": "glm-5.2",
       "displayName": "GLM 5.2 (Z.AI GLM Coding Plan)",
       "provider": "generic-chat-completion-api",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 131072
     }
@@ -110,7 +110,7 @@ export ZAI_CODING_API_KEY=...
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/chat/completions \
+curl -sS http://127.0.0.1:9787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "glm-5.2",

@@ -42,6 +42,9 @@ func main() {
 		case "doctor":
 			runDoctor(os.Args[2:])
 			return
+		case "migrate-port":
+			runMigratePort(os.Args[2:])
+			return
 		}
 	}
 

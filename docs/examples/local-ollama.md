@@ -46,7 +46,7 @@ models:
       "model": "llama3",
       "displayName": "Llama 3 8B (Ollama local)",
       "provider": "generic-chat-completion-api",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 4096
     }
@@ -65,7 +65,7 @@ ollama serve &   # if not already running
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/chat/completions \
+curl -sS http://127.0.0.1:9787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "llama3",

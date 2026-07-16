@@ -44,7 +44,7 @@ models:
       "model": "gpt-4o",
       "displayName": "GPT-4o (OpenAI)",
       "provider": "openai",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 16000
     }
@@ -63,7 +63,7 @@ export OPENAI_API_KEY=sk-...
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "gpt-4o",

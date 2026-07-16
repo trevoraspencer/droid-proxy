@@ -126,8 +126,8 @@ func validateFactorySettingsJSON(t *testing.T, raw []byte) {
 				t.Fatalf("customModels[%d] contains stale field %q in %s", i, key, raw)
 			}
 		}
-		if got := model["baseUrl"]; got != "http://127.0.0.1:8787" {
-			t.Fatalf("customModels[%d].baseUrl = %v, want local proxy URL", i, got)
+		if got := model["baseUrl"]; got != "http://127.0.0.1:9787" {
+			t.Fatalf("customModels[%d].baseUrl = %v, want local proxy URL http://127.0.0.1:9787", i, got)
 		}
 		if key, _ := model["apiKey"].(string); key == "" || strings.Contains(key, "sk-") {
 			t.Fatalf("customModels[%d].apiKey must be a safe downstream placeholder, got %q", i, key)
@@ -919,5 +919,269 @@ models:
 `))
 	if err == nil || !strings.Contains(err.Error(), "field add_account not found") {
 		t.Fatalf("expected strict YAML rejection for add_account, got: %v", err)
+	}
+}
+
+// --- VAL-PORT-026: Active defaults, guidance, templates, and release assets use 9787 ---
+
+func TestConfigExampleUsesCurrentDefaultPort(t *testing.T) {
+	body := readRepoRel(t, "config.example.yaml")
+	var cfg struct {
+		Listen struct {
+			Port int `yaml:"port"`
+		} `yaml:"listen"`
+	}
+	if err := yaml.Unmarshal([]byte(body), &cfg); err != nil {
+		t.Fatalf("config.example.yaml must parse: %v", err)
+	}
+	if cfg.Listen.Port != DefaultListenPort {
+		t.Fatalf("config.example.yaml listen.port = %d, want %d (DefaultListenPort)", cfg.Listen.Port, DefaultListenPort)
+	}
+}
+
+func TestInstallConfigUsesCurrentDefaultPort(t *testing.T) {
+	body := readRepoRel(t, "internal/setup/install_config.yaml")
+	var cfg struct {
+		Listen struct {
+			Port int `yaml:"port"`
+		} `yaml:"listen"`
+	}
+	if err := yaml.Unmarshal([]byte(body), &cfg); err != nil {
+		t.Fatalf("install_config.yaml must parse: %v", err)
+	}
+	if cfg.Listen.Port != DefaultListenPort {
+		t.Fatalf("install_config.yaml listen.port = %d, want %d", cfg.Listen.Port, DefaultListenPort)
+	}
+}
+
+func TestDocsConfigMDocumentsCurrentDefaultPort(t *testing.T) {
+	body := readRepoRel(t, "docs/CONFIG.md")
+	// The config reference table must show 9787 as the default, not 8787.
+	if !strings.Contains(body, "| `port` | int | `9787`") {
+		// Try without the markdown table pipe style.
+		if !strings.Contains(body, "9787") {
+			t.Fatal("docs/CONFIG.md must document port default 9787")
+		}
+	}
+}
+
+// activeDocFiles lists tracked markdown and JSON documentation files that
+// represent current operational guidance (not historical/classified docs).
+func activeDocFiles() []string {
+	var files []string
+	files = append(files, "README.md", "config.example.yaml")
+	files = append(files, docExampleMarkdownFiles()...)
+	for _, f := range []string{
+		"docs/CLI.md",
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+		"docs/OAUTH.md",
+		"docs/PROVIDERS.md",
+		"docs/README.md",
+		"docs/SMOKE.md",
+		"docs/UPGRADE.md",
+		"docs/TROUBLESHOOTING.md",
+	} {
+		files = append(files, f)
+	}
+	return files
+}
+
+func TestDocsActiveDocsUseCurrentDefaultPort(t *testing.T) {
+	// No active documentation file may present the old 8787 port as a
+	// current droid-proxy operational default. The value 8787 is allowed
+	// only in historical/third-party-conflict context.
+	oldURLPatterns := []string{
+		"http://127.0.0.1:8787",
+		"http://localhost:8787",
+		"http://[::1]:8787",
+	}
+	for _, rel := range activeDocFiles() {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			for _, pat := range oldURLPatterns {
+				if strings.Contains(body, pat) {
+					t.Fatalf("%s contains active old-default URL %q; update to 9787 or classify as historical", rel, pat)
+				}
+			}
+		})
+	}
+}
+
+func TestDocsFactorySettingsFilesUseCurrentPort(t *testing.T) {
+	// Factory settings JSON example files must all use 9787.
+	files, err := filepath.Glob(filepath.Join(repoRoot(t), "docs", "factory-settings", "*.json"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	for _, file := range files {
+		t.Run(filepath.Base(file), func(t *testing.T) {
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
+			if strings.Contains(string(raw), ":8787") {
+				t.Fatalf("%s contains old-default port 8787; update to 9787", file)
+			}
+		})
+	}
+}
+
+func TestDocsLiveE2eTemplatesUseCurrentPort(t *testing.T) {
+	// Live-E2E config and factory-settings templates must default to 9787.
+	for _, rel := range []string{
+		"docs/live-e2e/config.local.yaml.template",
+		"docs/live-e2e/factory-settings.live.json.template",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			if strings.Contains(body, ":8787") {
+				t.Fatalf("%s contains old-default port 8787; update to 9787", rel)
+			}
+		})
+	}
+}
+
+func TestDocsSmokeUsesCurrentPort(t *testing.T) {
+	body := readRepoRel(t, "docs/SMOKE.md")
+	if strings.Contains(body, "port **8787**") || strings.Contains(body, "port 8787") {
+		t.Fatal("docs/SMOKE.md must reference port 9787, not 8787")
+	}
+}
+
+// --- VAL-PORT-027: Historical 8787 references remain accurate and classified ---
+
+// classifiedOldPortFiles lists tracked files where 8787 is allowed to appear
+// because the reference is explicitly historical, a migration fixture, a
+// compatibility test, or third-party conflict context.
+func classifiedOldPortFiles() map[string]string {
+	return map[string]string{
+		"docs/TROUBLESHOOTING.md":                 "third-party conflict context (Cursor MCP, Wrangler, Dask) and historical default",
+		"docs/spec-gpt56-reasoning-controls.md":   "superseded design document",
+		"CHANGELOG.md":                            "historical changelog entries",
+		"scripts/live-e2e/merge-custom-models.jq": "legacy harness retirement pattern",
+		"scripts/security-audit.sh":               "secret-scan exclusion pattern",
+	}
+}
+
+func TestDocsTroubleshootingClassifiesOldPort(t *testing.T) {
+	body := readRepoRel(t, "docs/TROUBLESHOOTING.md")
+	// Must distinguish the current default from the old 8787 conflict context.
+	if !strings.Contains(body, "9787") {
+		t.Fatal("docs/TROUBLESHOOTING.md must mention current default port 9787")
+	}
+	// Must retain accurate third-party conflict references for 8787.
+	for _, conflict := range []string{"Cursor", "wrangler"} {
+		if !strings.Contains(body, conflict) {
+			t.Fatalf("docs/TROUBLESHOOTING.md must retain %q conflict reference for port 8787", conflict)
+		}
+	}
+}
+
+func TestDocsSpecDocBanneredAsHistorical(t *testing.T) {
+	body := readRepoRel(t, "docs/spec-gpt56-reasoning-controls.md")
+	// Superseded design documents must be bannered as historical.
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "historical") && !strings.Contains(lower, "superseded") {
+		t.Fatal("docs/spec-gpt56-reasoning-controls.md must be bannered as historical/superseded when it references the old default port")
+	}
+}
+
+// --- VAL-PORT-028: Installers and live-E2E support isolated overrides ---
+
+func TestDocsLiveE2eLibUsesOverrideableProxyAddress(t *testing.T) {
+	body := readRepoRel(t, "scripts/live-e2e/lib.sh")
+	// The live-E2E library must derive the proxy address from an overrideable
+	// variable rather than hard-coding 8787.
+	for _, want := range []string{"LIVE_E2E_PROXY_PORT", "LIVE_E2E_PROXY_HOST"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("scripts/live-e2e/lib.sh must define overrideable %s", want)
+		}
+	}
+	// The default port must be 9787, not 8787.
+	if !strings.Contains(body, "9787") {
+		t.Fatal("scripts/live-e2e/lib.sh must default the proxy port to 9787")
+	}
+}
+
+func TestDocsLiveE2eScriptsDeriveURLsFromOverride(t *testing.T) {
+	// Key live-E2E scripts must not hard-code http://127.0.0.1:8787.
+	for _, rel := range []string{
+		"scripts/live-e2e/03-build-and-start.sh",
+		"scripts/live-e2e/05-direct-provider-tests.sh",
+		"scripts/live-e2e/error-redaction-checks.sh",
+		"scripts/live-e2e/oauth-refresh-check.sh",
+		"scripts/live-e2e/factory-manual-evidence.sh",
+		"scripts/live-e2e/06-write-factory-settings.sh",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			if strings.Contains(body, "http://127.0.0.1:8787") {
+				t.Fatalf("%s must derive proxy URLs from the overrideable address, not hard-code 8787", rel)
+			}
+		})
+	}
+}
+
+// TestDocsLiveE2eCleanupDocsMatchCode verifies the live-E2E README cleanup
+// guidance matches the actual positive-PID cleanup code and never implies
+// killing the operator's 9787 owner.
+func TestDocsLiveE2eCleanupDocsMatchCode(t *testing.T) {
+	readme := readRepoRel(t, "scripts/live-e2e/README.md")
+	cleanScript := readRepoRel(t, "scripts/live-e2e/01-clean-old-proxies.sh")
+
+	// The code excludes 9787 from KILL_PORTS.
+	if !strings.Contains(cleanScript, "KILL_PORTS=(1455 56121)") {
+		t.Fatal("01-clean-old-proxies.sh must define KILL_PORTS without 9787")
+	}
+
+	// The README must never claim that port 9787 is used as a kill selector.
+	// Specifically, the old phrasing "own a proxy port (9787/1455/56121)"
+	// implied killing the operator's 9787 owner and must not appear.
+	lowerReadme := strings.ToLower(readme)
+	if strings.Contains(lowerReadme, "9787/1455") || strings.Contains(lowerReadme, "9787/56121") {
+		t.Fatal("README must not list 9787 alongside kill-eligible ports; " +
+			"port 9787 is the operator's live port and is excluded from kill selection")
+	}
+
+	// The README must document that 9787 is excluded from kill selection and
+	// that cleanup uses positive binary-basename identification instead.
+	if !strings.Contains(readme, "9787") {
+		t.Fatal("README must mention port 9787 in the cleanup section to explain its exclusion from kill selection")
+	}
+	if !strings.Contains(lowerReadme, "not** used for kill selection") {
+		t.Fatal("README must explicitly state that 9787 is not used for kill selection")
+	}
+	if !strings.Contains(lowerReadme, "basename") {
+		t.Fatal("README must document positive binary-basename cleanup identification")
+	}
+}
+
+// --- VAL-CROSS-016: Bootstrap idempotency and versioned tool readiness ---
+//
+// Mission-local executable bootstrap validation (TestBootstrapDeterministicExecution,
+// TestBootstrapRefusesBadRepoRoot) lives in bootstrap_mission_test.go behind the
+// "mission_bootstrap" build tag so that ordinary `go test ./...` in clean CI does
+// not require /tmp mission markers. The mission gate runs:
+//   go test -tags=mission_bootstrap ./internal/config/...
+// to execute those tests explicitly.
+//
+// The error-returning resolver and its missing-fixture test are in
+// bootstrap_resolver_test.go and run as part of ordinary `go test ./...`.
+
+func TestDocsGoModVersionMatchesBootstrap(t *testing.T) {
+	mod := readRepoFile(t, "go.mod")
+	var goVersion string
+	for _, line := range strings.Split(mod, "\n") {
+		if fields := strings.Fields(line); len(fields) == 2 && fields[0] == "go" {
+			goVersion = fields[1]
+			break
+		}
+	}
+	if goVersion == "" {
+		t.Fatal("go.mod does not declare a Go version")
+	}
+	if goVersion != "1.26.4" {
+		t.Fatalf("go.mod Go version = %q, want 1.26.4", goVersion)
 	}
 }

@@ -47,7 +47,7 @@ models from Anthropic's `/v1/models` endpoint.
       "model": "claude-sonnet-4-5-20250929",
       "displayName": "Claude Sonnet 4.5 (Anthropic)",
       "provider": "anthropic",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 128000
     }
@@ -66,7 +66,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/messages \
+curl -sS http://127.0.0.1:9787/v1/messages \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "claude-sonnet-4-5-20250929",

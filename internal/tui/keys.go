@@ -55,7 +55,11 @@ func (m model) keyDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		return m, func() tea.Msg {
 			err := m.be.restartProxy()
-			return actionDoneMsg{text: "Proxy restarted.", err: err, reload: true}
+			text := "Proxy restarted."
+			if msg := m.be.consumeMigrationMessage(); msg != "" {
+				text = msg
+			}
+			return actionDoneMsg{text: text, err: err, reload: true}
 		}
 	}
 	return m, nil

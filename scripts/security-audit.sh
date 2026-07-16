@@ -102,7 +102,7 @@ for path in "${must_ignore[@]}"; do
 done
 
 if rg -n '=.{8,}' .env.local.example config.example.yaml 2>/dev/null \
-  | rg -v '""|example|your-|changeme|127\.0\.0\.1|localhost|/v1|generic-chat|openai|anthropic|deepseek|mimo|groq|fireworks|ollama|vllm|codex|xai|moonshot|kimi|zai|droid-|8787|model|alias|base_url|known_auth|provider|http' \
+  | rg -v '""|example|your-|changeme|127\.0\.0\.1|localhost|/v1|generic-chat|openai|anthropic|deepseek|mimo|groq|fireworks|ollama|vllm|codex|xai|moonshot|kimi|zai|droid-|8787|9787|model|alias|base_url|known_auth|provider|http' \
   >/dev/null; then
   warn "example config files may contain non-empty secret-like values; review manually"
 else

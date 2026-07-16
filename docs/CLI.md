@@ -154,7 +154,7 @@ Keep the proxy running without an open terminal.
 health-check hint:
 
 ```bash
-curl -s http://127.0.0.1:8787/health
+curl -s http://127.0.0.1:9787/health
 ```
 
 Daemon and service logs:

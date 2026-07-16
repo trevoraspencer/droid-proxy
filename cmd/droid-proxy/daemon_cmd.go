@@ -12,6 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 	"github.com/trevoraspencer/droid-proxy/internal/daemon"
 )
 
@@ -65,7 +68,7 @@ func runStart(args []string) {
 	for i := 0; i < 30; i++ {
 		if pid, running := daemon.IsRunning(); running {
 			fmt.Printf("droid-proxy started (pid %d)\n", pid)
-			fmt.Printf("health: curl -s http://127.0.0.1:8787/health\n")
+			fmt.Printf("health: curl -s %s/health\n", listenURL(*configPath))
 			return
 		}
 		if err := child.Process.Signal(syscall.Signal(0)); err != nil {
@@ -140,11 +143,21 @@ func runRestart(args []string) {
 	fs := flag.NewFlagSet("restart", flag.ExitOnError)
 	configPath := fs.String("config", defaultConfigPath(), "path to config.yaml")
 	envFile := fs.String("env-file", "", "optional env file with API keys (export KEY=...)")
+	noMigratePort := fs.Bool("no-migrate-port", false, "do not perform automatic port migration for this invocation")
 	_ = fs.Parse(args)
 
 	if *envFile == "" {
 		*envFile = defaultEnvFileForConfig(*configPath)
 	}
+	if *noMigratePort {
+		// Invocation-scoped opt-out: automatic migration is skipped for this
+		// restart. The read-only omitted-port startup preflight remains
+		// enforced. Explicit migrate-port is unaffected.
+	}
+	// Verified controlled restart: check for deferred upgrade provenance
+	// and perform automatic migration if eligible. This is the only path
+	// through which automatic migration runs.
+	attemptManagedMigration(*configPath, *noMigratePort)
 	if err := restartProxy(*configPath, *envFile); err != nil {
 		fmt.Fprintf(os.Stderr, "droid-proxy restart error: %v\n", err)
 		os.Exit(1)
@@ -202,6 +215,10 @@ func runService(args []string) {
 			fmt.Fprintf(os.Stderr, "droid-proxy service install error: %v\n", err)
 			os.Exit(1)
 		}
+		// service install cannot infer upgrade provenance, but if deferred
+		// provenance from a prior upgrade exists, consume it through the
+		// controlled transaction before starting the service.
+		attemptManagedMigration(*configPath, false)
 		if err := daemon.InstallService(*configPath); err != nil {
 			fmt.Fprintf(os.Stderr, "droid-proxy service install error: %v\n", err)
 			os.Exit(1)
@@ -297,4 +314,28 @@ func appendTailLine(lines []string, line string, n int) []string {
 		return lines
 	}
 	return append(lines, line)
+}
+
+// listenURL derives the proxy's listen URL from the config path for display.
+// It tries a full config load (which applies defaults and IPv6 bracket
+// serialization) and falls back to a minimal YAML parse.
+func listenURL(configPath string) string {
+	if cfg, err := config.Load(configPath); err == nil {
+		return config.FormatListenURL(cfg.Listen.Host, cfg.Listen.Port)
+	}
+	var lf struct {
+		Listen struct {
+			Host string `yaml:"host"`
+			Port int    `yaml:"port"`
+		} `yaml:"listen"`
+	}
+	if data, err := os.ReadFile(configPath); err == nil {
+		_ = yaml.Unmarshal(data, &lf)
+	}
+	host := lf.Listen.Host
+	port := lf.Listen.Port
+	if port == 0 {
+		port = config.DefaultListenPort
+	}
+	return config.FormatListenURL(host, port)
 }

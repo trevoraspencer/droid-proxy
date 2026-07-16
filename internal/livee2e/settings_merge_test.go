@@ -315,8 +315,8 @@ func TestMergeCustomModelsPreservesUnrelatedAndUpserts(t *testing.T) {
 	}
 
 	e2e := `[
-      {"model":"gpt-5.6","displayName":"GPT-5.6 Sol (Codex OAuth)","provider":"openai","baseUrl":"http://127.0.0.1:8787","apiKey":"not-required-when-client-auth-disabled","maxOutputTokens":128000},
-      {"model":"fireworks-live","displayName":"Fireworks Live","provider":"generic-chat-completion-api","baseUrl":"http://127.0.0.1:8787","apiKey":"not-required-when-client-auth-disabled","maxOutputTokens":8192}
+      {"model":"gpt-5.6","displayName":"GPT-5.6 Sol (Codex OAuth)","provider":"openai","baseUrl":"http://127.0.0.1:9787","apiKey":"not-required-when-client-auth-disabled","maxOutputTokens":128000},
+      {"model":"fireworks-live","displayName":"Fireworks Live","provider":"generic-chat-completion-api","baseUrl":"http://127.0.0.1:9787","apiKey":"not-required-when-client-auth-disabled","maxOutputTokens":8192}
     ]`
 
 	models := runMerge(t, jqBin, filter, settingsPath, e2e)
@@ -340,7 +340,7 @@ func TestMergeCustomModelsPreservesUnrelatedAndUpserts(t *testing.T) {
 			if m["displayName"] != "GPT-5.6 Sol (Codex OAuth)" {
 				t.Fatalf("gpt-5.6 not replaced with e2e definition: displayName=%v", m["displayName"])
 			}
-			if m["baseUrl"] != "http://127.0.0.1:8787" {
+			if m["baseUrl"] != "http://127.0.0.1:9787" {
 				t.Fatalf("gpt-5.6 baseUrl not from e2e set: %v", m["baseUrl"])
 			}
 		}
@@ -383,7 +383,7 @@ func TestMergeCustomModelsFromEmptyBase(t *testing.T) {
 	if err := os.WriteFile(settingsPath, []byte(`{"customModels":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	e2e := `[{"model":"only-e2e","displayName":"E2E","provider":"openai","baseUrl":"http://127.0.0.1:8787","maxOutputTokens":1}]`
+	e2e := `[{"model":"only-e2e","displayName":"E2E","provider":"openai","baseUrl":"http://127.0.0.1:9787","maxOutputTokens":1}]`
 
 	models := runMerge(t, jqBin, filter, settingsPath, e2e)
 	if len(models) != 1 || models[0]["model"] != "only-e2e" {
@@ -401,7 +401,7 @@ func TestMergeCustomModelsRetiresOnlyLegacyHarnessCodexAlias(t *testing.T) {
 
 	existing := `{
       "customModels": [
-        {"model":"gpt-5.2-codex","displayName":"GPT-5.2 Codex (ChatGPT OAuth)","provider":"openai","baseUrl":"http://127.0.0.1:8787","maxOutputTokens":128000},
+        {"model":"gpt-5.2-codex","displayName":"GPT-5.2 Codex (ChatGPT OAuth)","provider":"openai","baseUrl":"http://127.0.0.1:9787","maxOutputTokens":128000},
         {"model":"gpt-5.2-codex","displayName":"User-managed GPT-5.2","provider":"openai","baseUrl":"https://custom.example.test/v1","maxOutputTokens":64000},
         {"model":"keep-me","displayName":"Keep","provider":"x","baseUrl":"https://keep.example.test","maxOutputTokens":1}
       ]
@@ -410,7 +410,7 @@ func TestMergeCustomModelsRetiresOnlyLegacyHarnessCodexAlias(t *testing.T) {
 	if err := os.WriteFile(settingsPath, []byte(existing), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	e2e := `[{"model":"gpt-5.6","displayName":"GPT-5.6 Sol (Codex OAuth)","provider":"openai","baseUrl":"http://127.0.0.1:8787","maxOutputTokens":128000}]`
+	e2e := `[{"model":"gpt-5.6","displayName":"GPT-5.6 Sol (Codex OAuth)","provider":"openai","baseUrl":"http://127.0.0.1:9787","maxOutputTokens":128000}]`
 
 	models := runMerge(t, jqBin, filter, settingsPath, e2e)
 	counts := modelIDs(models)

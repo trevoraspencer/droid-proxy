@@ -117,7 +117,7 @@ Optional: pin any xAI OAuth model to a specific logged-in account:
       "model": "grok-4.5",
       "displayName": "Grok 4.5 (xAI OAuth)",
       "provider": "openai",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 128000,
       "reasoningEffort": "high"
@@ -126,7 +126,7 @@ Optional: pin any xAI OAuth model to a specific logged-in account:
       "model": "grok-build-0.1",
       "displayName": "Grok Build 0.1 (xAI OAuth)",
       "provider": "openai",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 128000
     },
@@ -134,7 +134,7 @@ Optional: pin any xAI OAuth model to a specific logged-in account:
       "model": "grok-composer-2.5-fast",
       "displayName": "Composer 2.5 Fast (xAI OAuth)",
       "provider": "openai",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 128000
     },
@@ -142,7 +142,7 @@ Optional: pin any xAI OAuth model to a specific logged-in account:
       "model": "grok-4.3",
       "displayName": "Grok 4.3 (xAI OAuth)",
       "provider": "openai",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 128000
     }
@@ -161,7 +161,7 @@ droid-proxy status
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "grok-4.5",
@@ -172,7 +172,7 @@ curl -sS http://127.0.0.1:8787/v1/responses \
 ```
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "grok-build-0.1",
@@ -182,7 +182,7 @@ curl -sS http://127.0.0.1:8787/v1/responses \
 ```
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "grok-composer-2.5-fast",
@@ -192,7 +192,7 @@ curl -sS http://127.0.0.1:8787/v1/responses \
 ```
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "grok-4.3",
@@ -209,7 +209,7 @@ droid-proxy auth disable xai user@example.com
 droid-proxy auth logout  xai user@example.com
 ```
 
-Check the model is logged in: `curl -s http://127.0.0.1:8787/v1/models | jq
+Check the model is logged in: `curl -s http://127.0.0.1:9787/v1/models | jq
 '.data[] | select(.oauth_auth) | {id, capabilities, oauth_auth}'`. See
 [OAUTH.md](../OAUTH.md#managing-accounts) for the full reference.
 

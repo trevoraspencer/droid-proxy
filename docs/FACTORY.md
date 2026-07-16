@@ -33,7 +33,7 @@ is optional and is managed only for models that advertise Factory reasoning:
 | `model` | Alias from `config.yaml` (e.g. `deepseek-v4-flash`) |
 | `displayName` | Label shown in Droid's model picker |
 | `provider` | One of `generic-chat-completion-api`, `openai`, or `anthropic` |
-| `baseUrl` | Proxy URL, typically `http://127.0.0.1:8787` |
+| `baseUrl` | Proxy URL, typically `http://127.0.0.1:9787` |
 | `apiKey` | Placeholder when proxy `client_auth` is off (see below) |
 | `maxOutputTokens` | Max tokens Droid may request; Factory sync uses `128000` when `max_output_tokens` is omitted |
 | `reasoningEffort` | Optional reasoning selector capability. Sync writes the model's `capabilities.factory_reasoning_effort` value and removes it for models that drop Factory reasoning. |
@@ -47,7 +47,7 @@ Example:
       "model": "deepseek-v4-flash",
       "displayName": "DeepSeek V4 Flash (DeepSeek)",
       "provider": "generic-chat-completion-api",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 128000
     }
@@ -166,7 +166,7 @@ Before relying on a model for tool-using agent workflows, confirm it is
 agent-ready:
 
 ```bash
-curl -s http://127.0.0.1:8787/v1/models | jq '.data[] | {id, agent_ready, capabilities}'
+curl -s http://127.0.0.1:9787/v1/models | jq '.data[] | {id, agent_ready, capabilities}'
 ```
 
 `agent_ready: true` means streaming, tools, and tool results are validated for
@@ -177,7 +177,7 @@ For OAuth models (Codex/xAI), each `/v1/models` entry also carries an
 model is actually logged in before using it:
 
 ```bash
-curl -s http://127.0.0.1:8787/v1/models \
+curl -s http://127.0.0.1:9787/v1/models \
   | jq '.data[] | select(.oauth_auth) | {id, oauth_auth}'
 ```
 

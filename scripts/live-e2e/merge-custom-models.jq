@@ -21,7 +21,8 @@ def retired_live_e2e_codex_model:
   .model == "gpt-5.2-codex"
   and .displayName == "GPT-5.2 Codex (ChatGPT OAuth)"
   and .provider == "openai"
-  and ((.baseUrl // "") == "http://127.0.0.1:8787" or (.baseUrl // "") == "http://localhost:8787");
+  and ((.baseUrl // "") == "http://127.0.0.1:8787" or (.baseUrl // "") == "http://localhost:8787"
+       or (.baseUrl // "") == "http://127.0.0.1:9787" or (.baseUrl // "") == "http://localhost:9787");
 
 ($e2e | map(.model)) as $ids
 | .customModels = (

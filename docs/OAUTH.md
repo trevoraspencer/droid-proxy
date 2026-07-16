@@ -190,7 +190,7 @@ Use `provider: "openai"` and point `baseUrl` at the proxy:
       "model": "gpt-5.6",
       "displayName": "GPT-5.6 Sol (Codex OAuth)",
       "provider": "openai",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 128000,
       "reasoningEffort": "max"
@@ -249,7 +249,7 @@ subset.
 Check pool status:
 
 ```bash
-curl -s http://127.0.0.1:8787/v1/oauth/pool-health | jq .
+curl -s http://127.0.0.1:9787/v1/oauth/pool-health | jq .
 droid-proxy auth pool --config config.yaml
 ```
 
@@ -332,7 +332,7 @@ xai:
 provider, summarizing the accounts that match the model's `oauth_account`:
 
 ```bash
-curl -s http://127.0.0.1:8787/v1/models \
+curl -s http://127.0.0.1:9787/v1/models \
   | jq '.data[] | select(.oauth_auth) | {id, oauth_auth}'
 ```
 
@@ -489,7 +489,7 @@ effective tier, which may remain `default` depending on the account/backend.
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/responses \
+curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{"model":"gpt-5.6","input":"hello"}' | jq '.output'
 ```

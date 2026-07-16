@@ -8,7 +8,7 @@ func (c *Config) applyDefaults() {
 		c.Listen.Host = "127.0.0.1"
 	}
 	if !c.wasPresent("listen.port") && c.Listen.Port == 0 {
-		c.Listen.Port = 8787
+		c.Listen.Port = DefaultListenPort
 	}
 	if !c.wasPresent("server.request_body_max_bytes") && c.Server.RequestBodyMaxBytes == 0 {
 		c.Server.RequestBodyMaxBytes = 10 << 20

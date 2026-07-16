@@ -8,7 +8,13 @@ source "$SCRIPT_DIR/lib.sh"
 cd "$LIVE_E2E_REPO_ROOT"
 
 PROXY_PROCESS_PATTERN='droid-proxy|cursor-proxy'
-PROXY_PORTS=(8787 1455 56121)
+# Ports used for port-free checks and listener snapshots.
+PROXY_PORTS=("$LIVE_E2E_PROXY_PORT" 1455 56121)
+# Ports whose owners are kill candidates. The main proxy port is NOT included
+# here because it defaults to 9787 (the operator's live port); the proxy
+# process is positively identified by binary basename and PID file instead.
+# Only OAuth callback ports are safe for port-based kill selection.
+KILL_PORTS=(1455 56121)
 SELECT_KILLS="$SCRIPT_DIR/select-proxy-kills.zsh"
 [[ -f "$SELECT_KILLS" ]] || fail "missing selector: $SELECT_KILLS"
 
@@ -28,10 +34,12 @@ proxy_process_table() {
   done
 }
 
-# PIDs that own the proxy ports — the most precise signal.
+# PIDs that own the OAuth callback ports — the most precise signal that
+# is safe to act on. The main proxy port is excluded to avoid killing an
+# unrelated process that happens to own the default 9787 port.
 proxy_port_owner_pids() {
   local port
-  for port in $PROXY_PORTS; do
+  for port in $KILL_PORTS; do
     lsof -ti tcp:"$port" 2>/dev/null || true
   done | sort -un
 }
@@ -72,7 +80,7 @@ pgrep -fl "$PROXY_PROCESS_PATTERN" \
   2>"$LIVE_E2E_RUN_DIR/processes.clean.before.err" \
   | tee "$LIVE_E2E_RUN_DIR/processes.clean.before.txt" || true
 lsof -nP -iTCP -sTCP:LISTEN \
-  | rg 'droid-proxy|cursor-proxy|:8787|:1455|:56121|:8000|:11434' \
+  | rg "droid-proxy|cursor-proxy|:${LIVE_E2E_PROXY_PORT}|:1455|:56121|:8000|:11434" \
   | tee "$LIVE_E2E_RUN_DIR/listeners.clean.before.txt" || true
 
 if [[ -f "$HOME/.factory/settings.json" ]]; then

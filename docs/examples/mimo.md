@@ -89,7 +89,7 @@ models:
       "model": "mimo-v2.5-pro",
       "displayName": "MiMo V2.5 Pro (Xiaomi MiMo)",
       "provider": "generic-chat-completion-api",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 131072
     }
@@ -117,7 +117,7 @@ export MIMO_TOKEN_PLAN_SGP_API_KEY=tp-...
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/chat/completions \
+curl -sS http://127.0.0.1:9787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "mimo-v2.5-pro",

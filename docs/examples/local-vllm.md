@@ -47,7 +47,7 @@ If vLLM requires an API key:
       "model": "meta-llama/Llama-3.1-8B-Instruct",
       "displayName": "Llama 3.1 8B (vLLM)",
       "provider": "generic-chat-completion-api",
-      "baseUrl": "http://127.0.0.1:8787",
+      "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
       "maxOutputTokens": 4096
     }
@@ -68,7 +68,7 @@ python -m vllm.entrypoints.openai.api_server \
 ## Verify
 
 ```bash
-curl -sS http://127.0.0.1:8787/v1/chat/completions \
+curl -sS http://127.0.0.1:9787/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "meta-llama/Llama-3.1-8B-Instruct",
