@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -2353,24 +2354,46 @@ func TestDeepInfraDocsRegistrySynchronized(t *testing.T) {
 		t.Fatal("deepinfra profile missing from registry")
 	}
 	body := readRepoRel(t, "docs/examples/deepinfra.md")
+
+	// Registry tuple elements must appear in their authoritative sections,
+	// not just anywhere in the document. A document-wide substring match
+	// could be masked by the value appearing in an unrelated section.
+	overview := extractMarkdownSection(body, "Overview")
+	if overview == "" {
+		t.Fatal("deepinfra.md must contain an '## Overview' section")
+	}
 	for _, want := range []string{
 		ka.BaseURL,
-		ka.APIKeyEnv,
 		string(ka.UpstreamProtocol),
 		"generic-chat-completion-api",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("deepinfra.md must contain %q", want)
+		if !strings.Contains(overview, want) {
+			t.Errorf("deepinfra.md Overview section must contain %q", want)
 		}
+	}
+
+	prereqs := extractMarkdownSection(body, "Prerequisites")
+	if prereqs == "" {
+		t.Fatal("deepinfra.md must contain a '## Prerequisites' section")
+	}
+	if !strings.Contains(prereqs, ka.APIKeyEnv) {
+		t.Errorf("deepinfra.md Prerequisites section must contain %q", ka.APIKeyEnv)
 	}
 }
 
 // TestDeepInfraDocsDiscoveryContract verifies the guide documents the exact
-// official discovery contract: unauthenticated GET /models/list with
-// Accept: application/json, bare-array response, model_name ID field, exact
-// text-generation filtering, and manual fallback.
+// official discovery contract within the "Model discovery and manual entry"
+// section: unauthenticated GET /models/list with Accept: application/json,
+// bare-array response, model_name ID field, exact text-generation filtering,
+// and manual fallback. The check is section-scoped so a mention of these
+// fields in unrelated prose (e.g. the Notes section) cannot mask a missing
+// contract element within the authoritative discovery section.
 func TestDeepInfraDocsDiscoveryContract(t *testing.T) {
 	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	section := extractMarkdownSection(body, "Model discovery and manual entry")
+	if section == "" {
+		t.Fatal("deepinfra.md must contain a '## Model discovery and manual entry' section")
+	}
 	for _, want := range []string{
 		"/models/list",
 		"Accept: application/json",
@@ -2378,10 +2401,9 @@ func TestDeepInfraDocsDiscoveryContract(t *testing.T) {
 		"model_name",
 		"reported_type",
 		"text-generation",
-		"manual",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("deepinfra.md must document discovery contract field %q", want)
+		if !strings.Contains(section, want) {
+			t.Errorf("deepinfra.md Model discovery section must document contract field %q", want)
 		}
 	}
 }
@@ -2446,21 +2468,28 @@ func TestDeepInfraDocsNoLiveValidationClaims(t *testing.T) {
 			t.Fatalf("%s: %v", rel, err)
 		}
 	}
-	// deepinfra.md must qualify mock validation.
+	// deepinfra.md must qualify mock validation with either "not live" or
+	// "mock-only" wording. The predicate is parenthesized explicitly so the
+	// qualification cannot be masked by operator-precedence ambiguity.
 	body := readRepoRel(t, "docs/examples/deepinfra.md")
-	lower := strings.ToLower(body)
-	if !strings.Contains(lower, "mock") || !strings.Contains(lower, "not live") && !strings.Contains(lower, "mock-only") {
-		t.Error("deepinfra.md must qualify that validation is mock-only, not live")
+	if err := checkDeepInfraMockOnlyQualified(body); err != nil {
+		t.Errorf("deepinfra.md: %v", err)
 	}
 }
 
 // TestDeepInfraDocsManualEntryGuaranteed verifies the guide documents manual
-// entry as always available for private deployments and absent-from-catalog IDs.
+// entry as always available within the "Model discovery and manual entry"
+// section, scoped so a mention in unrelated prose cannot mask a missing
+// guarantee in the authoritative section.
 func TestDeepInfraDocsManualEntryGuaranteed(t *testing.T) {
 	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	section := extractMarkdownSection(body, "Model discovery and manual entry")
+	if section == "" {
+		t.Fatal("deepinfra.md must contain a '## Model discovery and manual entry' section")
+	}
 	for _, want := range []string{"manual", "guaranteed"} {
-		if !strings.Contains(strings.ToLower(body), want) {
-			t.Errorf("deepinfra.md must mention %q for manual entry", want)
+		if !strings.Contains(strings.ToLower(section), want) {
+			t.Errorf("deepinfra.md Model discovery section must mention %q for manual entry", want)
 		}
 	}
 }
@@ -2655,20 +2684,25 @@ func TestDeepInfraDocsTierRecipesSeparate(t *testing.T) {
 		t.Error("deepinfra.md must define a Flex recipe (service_tier: flex)")
 	}
 
-	// Must document effective tier literals: priority, flex, and default (fallback).
+	// Tier literal documentation and authoritative/effective-standard claims
+	// must appear within the "Serving paths and tiers" section, not just
+	// anywhere in the document. This scopes the serving-path assertions so
+	// a mention in unrelated prose (e.g. Notes) cannot mask a missing claim
+	// in the authoritative serving-path section.
+	servingSection := extractMarkdownSection(body, "Serving paths and tiers")
+	if servingSection == "" {
+		t.Fatal("deepinfra.md must contain a '## Serving paths and tiers' section")
+	}
 	for _, want := range []string{`"priority"`, `"flex"`, `"default"`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("deepinfra.md must document effective tier literal %s", want)
+		if !strings.Contains(servingSection, want) {
+			t.Errorf("deepinfra.md Serving paths section must document effective tier literal %s", want)
 		}
 	}
-	// Must identify response service_tier as authoritative.
-	if !strings.Contains(strings.ToLower(body), "authoritative") {
-		t.Error("deepinfra.md must identify response service_tier as authoritative")
+	if !strings.Contains(strings.ToLower(servingSection), "authoritative") {
+		t.Error("deepinfra.md Serving paths section must identify response service_tier as authoritative")
 	}
-	// Must label default as effective Standard.
-	lower := strings.ToLower(body)
-	if !strings.Contains(lower, "effective standard") {
-		t.Error("deepinfra.md must label the default fallback as effective Standard")
+	if !strings.Contains(strings.ToLower(servingSection), "effective standard") {
+		t.Error("deepinfra.md Serving paths section must label the default fallback as effective Standard")
 	}
 }
 
@@ -2911,5 +2945,168 @@ func TestDeepInfraDocsForbiddenRoutesForbidden(t *testing.T) {
 		strings.Contains(lower, "no fallback")
 	if !hasForbiddenRouteNegativeContext {
 		t.Error("deepinfra.md must state it does not fall back to /v1/models or undocumented aliases")
+	}
+}
+
+// checkDeepInfraMockOnlyQualified verifies a doc qualifies mock validation
+// with either "not live" or "mock-only" wording. The predicate is
+// parenthesized explicitly: the doc must contain "mock" AND at least one of
+// "not live" or "mock-only". An incomplete qualification (e.g., "mock" alone
+// without a live/mock-only qualifier) is rejected deterministically. This
+// replaces the previous implicit-precedence boolean expression that relied on
+// Go's && binding tighter than ||.
+func checkDeepInfraMockOnlyQualified(body string) error {
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "mock") {
+		return fmt.Errorf("doc must mention mock validation")
+	}
+	if (!strings.Contains(lower, "not live")) && (!strings.Contains(lower, "mock-only")) {
+		return fmt.Errorf("doc must qualify mock validation with either 'not live' or 'mock-only' wording")
+	}
+	return nil
+}
+
+// TestDeepInfraDocsMockOnlyQualificationDeterministic proves the mock-only
+// qualification predicate accepts docs with either "not live" or "mock-only"
+// wording (alongside "mock") and rejects incomplete qualifications
+// deterministically. This prevents a document that merely mentions "mock"
+// without a live/mock-only qualifier from passing the guard.
+func TestDeepInfraDocsMockOnlyQualificationDeterministic(t *testing.T) {
+	tests := []struct {
+		name    string
+		doc     string
+		wantErr bool
+	}{
+		// --- Failing fixtures: incomplete mock-only qualification ---
+		{
+			name:    "mock without qualifier fails",
+			doc:     "# Guide\n\nDiscovery is mock-validated in this build.\n",
+			wantErr: true,
+		},
+		{
+			name:    "no mock mention at all fails",
+			doc:     "# Guide\n\nDiscovery uses local fakes only.\n",
+			wantErr: true,
+		},
+		// --- Accepted fixtures: complete mock-only qualification ---
+		{
+			name:    "mock with not-live qualifier accepted",
+			doc:     "# Guide\n\nDiscovery is mock-validated and not live.\n",
+			wantErr: false,
+		},
+		{
+			name:    "mock with mock-only qualifier accepted",
+			doc:     "# Guide\n\nThis is mock-only validation.\n",
+			wantErr: false,
+		},
+		{
+			name:    "precise guide wording accepted",
+			doc:     "# Guide\n\nDiscovery is mock-validated in this build. This mission validates through local fakes, not live credentialed calls.\n",
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkDeepInfraMockOnlyQualified(tt.doc)
+			if tt.wantErr && err == nil {
+				t.Fatal("checkDeepInfraMockOnlyQualified must reject this doc")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("checkDeepInfraMockOnlyQualified must accept this doc: %v", err)
+			}
+		})
+	}
+}
+
+// TestDeepInfraDocsClaimsDeterministic proves the sentence-level guards catch
+// DeepInfra-specific positive live-validation, universal-capability, and
+// model-normalization claims even when unrelated text contains a negation,
+// and that accepted fixtures with precise mock-only and opaque-ID
+// preservation wording pass. This provides deterministic failing and accepted
+// fixture paths that cannot be masked by document-wide substring matches.
+func TestDeepInfraDocsClaimsDeterministic(t *testing.T) {
+	tests := []struct {
+		name    string
+		doc     string
+		wantErr bool
+	}{
+		// --- Failing: prohibited live-validation claims ---
+		{
+			name:    "mock validation establishes fails despite negation elsewhere",
+			doc:     "# Guide\n\nThe proxy does not modify data.\n\nMock validation establishes live provider availability.\n",
+			wantErr: true,
+		},
+		{
+			name:    "mocked success proves fails",
+			doc:     "# Guide\n\nMocked success proves live provider availability.\n",
+			wantErr: true,
+		},
+		{
+			name:    "establishes live fails",
+			doc:     "# Guide\n\nThis test establishes live model support.\n",
+			wantErr: true,
+		},
+		// --- Failing: universal-capability claims ---
+		{
+			name:    "all models support fails",
+			doc:     "# Guide\n\nAll models support reasoning output.\n",
+			wantErr: true,
+		},
+		{
+			name:    "every model supports fails",
+			doc:     "# Guide\n\nEvery model supports tool calling.\n",
+			wantErr: true,
+		},
+		// --- Failing: model-normalization claims ---
+		{
+			name:    "rewrites model fails despite negation elsewhere",
+			doc:     "# Guide\n\nThe proxy does not modify data.\n\nThe proxy rewrites model IDs to canonical names.\n",
+			wantErr: true,
+		},
+		{
+			name:    "normalizes model fails",
+			doc:     "# Guide\n\nDeepInfra normalizes model slugs automatically.\n",
+			wantErr: true,
+		},
+		// --- Accepted: negated claims and correct preservation ---
+		{
+			name:    "negated live-validation accepted",
+			doc:     "# Guide\n\nMock success does not establish live provider availability.\n",
+			wantErr: false,
+		},
+		{
+			name:    "mock-only qualification accepted",
+			doc:     "# Guide\n\nThis is mock-only validation, not live.\n",
+			wantErr: false,
+		},
+		{
+			name:    "opaque-ID byte-for-byte preservation accepted",
+			doc:     "# Guide\n\nDeepInfra model IDs are preserved byte-for-byte through the picker and reload cycle.\n",
+			wantErr: false,
+		},
+		{
+			name:    "precise opaque slug preservation accepted",
+			doc:     "# Guide\n\nThe proxy preserves opaque slugs exactly without provider-prefix normalization.\n",
+			wantErr: false,
+		},
+		{
+			name:    "model-dependent caveat accepted",
+			doc:     "# Guide\n\nCapabilities are model-dependent and mutable.\n",
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Run both the prohibited-claims and normalization-claim guards.
+			err1 := checkNoProhibitedClaims(tt.doc)
+			err2 := checkNoModelNormalizationClaims(tt.doc)
+			combinedErr := errors.Join(err1, err2)
+			if tt.wantErr && combinedErr == nil {
+				t.Fatal("guards must reject this doc")
+			}
+			if !tt.wantErr && combinedErr != nil {
+				t.Fatalf("guards must accept this doc: %v", combinedErr)
+			}
+		})
 	}
 }
