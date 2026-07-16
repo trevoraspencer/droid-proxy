@@ -105,6 +105,10 @@ var knownAuthRegistry = map[string]KnownAuth{
 		DiscoveryPolicy:  DiscoveryStatic,
 		StaticModels:     fireworksFirePassCatalog(),
 	},
+	"baseten": {
+		Name: "baseten", BaseURL: "https://inference.baseten.co/v1",
+		APIKeyEnv: "BASETEN_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
+	},
 	"zai": {
 		Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4",
 		APIKeyEnv: "ZAI_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
@@ -170,6 +174,7 @@ var knownAuthLabels = map[string]string{
 	"groq":                "Groq",
 	"fireworks":           "Fireworks AI",
 	"fireworks-fire-pass": "Fireworks AI (Fire Pass)",
+	"baseten":             "Baseten",
 	"zai":                 "Z.AI (main, legacy alias)",
 	"zai-main-api":        "Z.AI (main API)",
 	"zai-coding-api":      "Z.AI (GLM Coding Plan)",

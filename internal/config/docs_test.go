@@ -41,6 +41,7 @@ func readRepoRel(t *testing.T, rel string) string {
 func docExampleMarkdownFiles() []string {
 	return []string{
 		"docs/examples/anthropic.md",
+		"docs/examples/baseten.md",
 		"docs/examples/codex-oauth.md",
 		"docs/examples/deepseek.md",
 		"docs/examples/fireworks.md",
@@ -469,6 +470,7 @@ func TestDocsExamplePagesExistForKnownAuth(t *testing.T) {
 		"groq":                "examples/groq.md",
 		"fireworks":           "examples/fireworks.md",
 		"fireworks-fire-pass": "examples/fireworks-fire-pass.md",
+		"baseten":             "examples/baseten.md",
 		"zai":                 "examples/zai.md",
 		"zai-main-api":        "examples/zai.md",
 		"zai-coding-api":      "examples/zai.md",
@@ -1849,5 +1851,491 @@ func TestFireworksDocsFactorySyncExcludesDeterministic(t *testing.T) {
 		"the env-var name, or the upstream credential.\n"
 	if err := checkFactorySyncSectionExclusions(goodDoc); err != nil {
 		t.Fatalf("checkFactorySyncSectionExclusions must accept complete section: %v", err)
+	}
+}
+
+// --- VAL-BASETEN-017: Baseten registry and public artifacts stay synchronized ---
+
+// TestBasetenDocsFactorySyncExcludesUpstream verifies the Baseten Factory-sync
+// section explicitly documents that it excludes upstream secrets and metadata.
+func TestBasetenDocsFactorySyncExcludesUpstream(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	section := extractMarkdownSection(body, "Factory sync")
+	if section == "" {
+		t.Fatal("docs/examples/baseten.md must contain a '## Factory sync' section")
+	}
+	for _, marker := range []string{
+		"upstream URL",
+		"known_auth",
+		"upstream model",
+		"extra_args",
+		"env-var name",
+		"credential",
+	} {
+		if !strings.Contains(section, marker) {
+			t.Errorf("baseten.md Factory sync section must mention exclusion of %q", marker)
+		}
+	}
+}
+
+// TestBasetenDocsManualEntryGuaranteed verifies the Baseten guide documents
+// manual entry as always available.
+func TestBasetenDocsManualEntryGuaranteed(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	for _, want := range []string{
+		"manual",
+		"Manual",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("baseten.md must mention manual entry")
+		}
+	}
+}
+
+// TestBasetenDocsNoLiveValidationClaims verifies the Baseten guide does not
+// claim live provider validation.
+func TestBasetenDocsNoLiveValidationClaims(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	if err := checkNoProhibitedClaims(body); err != nil {
+		t.Fatalf("baseten.md: %v", err)
+	}
+}
+
+// TestBasetenDocsScopedToSharedModelAPI verifies the guide scopes the native
+// profile to shared Model APIs and directs custom deployments to custom endpoints.
+func TestBasetenDocsScopedToSharedModelAPI(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	for _, want := range []string{
+		"shared Model API",
+		"custom",
+		"dedicated",
+	} {
+		if !strings.Contains(strings.ToLower(body), strings.ToLower(want)) {
+			t.Errorf("baseten.md must mention %q", want)
+		}
+	}
+	// The native recipe must have known_auth: baseten and no base_url.
+	nativeSection := extractMarkdownSection(body, "Recipe")
+	if nativeSection == "" {
+		t.Fatal("baseten.md must contain a '## Recipe' section")
+	}
+	yamlBlocks := fencedBlocks(nativeSection, "yaml")
+	found := false
+	for _, block := range yamlBlocks {
+		if strings.Contains(block, "known_auth: baseten") && !strings.Contains(block, "base_url:") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("baseten.md native recipe must have known_auth: baseten and no base_url")
+	}
+}
+
+// TestBasetenDocsNativeAndCustomAreDistinct verifies the guide presents both
+// a native profile recipe (with known_auth: baseten) and a custom deployment
+// recipe (with explicit base_url/api_key_env and no known_auth).
+func TestBasetenDocsNativeAndCustomAreDistinct(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	// Custom deployment section must exist.
+	customSection := extractMarkdownSection(body, "Custom deployment recipe")
+	if customSection == "" {
+		t.Fatal("baseten.md must contain a '## Custom deployment recipe' section")
+	}
+	yamlBlocks := fencedBlocks(customSection, "yaml")
+	found := false
+	for _, block := range yamlBlocks {
+		if strings.Contains(block, "base_url:") && strings.Contains(block, "api_key_env:") && !strings.Contains(block, "known_auth: baseten") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("baseten.md custom deployment recipe must have base_url and api_key_env without known_auth: baseten")
+	}
+}
+
+// TestBasetenDocsAgentReadyScoped verifies the guide describes agent_ready as
+// configured/resolved metadata, not proof of universal model support.
+func TestBasetenDocsAgentReadyScoped(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	if !strings.Contains(body, "agent_ready") {
+		t.Fatal("baseten.md must mention agent_ready")
+	}
+	if !strings.Contains(strings.ToLower(body), "configured") || !strings.Contains(strings.ToLower(body), "model-dependent") {
+		t.Errorf("baseten.md must describe agent_ready as configured metadata and note model-dependence")
+	}
+}
+
+// TestBasetenEnvTemplateHasKey verifies the env template contains exactly one
+// empty BASETEN_API_KEY assignment.
+func TestBasetenEnvTemplateHasKey(t *testing.T) {
+	body := readRepoRel(t, ".env.local.example")
+	pattern := `BASETEN_API_KEY=""`
+	count := strings.Count(body, pattern)
+	if count != 1 {
+		t.Errorf("BASETEN_API_KEY empty assignment count = %d, want 1", count)
+	}
+}
+
+// TestBasetenDocsRegistrySynchronized verifies the Baseten registry tuple
+// matches the PROVIDERS.md matrix row.
+func TestBasetenDocsRegistrySynchronized(t *testing.T) {
+	ka, ok := LookupKnownAuth("baseten")
+	if !ok {
+		t.Fatal("baseten profile missing from registry")
+	}
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	for _, want := range []string{
+		ka.BaseURL,
+		ka.APIKeyEnv,
+		string(ka.UpstreamProtocol),
+		"generic-chat-completion-api",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("baseten.md must contain %q", want)
+		}
+	}
+}
+
+// TestBasetenDocsReadmeAndProviderLinks verify the README and docs/README.md
+// link to the Baseten example.
+func TestBasetenDocsReadmeAndProviderLinks(t *testing.T) {
+	for _, rel := range []string{"README.md", "docs/README.md"} {
+		body := readRepoRel(t, rel)
+		if !strings.Contains(body, "baseten.md") {
+			t.Errorf("%s must link to examples/baseten.md", rel)
+		}
+	}
+}
+
+// TestBasetenDocsRecipeHydratesWithSyntheticKey parses the native recipe YAML
+// from baseten.md and verifies it hydrates with a synthetic BASETEN_API_KEY.
+// This directly tests VAL-BASETEN-017's "hydrates with a synthetic key" claim.
+func TestBasetenDocsRecipeHydratesWithSyntheticKey(t *testing.T) {
+	t.Setenv("BASETEN_API_KEY", "synthetic-baseten-key-12345")
+
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	recipeSection := extractMarkdownSection(body, "Recipe")
+	if recipeSection == "" {
+		t.Fatal("baseten.md must contain a '## Recipe' section")
+	}
+	blocks := fencedBlocks(recipeSection, "yaml")
+	if len(blocks) == 0 {
+		t.Fatal("baseten.md Recipe section must contain at least one YAML block")
+	}
+
+	// Parse the native recipe block (contains known_auth: baseten).
+	type recipeYAML struct {
+		Models []Model `yaml:"models"`
+	}
+	var nativeFound bool
+	for _, block := range blocks {
+		var ry recipeYAML
+		if err := yaml.Unmarshal([]byte(block), &ry); err != nil {
+			continue
+		}
+		for _, m := range ry.Models {
+			if m.KnownAuth != "baseten" {
+				continue
+			}
+			nativeFound = true
+			// Hydrate the model from the registry.
+			model := m
+			if err := HydrateModel(&model); err != nil {
+				t.Fatalf("hydration failed for native recipe: %v", err)
+			}
+			// Verify exact tuple after hydration.
+			if model.BaseURL != "https://inference.baseten.co/v1" {
+				t.Errorf("hydrated BaseURL = %q, want https://inference.baseten.co/v1", model.BaseURL)
+			}
+			if model.APIKeyEnv != "BASETEN_API_KEY" {
+				t.Errorf("hydrated APIKeyEnv = %q, want BASETEN_API_KEY", model.APIKeyEnv)
+			}
+			if model.UpstreamProtocol != UpstreamOpenAIChat {
+				t.Errorf("hydrated UpstreamProtocol = %q, want openai-chat", model.UpstreamProtocol)
+			}
+			if model.FactoryProvider != "generic-chat-completion-api" {
+				t.Errorf("FactoryProvider = %q, want generic-chat-completion-api", model.FactoryProvider)
+			}
+			// No provider-wide defaults injected.
+			if len(model.ExtraArgs) != 0 {
+				t.Errorf("ExtraArgs should be empty after hydration, got %v", model.ExtraArgs)
+			}
+			if len(model.ExtraHeaders) != 0 {
+				t.Errorf("ExtraHeaders should be empty after hydration, got %v", model.ExtraHeaders)
+			}
+			// Upstream model must be preserved exactly (opaque slug).
+			if m.UpstreamModel != model.UpstreamModel {
+				t.Errorf("upstream model changed during hydration: %q -> %q", m.UpstreamModel, model.UpstreamModel)
+			}
+		}
+	}
+	if !nativeFound {
+		t.Fatal("baseten.md Recipe section must contain a native recipe with known_auth: baseten")
+	}
+}
+
+// TestBasetenDocsCustomRecipeDoesNotInheritProfile verifies the custom
+// deployment recipe in baseten.md does not carry known_auth: baseten and
+// has its own explicit base_url/api_key_env.
+func TestBasetenDocsCustomRecipeDoesNotInheritProfile(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	customSection := extractMarkdownSection(body, "Custom deployment recipe")
+	if customSection == "" {
+		t.Fatal("baseten.md must contain a '## Custom deployment recipe' section")
+	}
+	blocks := fencedBlocks(customSection, "yaml")
+	if len(blocks) == 0 {
+		t.Fatal("baseten.md Custom deployment recipe section must contain at least one YAML block")
+	}
+
+	type recipeYAML struct {
+		Models []Model `yaml:"models"`
+	}
+	var customFound bool
+	for _, block := range blocks {
+		var ry recipeYAML
+		if err := yaml.Unmarshal([]byte(block), &ry); err != nil {
+			continue
+		}
+		for _, m := range ry.Models {
+			if m.KnownAuth == "baseten" {
+				t.Errorf("custom deployment recipe must not have known_auth: baseten (alias %q)", m.Alias)
+			}
+			if m.BaseURL != "" && m.APIKeyEnv != "" && m.KnownAuth == "" {
+				customFound = true
+			}
+		}
+	}
+	if !customFound {
+		t.Fatal("baseten.md Custom deployment recipe must have a model with explicit base_url and api_key_env and no known_auth")
+	}
+}
+
+// TestBasetenDocsNoStaleEndpoints verifies no Baseten doc uses a stale or
+// incorrect endpoint or env var name.
+func TestBasetenDocsNoStaleEndpoints(t *testing.T) {
+	staleURLs := []string{
+		// Must always use the inference subdomain prefix.
+		"https://baseten.co/v1",
+		"https://api.baseten.co/v1",
+		// Must not use model API without the /v1 path.
+		"https://inference.baseten.co/chat",
+	}
+	staleEnvNames := []string{
+		"BASETEN_KEY",
+		"BASETEN_TOKEN",
+		"BASETEN_SECRET",
+		"BASETEN_API_TOKEN",
+	}
+	docsToCheck := append([]string{
+		"docs/examples/baseten.md",
+		"docs/PROVIDERS.md",
+		"README.md",
+		"docs/README.md",
+		".env.local.example",
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+	}, docExampleMarkdownFiles()...)
+	for _, rel := range docsToCheck {
+		body := readRepoRel(t, rel)
+		for _, stale := range staleURLs {
+			if strings.Contains(body, stale) {
+				t.Errorf("%s contains stale Baseten URL %q", rel, stale)
+			}
+		}
+		for _, stale := range staleEnvNames {
+			if strings.Contains(body, stale) {
+				t.Errorf("%s contains stale Baseten env name %q", rel, stale)
+			}
+		}
+	}
+}
+
+// normalizationClaimPatterns maps prohibited model-ID normalization claim
+// phrases to the negation markers that may appear in the same sentence to
+// make the claim explicitly negative (and thus acceptable). A sentence
+// containing a prohibited phrase without a co-occurring negation fails.
+// Universal-capability phrases are always prohibited (empty negation slice).
+var normalizationClaimPatterns = []struct {
+	phrase   string
+	negation []string
+}{
+	{"rewrites model", []string{"does not", "not ", "never "}},
+	{"normalizes model", []string{"does not", "not ", "never "}},
+	{"maps model", []string{"does not", "not ", "never "}},
+	{"translates model", []string{"does not", "not ", "never "}},
+	// Universal-capability claims are always prohibited (no negation escape).
+	{"all models support", []string{}},
+	{"every model supports", []string{}},
+}
+
+// checkNoModelNormalizationClaims is a reusable predicate that splits body
+// into sentences and verifies that no sentence positively claims the proxy
+// rewrites, normalizes, maps, or translates model IDs without a co-occurring
+// negation. Precise descriptions of exact opaque model preservation (e.g.,
+// "model IDs are preserved byte-for-byte") remain allowed because they do
+// not contain a prohibited normalization phrase. Universal-capability claims
+// ("all models support ...") are always rejected.
+func checkNoModelNormalizationClaims(body string) error {
+	for _, sent := range splitSentences(body) {
+		lower := strings.ToLower(sent)
+		for _, p := range normalizationClaimPatterns {
+			if !strings.Contains(lower, p.phrase) {
+				continue
+			}
+			allowed := false
+			for _, neg := range p.negation {
+				if strings.Contains(lower, neg) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("prohibited model-ID normalization claim %q appears without co-occurring negation in sentence: %q", p.phrase, strings.TrimSpace(sent))
+			}
+		}
+	}
+	return nil
+}
+
+// TestBasetenDocsNoModelNormalizationClaims verifies the Baseten guide and
+// scoped reference docs do not positively claim model-ID normalization,
+// rewriting, mapping, or translation. The check is sentence-level so a
+// negation in unrelated prose cannot mask a positive claim, and so that
+// precise descriptions of exact opaque model preservation remain allowed.
+// "Provider-wide reasoning" is acceptable when negated and is additionally
+// checked by checkNoProhibitedClaims in TestBasetenDocsNoLiveValidationClaims.
+func TestBasetenDocsNoModelNormalizationClaims(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/baseten.md",
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			if err := checkNoModelNormalizationClaims(body); err != nil {
+				t.Fatalf("%s: %v", rel, err)
+			}
+		})
+	}
+}
+
+// TestBasetenDocsNormalizationClaimsDeterministic proves the sentence-level
+// normalization predicate catches each prohibited model-ID claim (rewrites,
+// normalizes, maps, translates) even when unrelated text contains a
+// negation, and accepts precise descriptions of exact opaque model
+// preservation. This provides deterministic failing and accepted fixture
+// paths that cannot be masked by document-wide substring matches.
+func TestBasetenDocsNormalizationClaimsDeterministic(t *testing.T) {
+	tests := []struct {
+		name    string
+		doc     string
+		wantErr bool
+	}{
+		// --- Failing fixtures: positive claims without negation ---
+		{
+			name:    "rewrite positive claim fails despite negation elsewhere",
+			doc:     "# Guide\n\nThe proxy does not modify data.\n\nThe proxy rewrites model IDs to canonical names.\n",
+			wantErr: true,
+		},
+		{
+			name:    "normalize positive claim fails",
+			doc:     "# Guide\n\nBaseten normalizes model slugs automatically.\n",
+			wantErr: true,
+		},
+		{
+			name:    "map positive claim fails",
+			doc:     "# Guide\n\nThe proxy maps model IDs to standard formats.\n",
+			wantErr: true,
+		},
+		{
+			name:    "translate positive claim fails",
+			doc:     "# Guide\n\nThe proxy translates model identifiers for compatibility.\n",
+			wantErr: true,
+		},
+		{
+			name:    "universal capability always fails",
+			doc:     "# Guide\n\nAll models support reasoning output.\n",
+			wantErr: true,
+		},
+		// --- Accepted fixtures: negated claims and correct preservation ---
+		{
+			name:    "rewrite negated with never accepted",
+			doc:     "# Guide\n\nThe proxy never rewrites model IDs.\n",
+			wantErr: false,
+		},
+		{
+			name:    "rewrite negated with does not accepted",
+			doc:     "# Guide\n\nThe proxy does not rewrite model IDs.\n",
+			wantErr: false,
+		},
+		{
+			name:    "normalize negated accepted",
+			doc:     "# Guide\n\nThe proxy does not normalize model slugs.\n",
+			wantErr: false,
+		},
+		{
+			name:    "map negated accepted",
+			doc:     "# Guide\n\nThe proxy never maps model IDs to aliases.\n",
+			wantErr: false,
+		},
+		{
+			name:    "translate negated accepted",
+			doc:     "# Guide\n\nThe proxy does not translate model IDs.\n",
+			wantErr: false,
+		},
+		{
+			name:    "exact byte-for-byte preservation accepted",
+			doc:     "# Guide\n\nBaseten model IDs are preserved byte-for-byte through the picker and reload cycle.\n",
+			wantErr: false,
+		},
+		{
+			name:    "precise opaque slug preservation accepted",
+			doc:     "# Guide\n\nThe proxy preserves opaque slugs exactly without provider-prefix normalization.\n",
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkNoModelNormalizationClaims(tt.doc)
+			if tt.wantErr && err == nil {
+				t.Fatal("checkNoModelNormalizationClaims must reject this doc")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("checkNoModelNormalizationClaims must accept this doc: %v", err)
+			}
+		})
+	}
+}
+
+// TestBasetenDocsProhibitedClaimsExtendedDocs verifies generic reference docs
+// (CONFIG.md and FACTORY.md) do not contain prohibited live-validation or
+// universal capability claims. PROVIDERS.md is excluded because it
+// legitimately describes T3 protocol translation paths as a core proxy
+// feature.
+func TestBasetenDocsProhibitedClaimsExtendedDocs(t *testing.T) {
+	for _, rel := range []string{
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			// Run the sentence-level prohibited-claims check.
+			if err := checkNoProhibitedClaims(body); err != nil {
+				t.Fatalf("%s: %v", rel, err)
+			}
+		})
+	}
+}
+
+// TestBasetenDocsUsesCurrentPort verifies Baseten docs use port 9787 and
+// never the old default 8787 as an operational target.
+func TestBasetenDocsUsesCurrentPort(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	if !strings.Contains(body, "127.0.0.1:9787") {
+		t.Error("baseten.md must reference the current default port 127.0.0.1:9787")
+	}
+	if strings.Contains(body, "127.0.0.1:8787") {
+		t.Error("baseten.md must not reference the old default port 127.0.0.1:8787")
 	}
 }
