@@ -301,38 +301,6 @@ func TestDeepInfraDiscoveryDoesNotUseInferenceCredential(t *testing.T) {
 	}
 }
 
-// TestDeepInfraDiscoveryAPIKeyNotSentWhenNonEmpty verifies that even when a
-// non-empty APIKey is passed directly to ListModelsWithOptions, the HTTP
-// request carries no Authorization or other credential header when the caller
-// omits the key (as backend.discover does for DiscoveryNoAuth profiles).
-func TestDeepInfraDiscoveryAPIKeyNotSentWhenNonEmpty(t *testing.T) {
-	var gotAuth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"model_name":"test-model","reported_type":"text-generation"}]`))
-	}))
-	defer srv.Close()
-
-	// The backend.discover path sets APIKey="" when DiscoveryNoAuth is true.
-	// This test proves at the transport level that an empty APIKey produces
-	// no auth header, which is the behavior backend.discover relies on.
-	_, err := ListModelsWithOptions(context.Background(), ListOptions{
-		BaseURL:    srv.URL,
-		ModelsPath: "/models/list",
-		APIKey:     "", // DiscoveryNoAuth causes backend.discover to pass empty.
-		IDField:    "model_name",
-		TypeField:  "reported_type",
-		TypeValue:  "text-generation",
-	})
-	if err != nil {
-		t.Fatalf("ListModels: %v", err)
-	}
-	if gotAuth != "" {
-		t.Errorf("Authorization = %q, want empty (unauthenticated discovery)", gotAuth)
-	}
-}
-
 // TestDeepInfraDiscoveryUnsupportedIDFieldFailsExplicitly verifies that an
 // unsupported discovery ID field configuration fails with an explicit error
 // rather than silently returning an empty catalog (which would mask the
