@@ -1463,6 +1463,8 @@ func TestBaseten_ErrorResponseHeaders_Filtered(t *testing.T) {
 		w.Header().Set("X-Litellm-Version", "2.0")
 		w.Header().Set("X-Portkey-Status", "error")
 		w.Header().Set("Helicone-Request-Id", "hc-err-1")
+		// Unsafe: privacy-sensitive intermediary metadata (not hop-by-hop).
+		w.Header().Set("Via", "1.1 baseten-err.internal.topology.sentinel (squid/5.7)")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit_error"}}`))
 	}, m)
@@ -1494,6 +1496,7 @@ func TestBaseten_ErrorResponseHeaders_Filtered(t *testing.T) {
 		"Transfer-Encoding",
 		"Content-Encoding",
 		"Keep-Alive",
+		"Via",
 		"X-Litellm-Version",
 		"X-Portkey-Status",
 		"Helicone-Request-Id",
@@ -1537,6 +1540,8 @@ func TestBaseten_FilterHeaders_RemovesUnsafeCategories(t *testing.T) {
 	src.Set("Cf-Aig-Status", "blocked")
 	src.Set("X-Kong-Proxy-Latency", "123")
 	src.Set("X-Bt-Trace-Id", "bt-1")
+	// Unsafe: privacy-sensitive intermediary metadata (not hop-by-hop).
+	src.Set("Via", "1.1 baseten-edge.internal.topology.sentinel (envoy/1.30)")
 
 	filtered := upstream.FilterHeaders(src)
 
@@ -1555,7 +1560,7 @@ func TestBaseten_FilterHeaders_RemovesUnsafeCategories(t *testing.T) {
 		"Set-Cookie", "Connection", "Keep-Alive", "Transfer-Encoding",
 		"Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer",
 		"Upgrade", "Content-Length", "Content-Encoding",
-		"X-Custom-Named",
+		"X-Custom-Named", "Via",
 		"X-Litellm-Version", "X-Portkey-Id", "Helicone-Request-Id",
 		"Cf-Aig-Status", "X-Kong-Proxy-Latency", "X-Bt-Trace-Id",
 	}

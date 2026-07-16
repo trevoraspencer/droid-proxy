@@ -43,6 +43,7 @@ Each guide includes config, Factory settings, run commands, and a curl check.
 | Fireworks | [examples/fireworks.md](examples/fireworks.md) | T2 |
 | Fireworks Fire Pass | [examples/fireworks-fire-pass.md](examples/fireworks-fire-pass.md) | T2 |
 | Baseten | [examples/baseten.md](examples/baseten.md) | T2 |
+| DeepInfra | [examples/deepinfra.md](examples/deepinfra.md) | T2 |
 | Z.AI | [examples/zai.md](examples/zai.md) | T2 |
 | Xiaomi MiMo | [examples/mimo.md](examples/mimo.md) | T2 |
 | Ollama | [examples/local-ollama.md](examples/local-ollama.md) | T2 |
