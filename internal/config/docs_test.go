@@ -2006,3 +2006,200 @@ func TestBasetenDocsReadmeAndProviderLinks(t *testing.T) {
 		}
 	}
 }
+
+// TestBasetenDocsRecipeHydratesWithSyntheticKey parses the native recipe YAML
+// from baseten.md and verifies it hydrates with a synthetic BASETEN_API_KEY.
+// This directly tests VAL-BASETEN-017's "hydrates with a synthetic key" claim.
+func TestBasetenDocsRecipeHydratesWithSyntheticKey(t *testing.T) {
+	t.Setenv("BASETEN_API_KEY", "synthetic-baseten-key-12345")
+
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	recipeSection := extractMarkdownSection(body, "Recipe")
+	if recipeSection == "" {
+		t.Fatal("baseten.md must contain a '## Recipe' section")
+	}
+	blocks := fencedBlocks(recipeSection, "yaml")
+	if len(blocks) == 0 {
+		t.Fatal("baseten.md Recipe section must contain at least one YAML block")
+	}
+
+	// Parse the native recipe block (contains known_auth: baseten).
+	type recipeYAML struct {
+		Models []Model `yaml:"models"`
+	}
+	var nativeFound bool
+	for _, block := range blocks {
+		var ry recipeYAML
+		if err := yaml.Unmarshal([]byte(block), &ry); err != nil {
+			continue
+		}
+		for _, m := range ry.Models {
+			if m.KnownAuth != "baseten" {
+				continue
+			}
+			nativeFound = true
+			// Hydrate the model from the registry.
+			model := m
+			if err := HydrateModel(&model); err != nil {
+				t.Fatalf("hydration failed for native recipe: %v", err)
+			}
+			// Verify exact tuple after hydration.
+			if model.BaseURL != "https://inference.baseten.co/v1" {
+				t.Errorf("hydrated BaseURL = %q, want https://inference.baseten.co/v1", model.BaseURL)
+			}
+			if model.APIKeyEnv != "BASETEN_API_KEY" {
+				t.Errorf("hydrated APIKeyEnv = %q, want BASETEN_API_KEY", model.APIKeyEnv)
+			}
+			if model.UpstreamProtocol != UpstreamOpenAIChat {
+				t.Errorf("hydrated UpstreamProtocol = %q, want openai-chat", model.UpstreamProtocol)
+			}
+			if model.FactoryProvider != "generic-chat-completion-api" {
+				t.Errorf("FactoryProvider = %q, want generic-chat-completion-api", model.FactoryProvider)
+			}
+			// No provider-wide defaults injected.
+			if len(model.ExtraArgs) != 0 {
+				t.Errorf("ExtraArgs should be empty after hydration, got %v", model.ExtraArgs)
+			}
+			if len(model.ExtraHeaders) != 0 {
+				t.Errorf("ExtraHeaders should be empty after hydration, got %v", model.ExtraHeaders)
+			}
+			// Upstream model must be preserved exactly (opaque slug).
+			if m.UpstreamModel != model.UpstreamModel {
+				t.Errorf("upstream model changed during hydration: %q -> %q", m.UpstreamModel, model.UpstreamModel)
+			}
+		}
+	}
+	if !nativeFound {
+		t.Fatal("baseten.md Recipe section must contain a native recipe with known_auth: baseten")
+	}
+}
+
+// TestBasetenDocsCustomRecipeDoesNotInheritProfile verifies the custom
+// deployment recipe in baseten.md does not carry known_auth: baseten and
+// has its own explicit base_url/api_key_env.
+func TestBasetenDocsCustomRecipeDoesNotInheritProfile(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	customSection := extractMarkdownSection(body, "Custom deployment recipe")
+	if customSection == "" {
+		t.Fatal("baseten.md must contain a '## Custom deployment recipe' section")
+	}
+	blocks := fencedBlocks(customSection, "yaml")
+	if len(blocks) == 0 {
+		t.Fatal("baseten.md Custom deployment recipe section must contain at least one YAML block")
+	}
+
+	type recipeYAML struct {
+		Models []Model `yaml:"models"`
+	}
+	var customFound bool
+	for _, block := range blocks {
+		var ry recipeYAML
+		if err := yaml.Unmarshal([]byte(block), &ry); err != nil {
+			continue
+		}
+		for _, m := range ry.Models {
+			if m.KnownAuth == "baseten" {
+				t.Errorf("custom deployment recipe must not have known_auth: baseten (alias %q)", m.Alias)
+			}
+			if m.BaseURL != "" && m.APIKeyEnv != "" && m.KnownAuth == "" {
+				customFound = true
+			}
+		}
+	}
+	if !customFound {
+		t.Fatal("baseten.md Custom deployment recipe must have a model with explicit base_url and api_key_env and no known_auth")
+	}
+}
+
+// TestBasetenDocsNoStaleEndpoints verifies no Baseten doc uses a stale or
+// incorrect endpoint or env var name.
+func TestBasetenDocsNoStaleEndpoints(t *testing.T) {
+	staleURLs := []string{
+		// Must always use the inference subdomain prefix.
+		"https://baseten.co/v1",
+		"https://api.baseten.co/v1",
+		// Must not use model API without the /v1 path.
+		"https://inference.baseten.co/chat",
+	}
+	staleEnvNames := []string{
+		"BASETEN_KEY",
+		"BASETEN_TOKEN",
+		"BASETEN_SECRET",
+		"BASETEN_API_TOKEN",
+	}
+	docsToCheck := append([]string{
+		"docs/examples/baseten.md",
+		"docs/PROVIDERS.md",
+		"README.md",
+		"docs/README.md",
+		".env.local.example",
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+	}, docExampleMarkdownFiles()...)
+	for _, rel := range docsToCheck {
+		body := readRepoRel(t, rel)
+		for _, stale := range staleURLs {
+			if strings.Contains(body, stale) {
+				t.Errorf("%s contains stale Baseten URL %q", rel, stale)
+			}
+		}
+		for _, stale := range staleEnvNames {
+			if strings.Contains(body, stale) {
+				t.Errorf("%s contains stale Baseten env name %q", rel, stale)
+			}
+		}
+	}
+}
+
+// TestBasetenDocsNoModelNormalizationClaims verifies the Baseten guide does
+// not claim model normalization, mutable-catalog availability guarantees, or
+// universal capability. "Provider-wide reasoning" is acceptable when negated
+// (e.g. "No provider-wide reasoning...is applied") and is checked by the
+// sentence-level checkNoProhibitedClaims in TestBasetenDocsNoLiveValidationClaims.
+func TestBasetenDocsNoModelNormalizationClaims(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	// These phrases must never appear in any form (not even negated),
+	// because the proxy does not rewrite or normalize Baseten model IDs.
+	for _, bad := range []string{
+		"rewrites model",
+		"normalizes model",
+		"maps model IDs",
+		"translates model",
+		"all models support",
+		"every model supports",
+	} {
+		if strings.Contains(strings.ToLower(body), strings.ToLower(bad)) {
+			t.Errorf("baseten.md must not contain prohibited claim %q", bad)
+		}
+	}
+}
+
+// TestBasetenDocsProhibitedClaimsExtendedDocs verifies generic reference docs
+// (CONFIG.md) do not contain prohibited live-validation or universal
+// capability claims. PROVIDERS.md is excluded because it legitimately
+// describes T3 protocol translation paths as a core proxy feature.
+func TestBasetenDocsProhibitedClaimsExtendedDocs(t *testing.T) {
+	for _, rel := range []string{
+		"docs/CONFIG.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			// Run the sentence-level prohibited-claims check.
+			if err := checkNoProhibitedClaims(body); err != nil {
+				t.Fatalf("%s: %v", rel, err)
+			}
+		})
+	}
+}
+
+// TestBasetenDocsUsesCurrentPort verifies Baseten docs use port 9787 and
+// never the old default 8787 as an operational target.
+func TestBasetenDocsUsesCurrentPort(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	if !strings.Contains(body, "127.0.0.1:9787") {
+		t.Error("baseten.md must reference the current default port 127.0.0.1:9787")
+	}
+	if strings.Contains(body, "127.0.0.1:8787") {
+		t.Error("baseten.md must not reference the old default port 127.0.0.1:8787")
+	}
+}

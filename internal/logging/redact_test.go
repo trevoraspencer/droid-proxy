@@ -60,6 +60,14 @@ func TestRedact(t *testing.T) {
 			in:      "Authorization: Bearer fpk_firepass_secret_456",
 			mustNot: "fpk_firepass_secret_456",
 		},
+		// Baseten credentials are opaque (no known prefix like fw_ or sk_).
+		// Redaction must handle opaque Bearer credentials without relying
+		// on a key prefix pattern. This uses a generic opaque sentinel.
+		{
+			name:    "baseten opaque bearer sentinel",
+			in:      "Authorization: Bearer opaque_baseten_sentinel_xyz",
+			mustNot: "opaque_baseten_sentinel_xyz",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
