@@ -43,6 +43,7 @@ func docExampleMarkdownFiles() []string {
 		"docs/examples/anthropic.md",
 		"docs/examples/baseten.md",
 		"docs/examples/codex-oauth.md",
+		"docs/examples/deepinfra.md",
 		"docs/examples/deepseek.md",
 		"docs/examples/fireworks.md",
 		"docs/examples/fireworks-fire-pass.md",
@@ -471,6 +472,7 @@ func TestDocsExamplePagesExistForKnownAuth(t *testing.T) {
 		"fireworks":           "examples/fireworks.md",
 		"fireworks-fire-pass": "examples/fireworks-fire-pass.md",
 		"baseten":             "examples/baseten.md",
+		"deepinfra":           "examples/deepinfra.md",
 		"zai":                 "examples/zai.md",
 		"zai-main-api":        "examples/zai.md",
 		"zai-coding-api":      "examples/zai.md",
@@ -2337,5 +2339,577 @@ func TestBasetenDocsUsesCurrentPort(t *testing.T) {
 	}
 	if strings.Contains(body, "127.0.0.1:8787") {
 		t.Error("baseten.md must not reference the old default port 127.0.0.1:8787")
+	}
+}
+
+// --- VAL-DEEPINFRA-017: DeepInfra registry and public artifacts stay synchronized ---
+
+// TestDeepInfraDocsRegistrySynchronized verifies the DeepInfra guide matches
+// the exact registry tuple: base URL, env var, protocol, Factory mode, and
+// discovery contract.
+func TestDeepInfraDocsRegistrySynchronized(t *testing.T) {
+	ka, ok := LookupKnownAuth("deepinfra")
+	if !ok {
+		t.Fatal("deepinfra profile missing from registry")
+	}
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	for _, want := range []string{
+		ka.BaseURL,
+		ka.APIKeyEnv,
+		string(ka.UpstreamProtocol),
+		"generic-chat-completion-api",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("deepinfra.md must contain %q", want)
+		}
+	}
+}
+
+// TestDeepInfraDocsDiscoveryContract verifies the guide documents the exact
+// official discovery contract: unauthenticated GET /models/list with
+// Accept: application/json, bare-array response, model_name ID field, exact
+// text-generation filtering, and manual fallback.
+func TestDeepInfraDocsDiscoveryContract(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	for _, want := range []string{
+		"/models/list",
+		"Accept: application/json",
+		"unauthenticated",
+		"model_name",
+		"reported_type",
+		"text-generation",
+		"manual",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("deepinfra.md must document discovery contract field %q", want)
+		}
+	}
+}
+
+// TestDeepInfraDocsNoStaleDiscoveryRoutes verifies no DeepInfra doc references
+// stale or incorrect discovery endpoints or env var names.
+func TestDeepInfraDocsNoStaleDiscoveryRoutes(t *testing.T) {
+	staleEndpoints := []string{
+		"/v1/models",
+		"/v1/openai/models",
+		"DEEPINFRA_API_KEY",
+		"DEEPINFRA_KEY",
+		"DEEPINFRA_API_TOKEN",
+	}
+	docsToCheck := append([]string{
+		"docs/examples/deepinfra.md",
+		"docs/PROVIDERS.md",
+		"README.md",
+		"docs/README.md",
+		".env.local.example",
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+	}, docExampleMarkdownFiles()...)
+	for _, rel := range docsToCheck {
+		// Skip deepinfra.md itself for the model-list route check since it
+		// legitimately discusses forbidden routes in a negative context.
+		if rel == "docs/examples/deepinfra.md" {
+			body := readRepoRel(t, rel)
+			for _, stale := range []string{"DEEPINFRA_API_KEY", "DEEPINFRA_KEY", "DEEPINFRA_API_TOKEN"} {
+				if strings.Contains(body, stale) {
+					t.Errorf("%s contains stale DeepInfra env name %q", rel, stale)
+				}
+			}
+			continue
+		}
+		body := readRepoRel(t, rel)
+		for _, stale := range staleEndpoints {
+			// Allow /v1/models in generic docs that are not DeepInfra-specific
+			// and discuss the local proxy /v1/models endpoint.
+			if stale == "/v1/models" && rel != "docs/examples/deepinfra.md" {
+				continue
+			}
+			if strings.Contains(body, stale) {
+				t.Errorf("%s contains stale DeepInfra reference %q", rel, stale)
+			}
+		}
+	}
+}
+
+// TestDeepInfraDocsNoLiveValidationClaims verifies no DeepInfra public guidance
+// implies mock validation proves live availability. PROVIDERS.md is excluded
+// because it legitimately describes T3 protocol translation paths as a core
+// proxy feature.
+func TestDeepInfraDocsNoLiveValidationClaims(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/deepinfra.md",
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+	} {
+		body := readRepoRel(t, rel)
+		if err := checkNoProhibitedClaims(body); err != nil {
+			t.Fatalf("%s: %v", rel, err)
+		}
+	}
+	// deepinfra.md must qualify mock validation.
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "mock") || !strings.Contains(lower, "not live") && !strings.Contains(lower, "mock-only") {
+		t.Error("deepinfra.md must qualify that validation is mock-only, not live")
+	}
+}
+
+// TestDeepInfraDocsManualEntryGuaranteed verifies the guide documents manual
+// entry as always available for private deployments and absent-from-catalog IDs.
+func TestDeepInfraDocsManualEntryGuaranteed(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	for _, want := range []string{"manual", "guaranteed"} {
+		if !strings.Contains(strings.ToLower(body), want) {
+			t.Errorf("deepinfra.md must mention %q for manual entry", want)
+		}
+	}
+}
+
+// TestDeepInfraDocsOpaqueIDsPreserved verifies the guide documents that
+// Hugging Face-style IDs, version suffixes, and deploy_id values are
+// preserved without normalization.
+func TestDeepInfraDocsOpaqueIDsPreserved(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	for _, want := range []string{"opaque", "deploy_id"} {
+		if !strings.Contains(strings.ToLower(body), want) {
+			t.Errorf("deepinfra.md must mention %q", want)
+		}
+	}
+	// Must not positively claim model-ID normalization.
+	if err := checkNoModelNormalizationClaims(body); err != nil {
+		t.Fatalf("deepinfra.md: %v", err)
+	}
+}
+
+// TestDeepInfraEnvTemplateHasToken verifies the env template contains exactly
+// one empty DEEPINFRA_TOKEN assignment.
+func TestDeepInfraEnvTemplateHasToken(t *testing.T) {
+	body := readRepoRel(t, ".env.local.example")
+	pattern := `DEEPINFRA_TOKEN=""`
+	count := strings.Count(body, pattern)
+	if count != 1 {
+		t.Fatalf(".env.local.example must contain exactly one empty DEEPINFRA_TOKEN assignment, got %d", count)
+	}
+}
+
+// TestDeepInfraDocsReadmeAndProviderLinks verify the README and docs/README.md
+// link to the DeepInfra example.
+func TestDeepInfraDocsReadmeAndProviderLinks(t *testing.T) {
+	for _, rel := range []string{"README.md", "docs/README.md"} {
+		body := readRepoRel(t, rel)
+		if !strings.Contains(body, "deepinfra.md") {
+			t.Errorf("%s must link to examples/deepinfra.md", rel)
+		}
+	}
+}
+
+// TestDeepInfraDocsFactorySyncExcludesUpstream verifies the DeepInfra
+// Factory-sync section explicitly documents exclusions.
+func TestDeepInfraDocsFactorySyncExcludesUpstream(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	section := extractMarkdownSection(body, "Factory sync")
+	if section == "" {
+		t.Fatal("deepinfra.md must contain a '## Factory sync' section")
+	}
+	for _, marker := range []string{
+		"upstream URL",
+		"known_auth",
+		"upstream model",
+		"extra_args",
+		"env-var name",
+		"credential",
+	} {
+		if !strings.Contains(section, marker) {
+			t.Errorf("deepinfra.md Factory sync section must mention exclusion of %q", marker)
+		}
+	}
+}
+
+// TestDeepInfraDocsUsesCurrentPort verifies DeepInfra docs use port 9787 and
+// never the old default 8787.
+func TestDeepInfraDocsUsesCurrentPort(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	if !strings.Contains(body, "127.0.0.1:9787") {
+		t.Error("deepinfra.md must reference the current default port 127.0.0.1:9787")
+	}
+	if strings.Contains(body, "127.0.0.1:8787") {
+		t.Error("deepinfra.md must not reference the old default port 127.0.0.1:8787")
+	}
+}
+
+// TestDeepInfraDocsRecipeHydratesWithSyntheticToken parses the native recipe
+// YAML from deepinfra.md and verifies it hydrates with a synthetic token.
+// Standard recipes hydrate with no ExtraArgs; Priority/Flex recipes preserve
+// their configured service_tier.
+func TestDeepInfraDocsRecipeHydratesWithSyntheticToken(t *testing.T) {
+	t.Setenv("DEEPINFRA_TOKEN", "synthetic-deepinfra-token-12345")
+
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	recipeSection := extractMarkdownSection(body, "Recipe")
+	if recipeSection == "" {
+		t.Fatal("deepinfra.md must contain a '## Recipe' section")
+	}
+	blocks := fencedBlocks(recipeSection, "yaml")
+	if len(blocks) == 0 {
+		t.Fatal("deepinfra.md Recipe section must contain at least one YAML block")
+	}
+
+	type recipeYAML struct {
+		Models []Model `yaml:"models"`
+	}
+	var nativeFound bool
+	for _, block := range blocks {
+		var ry recipeYAML
+		if err := yaml.Unmarshal([]byte(block), &ry); err != nil {
+			continue
+		}
+		for _, m := range ry.Models {
+			if m.KnownAuth != "deepinfra" {
+				continue
+			}
+			nativeFound = true
+			model := m
+			if err := HydrateModel(&model); err != nil {
+				t.Fatalf("hydration failed for native recipe: %v", err)
+			}
+			if model.BaseURL != "https://api.deepinfra.com/v1/openai" {
+				t.Errorf("hydrated BaseURL = %q, want https://api.deepinfra.com/v1/openai", model.BaseURL)
+			}
+			if model.APIKeyEnv != "DEEPINFRA_TOKEN" {
+				t.Errorf("hydrated APIKeyEnv = %q, want DEEPINFRA_TOKEN", model.APIKeyEnv)
+			}
+			if model.UpstreamProtocol != UpstreamOpenAIChat {
+				t.Errorf("hydrated UpstreamProtocol = %q, want openai-chat", model.UpstreamProtocol)
+			}
+			if model.FactoryProvider != "generic-chat-completion-api" {
+				t.Errorf("FactoryProvider = %q, want generic-chat-completion-api", model.FactoryProvider)
+			}
+			// The DeepInfra registry profile has no ExtraArgs, so hydration
+			// does not inject any. Explicit model ExtraArgs (like service_tier
+			// on Priority/Flex recipes) are preserved as-is.
+			if m.UpstreamModel != model.UpstreamModel {
+				t.Errorf("upstream model changed during hydration: %q -> %q", m.UpstreamModel, model.UpstreamModel)
+			}
+		}
+	}
+	if !nativeFound {
+		t.Fatal("deepinfra.md Recipe section must contain a native recipe with known_auth: deepinfra")
+	}
+}
+
+// --- VAL-DEEPINFRA-018: DeepInfra tier and model-dependent guidance is accurate ---
+
+// TestDeepInfraDocsTierRecipesSeparate verifies the guide defines Standard
+// (no service_tier), Priority (exact "priority"), and Flex (exact "flex")
+// as distinct recipes, and documents effective tier literals.
+func TestDeepInfraDocsTierRecipesSeparate(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+
+	// Parse all YAML blocks looking for tier recipes.
+	type recipe struct {
+		hasServiceTier bool
+		serviceTierVal string
+	}
+	recipes := []recipe{}
+	for _, block := range fencedBlocks(body, "yaml") {
+		var m struct {
+			Models []struct {
+				ExtraArgs map[string]any `yaml:"extra_args"`
+			} `yaml:"models"`
+		}
+		if err := yaml.Unmarshal([]byte(block), &m); err != nil {
+			continue
+		}
+		for _, model := range m.Models {
+			r := recipe{}
+			if st, ok := model.ExtraArgs["service_tier"]; ok {
+				r.hasServiceTier = true
+				if s, ok := st.(string); ok {
+					r.serviceTierVal = s
+				}
+			}
+			recipes = append(recipes, r)
+		}
+	}
+
+	hasStandard := false
+	hasPriority := false
+	hasFlex := false
+	for _, r := range recipes {
+		switch {
+		case !r.hasServiceTier:
+			hasStandard = true
+		case r.serviceTierVal == "priority":
+			hasPriority = true
+		case r.serviceTierVal == "flex":
+			hasFlex = true
+		}
+	}
+	if !hasStandard {
+		t.Error("deepinfra.md must define a Standard recipe (no service_tier)")
+	}
+	if !hasPriority {
+		t.Error("deepinfra.md must define a Priority recipe (service_tier: priority)")
+	}
+	if !hasFlex {
+		t.Error("deepinfra.md must define a Flex recipe (service_tier: flex)")
+	}
+
+	// Must document effective tier literals: priority, flex, and default (fallback).
+	for _, want := range []string{`"priority"`, `"flex"`, `"default"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("deepinfra.md must document effective tier literal %s", want)
+		}
+	}
+	// Must identify response service_tier as authoritative.
+	if !strings.Contains(strings.ToLower(body), "authoritative") {
+		t.Error("deepinfra.md must identify response service_tier as authoritative")
+	}
+	// Must label default as effective Standard.
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "effective standard") {
+		t.Error("deepinfra.md must label the default fallback as effective Standard")
+	}
+}
+
+// TestDeepInfraDocsFlexEnumContradiction verifies the guide records the known
+// official-page contradiction between the Chat overview and the OpenAPI tier
+// enum regarding Flex, and resolves it in favor of pass-through.
+func TestDeepInfraDocsFlexEnumContradiction(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	lower := strings.ToLower(body)
+	// Must mention the contradiction.
+	if !strings.Contains(lower, "contradiction") && !strings.Contains(lower, "discrepancy") {
+		t.Error("deepinfra.md must mention the known official-page contradiction about Flex")
+	}
+	// Must mention the OpenAPI tier enum.
+	if !strings.Contains(lower, "openapi") || !strings.Contains(lower, "enum") {
+		t.Error("deepinfra.md must mention the OpenAPI tier enum omitting flex")
+	}
+	// Must resolve in favor of pass-through rather than a restrictive enum.
+	if !strings.Contains(lower, "pass-through") && !strings.Contains(lower, "passthrough") {
+		t.Error("deepinfra.md must resolve the contradiction in favor of pass-through")
+	}
+}
+
+// TestDeepInfraDocsNoProviderWideDefaults verifies the guide does not claim
+// provider-wide reasoning, capability, or output-limit defaults.
+func TestDeepInfraDocsNoProviderWideDefaults(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	if err := checkNoProhibitedClaims(body); err != nil {
+		t.Fatalf("deepinfra.md: %v", err)
+	}
+	// Must mention model-dependence.
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "model-dependent") {
+		t.Error("deepinfra.md must state capabilities are model-dependent")
+	}
+}
+
+// TestDeepInfraDocsMaxOutputTokensQualified verifies the guide describes
+// max_output_tokens as configured model metadata or documented local sync
+// fallback, not a DeepInfra guarantee.
+func TestDeepInfraDocsMaxOutputTokensQualified(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	if !strings.Contains(body, "max_output_tokens") {
+		t.Fatal("deepinfra.md must mention max_output_tokens")
+	}
+	// Must not imply it is a DeepInfra guarantee.
+	lower := strings.ToLower(body)
+	if strings.Contains(lower, "deepinfra guarantees") {
+		t.Error("deepinfra.md must not claim DeepInfra guarantees max_output_tokens")
+	}
+}
+
+// TestDeepInfraDocsTuiDefaultStandard verifies the guide explains the default
+// TUI flow creates Standard while Priority/Flex use documented config entries.
+func TestDeepInfraDocsTuiDefaultStandard(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	lower := strings.ToLower(body)
+	// Must mention that the default TUI creates Standard (no tier).
+	if !strings.Contains(lower, "standard") || !strings.Contains(lower, "tui") && !strings.Contains(lower, "onboarding") && !strings.Contains(lower, "default") {
+		t.Error("deepinfra.md must explain the default TUI/onboarding creates Standard")
+	}
+}
+
+// --- VAL-DEEPINFRA-020: DeepInfra behavioral sources are pinned and qualified ---
+
+// TestDeepInfraSourceRecordPinned verifies the committed source record has
+// official URLs and a retrieval date covering all required behavioral facts.
+func TestDeepInfraSourceRecordPinned(t *testing.T) {
+	rec := DeepInfraSourceRecord()
+	if rec.InferenceBaseURL != "https://api.deepinfra.com/v1/openai" {
+		t.Errorf("InferenceBaseURL = %q", rec.InferenceBaseURL)
+	}
+	if rec.DiscoveryURL != "https://api.deepinfra.com/models/list" {
+		t.Errorf("DiscoveryURL = %q", rec.DiscoveryURL)
+	}
+	if rec.DiscoveryMethod != "GET" {
+		t.Errorf("DiscoveryMethod = %q", rec.DiscoveryMethod)
+	}
+	if rec.DiscoveryIDField != "model_name" {
+		t.Errorf("DiscoveryIDField = %q", rec.DiscoveryIDField)
+	}
+	if rec.DiscoveryTypeField != "reported_type" {
+		t.Errorf("DiscoveryTypeField = %q", rec.DiscoveryTypeField)
+	}
+	if rec.DiscoveryTypeValue != "text-generation" {
+		t.Errorf("DiscoveryTypeValue = %q", rec.DiscoveryTypeValue)
+	}
+	if rec.CredentialEnv != "DEEPINFRA_TOKEN" {
+		t.Errorf("CredentialEnv = %q", rec.CredentialEnv)
+	}
+	if rec.RequestTierPriority != "priority" {
+		t.Errorf("RequestTierPriority = %q", rec.RequestTierPriority)
+	}
+	if rec.RequestTierFlex != "flex" {
+		t.Errorf("RequestTierFlex = %q", rec.RequestTierFlex)
+	}
+	if rec.EffectiveTierPriority != "priority" {
+		t.Errorf("EffectiveTierPriority = %q", rec.EffectiveTierPriority)
+	}
+	if rec.EffectiveTierFlex != "flex" {
+		t.Errorf("EffectiveTierFlex = %q", rec.EffectiveTierFlex)
+	}
+	if rec.EffectiveTierDefault != "default" && !strings.Contains(rec.EffectiveTierDefault, "default") {
+		t.Errorf("EffectiveTierDefault = %q, want default", rec.EffectiveTierDefault)
+	}
+	if rec.FlexEnumContraction == "" {
+		t.Error("FlexEnumContraction must be recorded")
+	}
+	if rec.PassthroughDecision == "" {
+		t.Error("PassthroughDecision must be recorded")
+	}
+	if len(rec.ReasoningFields) == 0 {
+		t.Error("ReasoningFields must not be empty")
+	}
+	if len(rec.CacheFields) == 0 {
+		t.Error("CacheFields must not be empty")
+	}
+	if rec.OpaqueIDNote == "" {
+		t.Error("OpaqueIDNote must be recorded")
+	}
+	if rec.ModelDependentNote == "" {
+		t.Error("ModelDependentNote must be recorded")
+	}
+}
+
+// TestDeepInfraSourceURLsAndDate verifies the source URLs and date are pinned.
+func TestDeepInfraSourceURLsAndDate(t *testing.T) {
+	urls, asOf := DeepInfraSourceURLs()
+	if len(urls) == 0 {
+		t.Fatal("source URLs must not be empty")
+	}
+	for _, u := range urls {
+		if !strings.HasPrefix(u, "https://") {
+			t.Errorf("source URL must be https: %q", u)
+		}
+	}
+	if asOf == "" {
+		t.Fatal("as-of date must not be empty")
+	}
+}
+
+// TestDeepInfraSourceRecordAgreesWithRegistry verifies the source record
+// agrees with the registry profile.
+func TestDeepInfraSourceRecordAgreesWithRegistry(t *testing.T) {
+	rec := DeepInfraSourceRecord()
+	ka, ok := LookupKnownAuth("deepinfra")
+	if !ok {
+		t.Fatal("deepinfra profile missing")
+	}
+	if rec.InferenceBaseURL != ka.BaseURL {
+		t.Errorf("source InferenceBaseURL %q != registry BaseURL %q", rec.InferenceBaseURL, ka.BaseURL)
+	}
+	if rec.CredentialEnv != ka.APIKeyEnv {
+		t.Errorf("source CredentialEnv %q != registry APIKeyEnv %q", rec.CredentialEnv, ka.APIKeyEnv)
+	}
+	if rec.DiscoveryIDField != ka.DiscoveryIDField {
+		t.Errorf("source DiscoveryIDField %q != registry %q", rec.DiscoveryIDField, ka.DiscoveryIDField)
+	}
+	if rec.DiscoveryTypeField != ka.DiscoveryTypeField {
+		t.Errorf("source DiscoveryTypeField %q != registry %q", rec.DiscoveryTypeField, ka.DiscoveryTypeField)
+	}
+	if rec.DiscoveryTypeValue != ka.DiscoveryTypeValue {
+		t.Errorf("source DiscoveryTypeValue %q != registry %q", rec.DiscoveryTypeValue, ka.DiscoveryTypeValue)
+	}
+	// Discovery URL must resolve to the registry fields.
+	discoveryURL := strings.TrimRight(ka.DiscoveryBaseURL, "/") + ka.ModelsPath
+	if rec.DiscoveryURL != discoveryURL {
+		t.Errorf("source DiscoveryURL %q != registry-resolved %q", rec.DiscoveryURL, discoveryURL)
+	}
+}
+
+// TestDeepInfraSourceRecordAgreesWithDocs verifies the source record agrees
+// with the provider guide.
+func TestDeepInfraSourceRecordAgreesWithDocs(t *testing.T) {
+	rec := DeepInfraSourceRecord()
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	if !strings.Contains(body, rec.InferenceBaseURL) {
+		t.Errorf("deepinfra.md must contain inference base URL %q", rec.InferenceBaseURL)
+	}
+	if !strings.Contains(body, rec.DiscoveryURL) {
+		t.Errorf("deepinfra.md must contain discovery URL %q", rec.DiscoveryURL)
+	}
+	if !strings.Contains(body, rec.CredentialEnv) {
+		t.Errorf("deepinfra.md must contain credential env %q", rec.CredentialEnv)
+	}
+	for _, field := range rec.ReasoningFields {
+		if !strings.Contains(body, field) {
+			t.Errorf("deepinfra.md must document reasoning field %q", field)
+		}
+	}
+	for _, field := range rec.CacheFields {
+		if !strings.Contains(body, field) {
+			t.Errorf("deepinfra.md must document cache field %q", field)
+		}
+	}
+}
+
+// TestDeepInfraDocsPassThroughFieldsDocumented verifies the guide identifies
+// extra_args as top-level pass-through and covers reasoning and cache fields.
+func TestDeepInfraDocsPassThroughFieldsDocumented(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	lower := strings.ToLower(body)
+
+	if !strings.Contains(lower, "pass-through") && !strings.Contains(lower, "passthrough") {
+		t.Fatal("deepinfra.md must identify extra_args as top-level pass-through")
+	}
+	for _, field := range []string{
+		"service_tier",
+		"reasoning_effort",
+		"reasoning_content",
+		"prompt_cache_key",
+		"chat_template_kwargs",
+		"stream",
+		"tools",
+		"response_format",
+	} {
+		if !strings.Contains(lower, field) {
+			t.Errorf("deepinfra.md must document pass-through field %q", field)
+		}
+	}
+}
+
+// TestDeepInfraDocsNoProhibitedClaims verifies no DeepInfra documentation
+// sentence contains prohibited translation, live-validation, or universal
+// capability claims without a co-occurring negation.
+func TestDeepInfraDocsNoProhibitedClaims(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	if err := checkNoProhibitedClaims(body); err != nil {
+		t.Fatalf("deepinfra.md: %v", err)
+	}
+}
+
+// TestDeepInfraDocsForbiddenRoutesForbidden verifies the guide states it does
+// not fall back to /v1/models or undocumented aliases for discovery.
+func TestDeepInfraDocsForbiddenRoutesForbidden(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	lower := strings.ToLower(body)
+	hasForbiddenRouteNegativeContext := strings.Contains(lower, "does not fall back") ||
+		strings.Contains(lower, "does not use /v1/models") ||
+		strings.Contains(lower, "no fallback")
+	if !hasForbiddenRouteNegativeContext {
+		t.Error("deepinfra.md must state it does not fall back to /v1/models or undocumented aliases")
 	}
 }

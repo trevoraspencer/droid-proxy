@@ -68,6 +68,14 @@ func TestRedact(t *testing.T) {
 			in:      "Authorization: Bearer opaque_baseten_sentinel_xyz",
 			mustNot: "opaque_baseten_sentinel_xyz",
 		},
+		// DeepInfra tokens are also opaque (DEEPINFRA_TOKEN) and sent as
+		// Bearer auth. Redaction must handle them without relying on a
+		// key prefix pattern.
+		{
+			name:    "deepinfra opaque bearer sentinel",
+			in:      "Authorization: Bearer opaque_deepinfra_token_qrs",
+			mustNot: "opaque_deepinfra_token_qrs",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
