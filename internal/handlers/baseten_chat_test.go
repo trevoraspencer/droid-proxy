@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -110,6 +111,34 @@ func canonicalTLSInterceptor(t *testing.T, handler http.HandlerFunc) (*httptest.
 		ForceAttemptHTTP2: false, // avoid h2 upgrade negotiation with the fake
 	}
 	return srv, transport, &authorities
+}
+
+// countingFailingRoundTripper is a deterministic http.RoundTripper that always
+// fails with err and records the exact number of RoundTrip calls. It never
+// contacts any server, making it ideal for proving exactly-one-attempt
+// transport-failure semantics without race conditions from real sockets.
+type countingFailingRoundTripper struct {
+	mu    sync.Mutex
+	calls int
+	err   error
+}
+
+func (rt *countingFailingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.mu.Lock()
+	rt.calls++
+	rt.mu.Unlock()
+	// Close the request body so the HTTP client does not leak goroutines
+	// waiting on a body read.
+	if req.Body != nil {
+		_ = req.Body.Close()
+	}
+	return nil, rt.err
+}
+
+func (rt *countingFailingRoundTripper) count() int {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.calls
 }
 
 // ---------------------------------------------------------------------------
@@ -645,9 +674,12 @@ func TestBaseten_StreamingRelaysRawSSE(t *testing.T) {
 }
 
 // TestBaseten_StreamingSSE_DetectsMutation proves that frame reordering,
-// duplicate frames, blank-line changes, and extra bytes all fail the exact
-// raw-byte SSE transcript comparison. Each mutation must produce a different
-// SHA-256 hash than the canonical fixture, confirming the test catches drift.
+// duplicate frames, single or triple newline separators, and trailing bytes
+// all fail the exact raw-byte SSE transcript comparison when they originate
+// from a fake upstream and pass through /v1/chat/completions before
+// downstream comparison. Each relayed mutation must differ byte-for-byte and
+// by SHA-256 from the canonical transcript, while the canonical relay remains
+// exact.
 func TestBaseten_StreamingSSE_DetectsMutation(t *testing.T) {
 	t.Setenv("BASETEN_API_KEY", "baseten_key")
 
@@ -658,7 +690,7 @@ func TestBaseten_StreamingSSE_DetectsMutation(t *testing.T) {
 		`data: [DONE]`,
 	}
 
-	// Compute the canonical transcript hash.
+	// Compute the canonical transcript: each frame followed by \n\n.
 	var canonicalSSE strings.Builder
 	for _, f := range canonicalFrames {
 		canonicalSSE.WriteString(f)
@@ -667,81 +699,116 @@ func TestBaseten_StreamingSSE_DetectsMutation(t *testing.T) {
 	canonicalBytes := []byte(canonicalSSE.String())
 	canonicalHash := sha256.Sum256(canonicalBytes)
 
+	m := basetenModel("bt-sse-mut", "org/sse-mut-model", nil)
+
+	// --- Canonical relay remains exact through /v1/chat/completions ---
+	// The canonical frames originate from a fake upstream and pass through the
+	// generic Chat proxy. The downstream SSE transcript must match the canonical
+	// bytes exactly (byte-for-byte and SHA-256).
+	ta := newBasetenTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		for _, frame := range canonicalFrames {
+			fmt.Fprintf(w, "%s\n\n", frame)
+			flusher.Flush()
+		}
+	}, m)
+
+	w := httptest.NewRecorder()
+	ta.engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"bt-sse-mut","stream":true,"messages":[]}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("canonical relay: expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	relayHash := sha256.Sum256(w.Body.Bytes())
+	if relayHash != canonicalHash {
+		t.Errorf("canonical relay SHA-256 mismatch:\nwant=%s\ngot =%s",
+			hex.EncodeToString(canonicalHash[:]), hex.EncodeToString(relayHash[:]))
+	}
+	if !bytesEqual(w.Body.Bytes(), canonicalBytes) {
+		t.Errorf("canonical relay raw-byte mismatch:\nwant(hex)=%s\ngot (hex)=%s",
+			hex.EncodeToString(canonicalBytes), hex.EncodeToString(w.Body.Bytes()))
+	}
+
+	// --- Each mutation originates from a fake upstream, passes through
+	// /v1/chat/completions, and must differ from the canonical transcript ---
 	mutations := []struct {
-		name   string
-		frames []string
-		sep    string // separator between frames and at end
+		name      string
+		writeFunc func(w http.ResponseWriter, flusher http.Flusher)
 	}{
 		{
 			name: "frame_reorder",
-			frames: []string{
-				`data: {"id":"s1","choices":[{"index":0,"delta":{"content":" world"}}]}`,
-				`data: {"id":"s1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"}}]}`,
-				`data: {"id":"s1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
-				`data: [DONE]`,
+			writeFunc: func(w http.ResponseWriter, flusher http.Flusher) {
+				reordered := []string{canonicalFrames[1], canonicalFrames[0], canonicalFrames[2], canonicalFrames[3]}
+				for _, f := range reordered {
+					fmt.Fprintf(w, "%s\n\n", f)
+					flusher.Flush()
+				}
 			},
-			sep: "\n\n",
 		},
 		{
 			name: "duplicate_frame",
-			frames: []string{
-				`data: {"id":"s1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"}}]}`,
-				`data: {"id":"s1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"}}]}`,
-				`data: {"id":"s1","choices":[{"index":0,"delta":{"content":" world"}}]}`,
-				`data: {"id":"s1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
-				`data: [DONE]`,
+			writeFunc: func(w http.ResponseWriter, flusher http.Flusher) {
+				duped := []string{canonicalFrames[0], canonicalFrames[0], canonicalFrames[1], canonicalFrames[2], canonicalFrames[3]}
+				for _, f := range duped {
+					fmt.Fprintf(w, "%s\n\n", f)
+					flusher.Flush()
+				}
 			},
-			sep: "\n\n",
 		},
 		{
 			name: "single_newline_separator",
-			frames: []string{
-				`data: {"id":"s1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"}}]}`,
-				`data: {"id":"s1","choices":[{"index":0,"delta":{"content":" world"}}]}`,
-				`data: {"id":"s1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
-				`data: [DONE]`,
+			writeFunc: func(w http.ResponseWriter, flusher http.Flusher) {
+				for _, f := range canonicalFrames {
+					fmt.Fprintf(w, "%s\n", f) // single newline instead of \n\n
+					flusher.Flush()
+				}
 			},
-			sep: "\n", // wrong: should be \n\n
 		},
 		{
 			name: "triple_newline_separator",
-			frames: []string{
-				`data: {"id":"s1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"}}]}`,
-				`data: {"id":"s1","choices":[{"index":0,"delta":{"content":" world"}}]}`,
-				`data: {"id":"s1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
-				`data: [DONE]`,
+			writeFunc: func(w http.ResponseWriter, flusher http.Flusher) {
+				for _, f := range canonicalFrames {
+					fmt.Fprintf(w, "%s\n\n\n", f) // triple newline instead of \n\n
+					flusher.Flush()
+				}
 			},
-			sep: "\n\n\n", // wrong: should be \n\n
 		},
 		{
-			name: "extra_byte_after_done",
-			frames: []string{
-				`data: {"id":"s1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"}}]}`,
-				`data: {"id":"s1","choices":[{"index":0,"delta":{"content":" world"}}]}`,
-				`data: {"id":"s1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
-				`data: [DONE]`,
+			name: "extra_trailing_byte",
+			writeFunc: func(w http.ResponseWriter, flusher http.Flusher) {
+				for _, f := range canonicalFrames {
+					fmt.Fprintf(w, "%s\n\n", f)
+					flusher.Flush()
+				}
+				fmt.Fprint(w, " ") // extra trailing byte after [DONE]
+				flusher.Flush()
 			},
-			sep: "\n\n",
 		},
 	}
 
 	for _, mt := range mutations {
 		t.Run(mt.name, func(t *testing.T) {
-			var mutatedSSE strings.Builder
-			for _, f := range mt.frames {
-				mutatedSSE.WriteString(f)
-				mutatedSSE.WriteString(mt.sep)
+			ta := newBasetenTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				mt.writeFunc(w, w.(http.Flusher))
+			}, m)
+
+			w := httptest.NewRecorder()
+			ta.engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+				strings.NewReader(`{"model":"bt-sse-mut","stream":true,"messages":[]}`)))
+			if w.Code != http.StatusOK {
+				t.Fatalf("mutation %s: expected 200, got %d body=%s", mt.name, w.Code, w.Body.String())
 			}
-			if mt.name == "extra_byte_after_done" {
-				mutatedSSE.WriteString(" ") // extra trailing byte
-			}
-			mutatedBytes := []byte(mutatedSSE.String())
-			mutHash := sha256.Sum256(mutatedBytes)
+
+			mutHash := sha256.Sum256(w.Body.Bytes())
 			if mutHash == canonicalHash {
-				t.Errorf("mutation %q produced the same SHA-256 as the canonical transcript; mutation not detected", mt.name)
+				t.Errorf("mutation %q: relayed SSE produced the same SHA-256 as the canonical transcript; mutation not detected", mt.name)
 			}
-			if bytesEqual(mutatedBytes, canonicalBytes) {
-				t.Errorf("mutation %q produced byte-identical output; mutation not detected", mt.name)
+			if bytesEqual(w.Body.Bytes(), canonicalBytes) {
+				t.Errorf("mutation %q: relayed SSE is byte-identical to the canonical transcript; mutation not detected", mt.name)
 			}
 		})
 	}
@@ -1499,28 +1566,25 @@ func TestBaseten_FilterHeaders_RemovesUnsafeCategories(t *testing.T) {
 	}
 }
 
-// TestBaseten_TransportFailureReturns502Envelope injects a transport failure
-// (unreachable upstream) and verifies the existing bounded secret-safe 502
-// upstream_error envelope with one attempt and no fallback. This closes the
-// VAL-BASETEN-013 transport-failure evidence gap.
+// TestBaseten_TransportFailureReturns502Envelope injects a deterministic
+// counting failing RoundTripper so the non-streaming transport failure proves
+// exactly one outbound attempt and no fallback. It verifies the existing
+// bounded secret-safe 502 upstream_error envelope without retry indicators or
+// SSE framing. This closes the VAL-BASETEN-013 transport-failure evidence gap.
 func TestBaseten_TransportFailureReturns502Envelope(t *testing.T) {
 	credSentinel := "baseten_transport_secret_xyz"
 	t.Setenv("BASETEN_API_KEY", credSentinel)
 
-	// Create a fake upstream server and immediately close it so the proxy's
-	// outbound connection fails (transport-level failure).
-	deadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("dead server should not receive any requests")
-	}))
-	deadURL := deadServer.URL
-	deadServer.Close()
+	// Inject a deterministic counting failing RoundTripper that never contacts
+	// any server. This proves exactly one outbound attempt with no retry.
+	rt := &countingFailingRoundTripper{
+		err: errors.New("deterministic transport failure: connection refused"),
+	}
 
 	m := basetenModel("bt-transport", "org/transport-model", nil)
 	if err := config.HydrateModel(m); err != nil {
 		t.Fatal(err)
 	}
-	// Point the model at the dead server so the connection fails.
-	m.BaseURL = deadURL + "/v1"
 
 	cfg := &config.Config{
 		Upstream: config.Upstream{HTTPTimeout: 5 * time.Second, StreamKeepAlive: 200 * time.Millisecond},
@@ -1533,8 +1597,11 @@ func TestBaseten_TransportFailureReturns502Envelope(t *testing.T) {
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
 
+	client := upstream.NewClient(cfg)
+	client.HTTP.Transport = rt
+
 	gin.SetMode(gin.TestMode)
-	api := &API{Cfg: cfg, Router: router, Client: upstream.NewClient(cfg), Logger: logger}
+	api := &API{Cfg: cfg, Router: router, Client: client, Logger: logger}
 	engine := gin.New()
 	engine.POST("/v1/chat/completions", api.ChatCompletions)
 
@@ -1547,6 +1614,11 @@ func TestBaseten_TransportFailureReturns502Envelope(t *testing.T) {
 		t.Fatalf("transport failure: expected 502, got %d body=%s", w.Code, w.Body.String())
 	}
 
+	// Exactly one outbound RoundTrip attempt: no retry, no fallback.
+	if got := rt.count(); got != 1 {
+		t.Errorf("RoundTrip call count = %d, want exactly 1 (no retry/fallback)", got)
+	}
+
 	// The error type must be upstream_error.
 	if got := gjson.Get(w.Body.String(), "error.type").String(); got != "upstream_error" {
 		t.Errorf("error.type = %q, want upstream_error", got)
@@ -1557,39 +1629,40 @@ func TestBaseten_TransportFailureReturns502Envelope(t *testing.T) {
 		t.Errorf("credential sentinel leaked in 502 transport-failure body: %s", w.Body.String())
 	}
 
-	// No retry or fallback: the error envelope must be a single bounded message.
-	// The proxy must not attempt a second upstream connection (one attempt only).
-	// Since the server is dead, there is exactly one connection attempt.
-	// We verify the error message is bounded and does not contain retry artifacts.
-	errMsg := gjson.Get(w.Body.String(), "error.message").String()
-	if errMsg == "" {
+	// The error message must be present and bounded.
+	if errMsg := gjson.Get(w.Body.String(), "error.message").String(); errMsg == "" {
 		t.Error("502 envelope missing error.message")
 	}
 
-	// No fallback: there must be no alternative model, no alternate host,
-	// and no retry indicator in the response.
-	if strings.Contains(w.Body.String(), "retry") || strings.Contains(w.Body.String(), "fallback") {
+	// No fallback: there must be no retry or fallback indicator in the response.
+	bodyLower := strings.ToLower(w.Body.String())
+	if strings.Contains(bodyLower, "retry") || strings.Contains(bodyLower, "fallback") {
 		t.Errorf("502 envelope suggests retry/fallback behavior: %s", w.Body.String())
+	}
+
+	// Must NOT be an SSE response.
+	if ct := w.Header().Get("Content-Type"); strings.Contains(ct, "text/event-stream") {
+		t.Errorf("non-streaming transport failure returned SSE Content-Type: %q", ct)
 	}
 }
 
 // TestBaseten_TransportFailureStreamingReturns502 verifies that a transport
 // failure on a streaming request also returns the 502 upstream_error envelope
-// (not an SSE error stream).
+// (not an SSE error stream), using a deterministic counting failing
+// RoundTripper to prove exactly one outbound attempt and no fallback.
 func TestBaseten_TransportFailureStreamingReturns502(t *testing.T) {
-	t.Setenv("BASETEN_API_KEY", "baseten_key")
+	credSentinel := "baseten_stream_transport_secret"
+	t.Setenv("BASETEN_API_KEY", credSentinel)
 
-	deadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("dead server should not receive any requests")
-	}))
-	deadURL := deadServer.URL
-	deadServer.Close()
+	// Inject a deterministic counting failing RoundTripper.
+	rt := &countingFailingRoundTripper{
+		err: errors.New("deterministic transport failure: connection refused"),
+	}
 
 	m := basetenModel("bt-tstream", "org/tstream-model", nil)
 	if err := config.HydrateModel(m); err != nil {
 		t.Fatal(err)
 	}
-	m.BaseURL = deadURL + "/v1"
 
 	cfg := &config.Config{
 		Upstream: config.Upstream{HTTPTimeout: 5 * time.Second, StreamKeepAlive: 200 * time.Millisecond},
@@ -1602,8 +1675,11 @@ func TestBaseten_TransportFailureStreamingReturns502(t *testing.T) {
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
 
+	client := upstream.NewClient(cfg)
+	client.HTTP.Transport = rt
+
 	gin.SetMode(gin.TestMode)
-	api := &API{Cfg: cfg, Router: router, Client: upstream.NewClient(cfg), Logger: logger}
+	api := &API{Cfg: cfg, Router: router, Client: client, Logger: logger}
 	engine := gin.New()
 	engine.POST("/v1/chat/completions", api.ChatCompletions)
 
@@ -1614,12 +1690,30 @@ func TestBaseten_TransportFailureStreamingReturns502(t *testing.T) {
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("streaming transport failure: expected 502, got %d body=%s", w.Code, w.Body.String())
 	}
+
+	// Exactly one outbound RoundTrip attempt: no retry, no fallback.
+	if got := rt.count(); got != 1 {
+		t.Errorf("RoundTrip call count = %d, want exactly 1 (no retry/fallback)", got)
+	}
+
 	if got := gjson.Get(w.Body.String(), "error.type").String(); got != "upstream_error" {
 		t.Errorf("error.type = %q, want upstream_error", got)
 	}
+
 	// Must NOT be an SSE response.
 	if ct := w.Header().Get("Content-Type"); strings.Contains(ct, "text/event-stream") {
 		t.Errorf("transport failure returned SSE Content-Type: %q", ct)
+	}
+
+	// The credential sentinel must NOT appear in the 502 error body.
+	if strings.Contains(w.Body.String(), credSentinel) {
+		t.Errorf("credential sentinel leaked in 502 streaming transport-failure body: %s", w.Body.String())
+	}
+
+	// No retry or fallback indicator.
+	bodyLower := strings.ToLower(w.Body.String())
+	if strings.Contains(bodyLower, "retry") || strings.Contains(bodyLower, "fallback") {
+		t.Errorf("502 envelope suggests retry/fallback behavior: %s", w.Body.String())
 	}
 }
 
