@@ -459,3 +459,136 @@ func TestChat_NonStream_BodyReadFailureIsNotReportedAsTooLarge(t *testing.T) {
 		t.Fatalf("expected read-failure message, got: %s", w.Body.String())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// VAL-CROSS-017: Via intermediary metadata is never relayed.
+//
+// These generic-provider integration fixtures exercise the shared generic Chat
+// handler end to end against a local fake upstream that returns a Via header
+// carrying a synthetic internal-topology sentinel. They prove Via is removed
+// uniformly from relayed success, upstream-error, and streaming responses while
+// exact safe Retry-After and allowlisted request-ID metadata survive.
+// ---------------------------------------------------------------------------
+
+// viaTopologySentinel is a synthetic internal-topology sentinel embedded in
+// upstream Via values. It must never appear in any relayed downstream header,
+// body, or captured artifact.
+const viaTopologySentinel = "egress-pool-node-42.internal.topology.sentinel"
+
+// TestChat_ViaHeader_FilteredOnSuccess proves that upstream Via intermediary
+// metadata (including a synthetic internal-topology sentinel) is never relayed
+// on a 2xx success response, while safe Retry-After and allowlisted request-ID
+// metadata survive byte-exact.
+func TestChat_ViaHeader_FilteredOnSuccess(t *testing.T) {
+	viaValue := "1.1 " + viaTopologySentinel + " (envoy/1.30)"
+	api := newTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Via", viaValue)
+		w.Header().Set("X-Request-ID", "req-via-success-123")
+		w.Header().Set("Retry-After", "120")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-via","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}]}`))
+	}, nil)
+
+	reqBody := `{"model":"droid-test","messages":[{"role":"user","content":"hi"}]}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Via"); got != "" {
+		t.Errorf("Via leaked on success response: %q", got)
+	}
+	if got := w.Header().Get("X-Request-ID"); got != "req-via-success-123" {
+		t.Errorf("safe X-Request-ID not preserved on success: %q", got)
+	}
+	if got := w.Header().Get("Retry-After"); got != "120" {
+		t.Errorf("safe Retry-After not preserved on success: %q", got)
+	}
+	if strings.Contains(w.Body.String(), viaTopologySentinel) {
+		t.Errorf("internal-topology sentinel leaked into success body: %q", viaTopologySentinel)
+	}
+}
+
+// TestChat_ViaHeader_FilteredOnUpstreamError proves Via is removed from an
+// upstream-error response while safe Retry-After and allowlisted request-ID
+// metadata survive byte-exact.
+func TestChat_ViaHeader_FilteredOnUpstreamError(t *testing.T) {
+	viaValue := "1.1 dl-intermediate-relay.eu.example.org, 1.1 " + viaTopologySentinel + " (haproxy 2.9)"
+	api := newTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Via", viaValue)
+		w.Header().Set("X-Request-ID", "req-via-error-456")
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit_error"}}`))
+	}, nil)
+
+	reqBody := `{"model":"droid-test","messages":[{"role":"user","content":"hi"}]}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Via"); got != "" {
+		t.Errorf("Via leaked on upstream-error response: %q", got)
+	}
+	if got := w.Header().Get("X-Request-ID"); got != "req-via-error-456" {
+		t.Errorf("safe X-Request-ID not preserved on upstream error: %q", got)
+	}
+	if got := w.Header().Get("Retry-After"); got != "60" {
+		t.Errorf("safe Retry-After not preserved on upstream error: %q", got)
+	}
+	if strings.Contains(w.Body.String(), viaTopologySentinel) {
+		t.Errorf("internal-topology sentinel leaked into error body: %q", viaTopologySentinel)
+	}
+}
+
+// TestChat_ViaHeader_FilteredOnStream proves Via is removed from a streaming
+// response's headers while safe Retry-After and allowlisted request-ID metadata
+// survive, and the internal-topology sentinel never appears in the relayed SSE
+// body.
+func TestChat_ViaHeader_FilteredOnStream(t *testing.T) {
+	viaValue := "1.1 " + viaTopologySentinel + " (varnish 7.4)"
+	api := newTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Via", viaValue)
+		w.Header().Set("X-Request-ID", "req-via-stream-789")
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		chunks := []string{
+			`data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"}}]}`,
+			`data: [DONE]`,
+		}
+		for _, c := range chunks {
+			_, _ = fmt.Fprintf(w, "%s\n\n", c)
+			flusher.Flush()
+		}
+	}, nil)
+
+	reqBody := `{"model":"droid-test","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	api.engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Via"); got != "" {
+		t.Errorf("Via leaked on streaming response: %q", got)
+	}
+	if got := w.Header().Get("X-Request-ID"); got != "req-via-stream-789" {
+		t.Errorf("safe X-Request-ID not preserved on stream: %q", got)
+	}
+	if got := w.Header().Get("Retry-After"); got != "30" {
+		t.Errorf("safe Retry-After not preserved on stream: %q", got)
+	}
+	if strings.Contains(w.Body.String(), viaTopologySentinel) {
+		t.Errorf("internal-topology sentinel leaked into SSE body: %q", viaTopologySentinel)
+	}
+}

@@ -1694,7 +1694,8 @@ func TestDeepInfra_UpstreamErrorRelayedWithExactStatusAndBody(t *testing.T) {
 // TestDeepInfra_ErrorHeadersBehavior verifies that for a 429 error,
 // downstream Retry-After equals upstream exactly, an allowlisted provider
 // request ID is preserved, while protected, hop-by-hop, cookie, compression,
-// connection-nominated, and gateway-identifying headers are absent.
+// connection-nominated, intermediary-metadata, and gateway-identifying headers
+// are absent.
 func TestDeepInfra_ErrorHeadersBehavior(t *testing.T) {
 	t.Setenv("DEEPINFRA_TOKEN", "deepinfra_key")
 
@@ -1715,6 +1716,8 @@ func TestDeepInfra_ErrorHeadersBehavior(t *testing.T) {
 		w.Header().Set("X-Litellm-Version", "2.0")
 		w.Header().Set("X-Portkey-Status", "error")
 		w.Header().Set("Helicone-Request-Id", "hc-err-1")
+		// Unsafe: privacy-sensitive intermediary metadata (not hop-by-hop).
+		w.Header().Set("Via", "1.1 deepinfra-err.internal.topology.sentinel (varnish 7.4)")
 		w.WriteHeader(http.StatusTooManyRequests)
 		w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit_error"}}`))
 	}, m)
@@ -1739,7 +1742,7 @@ func TestDeepInfra_ErrorHeadersBehavior(t *testing.T) {
 	// Unsafe headers removed.
 	for _, h := range []string{
 		"Set-Cookie", "Connection", "X-Conn-Scoped",
-		"Transfer-Encoding", "Content-Encoding", "Keep-Alive",
+		"Transfer-Encoding", "Content-Encoding", "Keep-Alive", "Via",
 		"X-Litellm-Version", "X-Portkey-Status", "Helicone-Request-Id",
 	} {
 		if got := w.Header().Get(h); got != "" {
@@ -2304,6 +2307,8 @@ func TestDeepInfra_FilterHeaders_RemovesUnsafeCategories(t *testing.T) {
 	src.Set("Helicone-Request-Id", "hc-1")
 	src.Set("Cf-Aig-Status", "blocked")
 	src.Set("X-Kong-Proxy-Latency", "123")
+	// Unsafe: privacy-sensitive intermediary metadata (not hop-by-hop).
+	src.Set("Via", "1.1 deepinfra-egress.internal.topology.sentinel (squid/5.7)")
 
 	filtered := upstream.FilterHeaders(src)
 
@@ -2320,7 +2325,7 @@ func TestDeepInfra_FilterHeaders_RemovesUnsafeCategories(t *testing.T) {
 		"Set-Cookie", "Connection", "Keep-Alive", "Transfer-Encoding",
 		"Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer",
 		"Upgrade", "Content-Length", "Content-Encoding",
-		"X-Custom-Named",
+		"X-Custom-Named", "Via",
 		"X-Litellm-Version", "X-Portkey-Id", "Helicone-Request-Id",
 		"Cf-Aig-Status", "X-Kong-Proxy-Latency",
 	}
