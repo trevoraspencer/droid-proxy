@@ -827,6 +827,147 @@ func TestDeepInfra_StreamingRelaysRawSSE(t *testing.T) {
 	}
 }
 
+// TestDeepInfra_StreamingSSE_DetectsMutation proves that frame reordering,
+// duplicate frames, single or triple newline separators, and trailing bytes
+// all fail the exact raw-byte SSE transcript comparison when they originate
+// from a fake upstream and pass through /v1/chat/completions before
+// downstream comparison. Each relayed mutation must differ byte-for-byte and
+// by SHA-256 from the canonical transcript, while the canonical relay remains
+// exact.
+func TestDeepInfra_StreamingSSE_DetectsMutation(t *testing.T) {
+	t.Setenv("DEEPINFRA_TOKEN", "deepinfra_key")
+
+	canonicalFrames := []string{
+		`data: {"id":"s1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"}}]}`,
+		`data: {"id":"s1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":" world"}}]}`,
+		`data: {"id":"s1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"service_tier":"default","usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
+		`data: [DONE]`,
+	}
+
+	// Compute the canonical transcript: each frame followed by \n\n.
+	var canonicalSSE strings.Builder
+	for _, f := range canonicalFrames {
+		canonicalSSE.WriteString(f)
+		canonicalSSE.WriteString("\n\n")
+	}
+	canonicalBytes := []byte(canonicalSSE.String())
+	canonicalHash := sha256.Sum256(canonicalBytes)
+
+	m := deepinfraModel("di-sse-mut", "meta-llama/Llama-3.3-70B-Instruct", nil)
+
+	// --- Canonical relay remains exact through /v1/chat/completions ---
+	// The canonical frames originate from a fake upstream and pass through the
+	// generic Chat proxy. The downstream SSE transcript must match the canonical
+	// bytes exactly (byte-for-byte and SHA-256).
+	ta := newDeepInfraTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		for _, frame := range canonicalFrames {
+			fmt.Fprintf(w, "%s\n\n", frame)
+			flusher.Flush()
+		}
+	}, m)
+
+	w := httptest.NewRecorder()
+	ta.engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"di-sse-mut","stream":true,"messages":[]}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("canonical relay: expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	relayHash := sha256.Sum256(w.Body.Bytes())
+	if relayHash != canonicalHash {
+		t.Errorf("canonical relay SHA-256 mismatch:\nwant=%s\ngot =%s",
+			hex.EncodeToString(canonicalHash[:]), hex.EncodeToString(relayHash[:]))
+	}
+	if !bytesEqual(w.Body.Bytes(), canonicalBytes) {
+		t.Errorf("canonical relay raw-byte mismatch:\nwant(hex)=%s\ngot (hex)=%s",
+			hex.EncodeToString(canonicalBytes), hex.EncodeToString(w.Body.Bytes()))
+	}
+
+	// --- Each mutation originates from a fake upstream, passes through
+	// /v1/chat/completions, and must differ from the canonical transcript ---
+	mutations := []struct {
+		name      string
+		writeFunc func(w http.ResponseWriter, flusher http.Flusher)
+	}{
+		{
+			name: "frame_reorder",
+			writeFunc: func(w http.ResponseWriter, flusher http.Flusher) {
+				reordered := []string{canonicalFrames[1], canonicalFrames[0], canonicalFrames[2], canonicalFrames[3]}
+				for _, f := range reordered {
+					fmt.Fprintf(w, "%s\n\n", f)
+					flusher.Flush()
+				}
+			},
+		},
+		{
+			name: "duplicate_frame",
+			writeFunc: func(w http.ResponseWriter, flusher http.Flusher) {
+				duped := []string{canonicalFrames[0], canonicalFrames[0], canonicalFrames[1], canonicalFrames[2], canonicalFrames[3]}
+				for _, f := range duped {
+					fmt.Fprintf(w, "%s\n\n", f)
+					flusher.Flush()
+				}
+			},
+		},
+		{
+			name: "single_newline_separator",
+			writeFunc: func(w http.ResponseWriter, flusher http.Flusher) {
+				for _, f := range canonicalFrames {
+					fmt.Fprintf(w, "%s\n", f) // single newline instead of \n\n
+					flusher.Flush()
+				}
+			},
+		},
+		{
+			name: "triple_newline_separator",
+			writeFunc: func(w http.ResponseWriter, flusher http.Flusher) {
+				for _, f := range canonicalFrames {
+					fmt.Fprintf(w, "%s\n\n\n", f) // triple newline instead of \n\n
+					flusher.Flush()
+				}
+			},
+		},
+		{
+			name: "extra_trailing_byte",
+			writeFunc: func(w http.ResponseWriter, flusher http.Flusher) {
+				for _, f := range canonicalFrames {
+					fmt.Fprintf(w, "%s\n\n", f)
+					flusher.Flush()
+				}
+				fmt.Fprint(w, " ") // extra trailing byte after [DONE]
+				flusher.Flush()
+			},
+		},
+	}
+
+	for _, mt := range mutations {
+		t.Run(mt.name, func(t *testing.T) {
+			ta := newDeepInfraTestAPI(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				mt.writeFunc(w, w.(http.Flusher))
+			}, m)
+
+			w := httptest.NewRecorder()
+			ta.engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+				strings.NewReader(`{"model":"di-sse-mut","stream":true,"messages":[]}`)))
+			if w.Code != http.StatusOK {
+				t.Fatalf("mutation %s: expected 200, got %d body=%s", mt.name, w.Code, w.Body.String())
+			}
+
+			mutHash := sha256.Sum256(w.Body.Bytes())
+			if mutHash == canonicalHash {
+				t.Errorf("mutation %q: relayed SSE produced the same SHA-256 as the canonical transcript; mutation not detected", mt.name)
+			}
+			if bytesEqual(w.Body.Bytes(), canonicalBytes) {
+				t.Errorf("mutation %q: relayed SSE is byte-identical to the canonical transcript; mutation not detected", mt.name)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // VAL-DEEPINFRA-010: DeepInfra tools and tool-result continuation are lossless.
 // ---------------------------------------------------------------------------
@@ -1040,7 +1181,7 @@ func TestDeepInfra_ContinuationNoDeepSeekReplay(t *testing.T) {
 		"model": "di-noreplay",
 		"messages": [
 			{"role":"user","content":"hi"},
-			{"role":"assistant","content":null,"reasoning_content":"prior reasoning","content":"response"}
+			{"role":"assistant","content":null,"reasoning_content":"prior reasoning"}
 		]
 	}`
 	w := httptest.NewRecorder()
@@ -1163,6 +1304,25 @@ func TestDeepInfra_StreamingReasoningDeltas(t *testing.T) {
 	// Reasoning and content are distinct lanes.
 	if strings.Index(out, "step 1") > strings.Index(out, "Here is the answer") {
 		t.Error("reasoning should precede content in ordered transcript")
+	}
+
+	// Byte-exact SSE transcript: the relayed stream must match the canonical
+	// frames byte-for-byte and by SHA-256.
+	var expectedSSE strings.Builder
+	for _, frame := range sseFrames {
+		expectedSSE.WriteString(frame)
+		expectedSSE.WriteString("\n\n")
+	}
+	expectedBytes := []byte(expectedSSE.String())
+	expectedHash := sha256.Sum256(expectedBytes)
+	relayHash := sha256.Sum256(w.Body.Bytes())
+	if relayHash != expectedHash {
+		t.Errorf("streamed reasoning SSE SHA-256 mismatch:\nwant=%s\ngot =%s",
+			hex.EncodeToString(expectedHash[:]), hex.EncodeToString(relayHash[:]))
+	}
+	if !bytesEqual(w.Body.Bytes(), expectedBytes) {
+		t.Errorf("streamed reasoning SSE raw-byte mismatch:\nwant(hex)=%s\ngot (hex)=%s",
+			hex.EncodeToString(expectedBytes), hex.EncodeToString(w.Body.Bytes()))
 	}
 }
 
