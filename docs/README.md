@@ -41,6 +41,7 @@ Each guide includes config, Factory settings, run commands, and a curl check.
 | Kimi | [examples/kimi.md](examples/kimi.md) | T2 |
 | Groq | [examples/groq.md](examples/groq.md) | T2 |
 | Fireworks | [examples/fireworks.md](examples/fireworks.md) | T2 |
+| Fireworks Fire Pass | [examples/fireworks-fire-pass.md](examples/fireworks-fire-pass.md) | T2 |
 | Z.AI | [examples/zai.md](examples/zai.md) | T2 |
 | Xiaomi MiMo | [examples/mimo.md](examples/mimo.md) | T2 |
 | Ollama | [examples/local-ollama.md](examples/local-ollama.md) | T2 |

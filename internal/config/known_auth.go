@@ -6,6 +6,27 @@ import (
 	"strings"
 )
 
+// DiscoveryPolicy controls how the TUI discovers available models for a
+// provider profile.
+type DiscoveryPolicy string
+
+const (
+	// DiscoveryRemote calls the configured model-list endpoint and falls back
+	// to manual entry. This is the default when the field is empty.
+	DiscoveryRemote DiscoveryPolicy = ""
+	// DiscoveryStatic presents curated catalog choices without a network call,
+	// always alongside manual entry.
+	DiscoveryStatic DiscoveryPolicy = "static"
+	// DiscoveryManual skips discovery and goes directly to manual entry.
+	DiscoveryManual DiscoveryPolicy = "manual"
+)
+
+// CatalogEntry is a curated model or router ID with an optional display label.
+type CatalogEntry struct {
+	ID    string
+	Label string
+}
+
 // KnownAuth describes a canonical provider's defaults: base URL, env var that
 // holds the API key, and the default upstream protocol it speaks. These are
 // used by config loading to fill in fields the user did not specify explicitly.
@@ -28,6 +49,11 @@ type KnownAuth struct {
 	AuthScheme string
 	// ExtraHeaders are appended to every outgoing request to this provider.
 	ExtraHeaders map[string]string
+	// DiscoveryPolicy controls TUI model discovery behavior for this profile.
+	// Empty means remote best-effort discovery (the default).
+	DiscoveryPolicy DiscoveryPolicy
+	// StaticModels is the curated catalog used when DiscoveryPolicy is static.
+	StaticModels []CatalogEntry
 }
 
 // knownAuthRegistry holds canonical defaults for providers droid-proxy ships
@@ -71,6 +97,13 @@ var knownAuthRegistry = map[string]KnownAuth{
 	"fireworks": {
 		Name: "fireworks", BaseURL: "https://api.fireworks.ai/inference/v1",
 		APIKeyEnv: "FIREWORKS_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
+	},
+	"fireworks-fire-pass": {
+		Name: "fireworks-fire-pass", BaseURL: "https://api.fireworks.ai/inference/v1",
+		APIKeyEnv:        "FIREWORKS_FIRE_PASS_API_KEY",
+		UpstreamProtocol: UpstreamOpenAIChat,
+		DiscoveryPolicy:  DiscoveryStatic,
+		StaticModels:     fireworksFirePassCatalog(),
 	},
 	"zai": {
 		Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4",
@@ -136,6 +169,7 @@ var knownAuthLabels = map[string]string{
 	"kimi":                "Kimi (Moonshot)",
 	"groq":                "Groq",
 	"fireworks":           "Fireworks AI",
+	"fireworks-fire-pass": "Fireworks AI (Fire Pass)",
 	"zai":                 "Z.AI (main, legacy alias)",
 	"zai-main-api":        "Z.AI (main API)",
 	"zai-coding-api":      "Z.AI (GLM Coding Plan)",

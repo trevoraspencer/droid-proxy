@@ -16,6 +16,8 @@ func (m model) View() string {
 		return m.viewAddProvider()
 	case screenAddKey:
 		return m.viewAddKey()
+	case screenServingPath:
+		return m.viewServingPath()
 	case screenDiscover:
 		return m.viewDiscover()
 	case screenPickModel:
@@ -159,6 +161,23 @@ func (m model) viewDiscover() string {
 	return b.String()
 }
 
+func (m model) viewServingPath() string {
+	var b strings.Builder
+	b.WriteString(m.header(m.sel.label + " — choose a serving path"))
+	paths := fireworksServingPaths()
+	for i, p := range paths {
+		cursor := "  "
+		label := p.label + "  " + subtleStyle.Render(p.desc)
+		if i == m.provCursor {
+			cursor = cursorStyle.Render("> ")
+			label = selectedStyle.Render(p.label) + "  " + subtleStyle.Render(p.desc)
+		}
+		b.WriteString(fmt.Sprintf("%s%s\n", cursor, label))
+	}
+	b.WriteString("\n" + helpStyle.Render("enter select  ↑/↓ move  esc back"))
+	return b.String()
+}
+
 func (m model) viewPickModel() string {
 	var b strings.Builder
 	b.WriteString(m.header("Choose a model from " + m.sel.label))
@@ -182,6 +201,9 @@ func (m model) viewPickModel() string {
 func (m model) viewForm() string {
 	var b strings.Builder
 	b.WriteString(m.header("New model — " + m.sel.label))
+	if m.discoverFeedback != "" {
+		b.WriteString(warnStyle.Render(m.discoverFeedback) + "\n\n")
+	}
 	for i, f := range m.form {
 		marker := "  "
 		label := f.label

@@ -47,6 +47,19 @@ func TestRedact(t *testing.T) {
 			in:      "got sk-abcdefghijklmnopqrst in body",
 			mustNot: "sk-abcdefghijklmnopqrst",
 		},
+		// Fireworks credential shapes (fw_ and fpk_) must be redacted in
+		// Authorization: Bearer context. The proxy does not route by prefix,
+		// but redaction must recognize both shapes as opaque secrets.
+		{
+			name:    "fireworks standard fw_ bearer",
+			in:      "Authorization: Bearer fw_standard_secret_123",
+			mustNot: "fw_standard_secret_123",
+		},
+		{
+			name:    "fireworks fire pass fpk_ bearer",
+			in:      "Authorization: Bearer fpk_firepass_secret_456",
+			mustNot: "fpk_firepass_secret_456",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

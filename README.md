@@ -210,7 +210,7 @@ Complete docs start at [docs/README.md](docs/README.md).
 | Smoke tests | [docs/SMOKE.md](docs/SMOKE.md) |
 | Examples | [docs/examples/](docs/examples/) |
 
-Provider walkthroughs: [DeepSeek](docs/examples/deepseek.md), [OpenAI](docs/examples/openai.md), [Anthropic](docs/examples/anthropic.md), [MiMo](docs/examples/mimo.md), [Ollama](docs/examples/local-ollama.md), [vLLM](docs/examples/local-vllm.md), [xAI](docs/examples/xai.md), [Kimi](docs/examples/kimi.md), [Groq](docs/examples/groq.md), [Fireworks](docs/examples/fireworks.md), [Z.AI](docs/examples/zai.md), [Codex OAuth](docs/examples/codex-oauth.md), and [xAI OAuth](docs/examples/xai-oauth.md).
+Provider walkthroughs: [DeepSeek](docs/examples/deepseek.md), [OpenAI](docs/examples/openai.md), [Anthropic](docs/examples/anthropic.md), [MiMo](docs/examples/mimo.md), [Ollama](docs/examples/local-ollama.md), [vLLM](docs/examples/local-vllm.md), [xAI](docs/examples/xai.md), [Kimi](docs/examples/kimi.md), [Groq](docs/examples/groq.md), [Fireworks](docs/examples/fireworks.md), [Fireworks Fire Pass](docs/examples/fireworks-fire-pass.md), [Z.AI](docs/examples/zai.md), [Codex OAuth](docs/examples/codex-oauth.md), and [xAI OAuth](docs/examples/xai-oauth.md).
 
 ## Configuration Notes
 

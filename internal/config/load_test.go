@@ -263,10 +263,21 @@ models:
 	}
 }
 
-func TestLoad_NormalizesServiceTierFastExtraArg(t *testing.T) {
+func TestLoad_PreservesServiceTierValuesExactly(t *testing.T) {
+	// The global config-load path must NOT rewrite service_tier values. Only the
+	// Codex Responses preparation path normalizes legacy "fast" to "priority".
+	// This test verifies that arbitrary service_tier values survive config load
+	// unchanged, including "fast", "priority", and non-string types.
 	in := `
 models:
   - alias: fast-tier
+    factory_provider: openai
+    upstream_protocol: openai-responses
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: TEST_KEY
+    extra_args:
+      service_tier: fast
+  - alias: fast-spaced
     factory_provider: openai
     upstream_protocol: openai-responses
     base_url: http://127.0.0.1:1/v1
@@ -292,13 +303,16 @@ models:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := cfg.Models[0].ExtraArgs["service_tier"]; got != "priority" {
-		t.Fatalf("fast service_tier = %#v, want priority", got)
+	if got := cfg.Models[0].ExtraArgs["service_tier"]; got != "fast" {
+		t.Fatalf("fast service_tier = %#v, want \"fast\" (global load must not rewrite)", got)
 	}
-	if got := cfg.Models[1].ExtraArgs["service_tier"]; got != "priority" {
+	if got := cfg.Models[1].ExtraArgs["service_tier"]; got != " Fast " {
+		t.Fatalf("spaced service_tier = %#v, want \" Fast \" unchanged", got)
+	}
+	if got := cfg.Models[2].ExtraArgs["service_tier"]; got != "priority" {
 		t.Fatalf("priority service_tier = %#v, want unchanged priority", got)
 	}
-	if got := cfg.Models[2].ExtraArgs["service_tier"]; got != 7 {
+	if got := cfg.Models[3].ExtraArgs["service_tier"]; got != 7 {
 		t.Fatalf("numeric service_tier = %#v, want unchanged 7", got)
 	}
 }
