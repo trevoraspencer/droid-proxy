@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -42,6 +43,10 @@ func (s Sample) ok() bool { return s.Err == "" && s.Status >= 200 && s.Status < 
 // per target keeps connection reuse comparable across targets.
 func NewHTTPClient() *http.Client {
 	transport := &http.Transport{
+		// Honor HTTPS_PROXY etc. like droid-proxy's own upstream client does,
+		// so the direct baseline and the proxy target take the same network
+		// path in proxied environments.
+		Proxy:               http.ProxyFromEnvironment,
 		MaxIdleConns:        256,
 		MaxIdleConnsPerHost: 64,
 		IdleConnTimeout:     90 * time.Second,
@@ -120,13 +125,17 @@ func readNonStream(resp *http.Response, p Protocol, start time.Time, s *Sample) 
 }
 
 // readStream consumes an SSE response line by line, timing the first content
-// token and inter-chunk gaps, and extracting usage from terminal events.
+// token and inter-chunk gaps, and extracting usage from terminal events. A
+// read error or a stream that ends without its protocol terminal event marks
+// the sample failed — truncated streams must not count as valid samples.
 func readStream(resp *http.Response, p Protocol, start time.Time, s *Sample) {
 	reader := bufio.NewReaderSize(resp.Body, 64*1024)
 	var (
-		lastChunk time.Time
-		gapSum    time.Duration
-		gapCount  int64
+		lastChunk   time.Time
+		gapSum      time.Duration
+		gapCount    int64
+		readErr     error
+		sawTerminal bool
 	)
 	for {
 		line, err := reader.ReadBytes('\n')
@@ -134,7 +143,11 @@ func readStream(resp *http.Response, p Protocol, start time.Time, s *Sample) {
 		trimmed := bytes.TrimSpace(line)
 		if len(trimmed) > 0 && bytes.HasPrefix(trimmed, []byte("data:")) {
 			data := bytes.TrimSpace(trimmed[len("data:"):])
-			if !bytes.Equal(data, []byte("[DONE]")) {
+			if bytes.Equal(data, []byte("[DONE]")) {
+				if p == ProtocolOpenAIChat {
+					sawTerminal = true
+				}
+			} else {
 				if isContentDelta(data, p) {
 					now := time.Now()
 					if s.Chunks == 0 {
@@ -150,10 +163,16 @@ func readStream(resp *http.Response, p Protocol, start time.Time, s *Sample) {
 					lastChunk = now
 					s.Chunks++
 				}
+				if isTerminalEvent(data, p) {
+					sawTerminal = true
+				}
 				mergeStreamUsage(data, p, &s.Usage)
 			}
 		}
 		if err != nil {
+			if err != io.EOF {
+				readErr = err
+			}
 			break
 		}
 	}
@@ -161,6 +180,28 @@ func readStream(resp *http.Response, p Protocol, start time.Time, s *Sample) {
 	if gapCount > 0 {
 		s.MeanGap = time.Duration(int64(gapSum) / gapCount)
 	}
+	if s.Err == "" {
+		if readErr != nil {
+			s.Err = "stream read: " + readErr.Error()
+		} else if !sawTerminal {
+			s.Err = "stream ended before terminal event"
+		}
+	}
+}
+
+// isTerminalEvent reports whether an SSE data payload is the protocol's
+// end-of-stream marker (the chat [DONE] sentinel is handled by the caller).
+func isTerminalEvent(data []byte, p Protocol) bool {
+	switch p {
+	case ProtocolAnthropicMessages:
+		return gjson.GetBytes(data, "type").String() == "message_stop"
+	case ProtocolOpenAIResponses:
+		switch gjson.GetBytes(data, "type").String() {
+		case "response.completed", "response.failed", "response.incomplete", "error":
+			return true
+		}
+	}
+	return false
 }
 
 // isContentDelta reports whether an SSE data payload carries assistant content.

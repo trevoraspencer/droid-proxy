@@ -18,6 +18,7 @@ type chatStreamChunk struct {
 	ID      string             `json:"id"`
 	Model   string             `json:"model"`
 	Choices []chatStreamChoice `json:"choices"`
+	Usage   map[string]any     `json:"usage"`
 }
 
 type chatStreamChoice struct {
@@ -84,6 +85,7 @@ type responsesStreamState struct {
 	tools       map[int]*responsesStreamTool
 	toolOffset  int
 	finished    bool
+	usage       map[string]any
 	err         error
 }
 
@@ -104,11 +106,14 @@ func (s *responsesStreamState) observe(ev chatStreamChunk) error {
 	if len(ev.Choices) > 1 {
 		return errors.New("Chat stream contains multiple choices, which this translator does not merge")
 	}
+	if ev.Usage != nil {
+		s.usage = ev.Usage
+	}
 	if len(ev.Choices) == 0 {
 		// Tolerate zero-choice chunks: Azure OpenAI emits a leading
 		// prompt-filter-results chunk with empty choices, and
 		// stream_options.include_usage makes the final usage chunk carry no
-		// choices. Neither carries content, so skip them.
+		// choices. Their usage (captured above) is the only content they have.
 		return nil
 	}
 	ch := ev.Choices[0]
@@ -216,7 +221,11 @@ func (s *responsesStreamState) complete() error {
 		}
 		output = append(output, toolItem)
 	}
-	return writeSSETo(s.w, "response.completed", map[string]any{"type": "response.completed", "response": map[string]any{"id": s.respID, "object": "response", "status": "completed", "model": s.model, "output": output}})
+	response := map[string]any{"id": s.respID, "object": "response", "status": "completed", "model": s.model, "output": output}
+	if u, ok := chatUsageToResponsesUsage(s.usage); ok && len(u) > 0 {
+		response["usage"] = u
+	}
+	return writeSSETo(s.w, "response.completed", map[string]any{"type": "response.completed", "response": response})
 }
 
 func ChatStreamToAnthropicSSE(r io.Reader, model string) ([]byte, error) {
@@ -265,6 +274,7 @@ type anthropicStreamState struct {
 	toolOffset int
 	finished   bool
 	stopReason string
+	usage      map[string]any
 	err        error
 }
 
@@ -278,11 +288,14 @@ func (s *anthropicStreamState) observe(ev chatStreamChunk) error {
 	if len(ev.Choices) > 1 {
 		return errors.New("Chat stream contains multiple choices, which this translator does not merge")
 	}
+	if ev.Usage != nil {
+		s.usage = ev.Usage
+	}
 	if len(ev.Choices) == 0 {
 		// Tolerate zero-choice chunks: Azure OpenAI emits a leading
 		// prompt-filter-results chunk with empty choices, and
 		// stream_options.include_usage makes the final usage chunk carry no
-		// choices. Neither carries content, so skip them.
+		// choices. Their usage (captured above) is the only content they have.
 		return nil
 	}
 	ch := ev.Choices[0]
@@ -353,7 +366,13 @@ func (s *anthropicStreamState) complete() error {
 		}
 		s.stopReason = "tool_use"
 	}
-	if err := writeSSETo(s.w, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": s.stopReason, "stop_sequence": nil}}); err != nil {
+	deltaEvent := map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": s.stopReason, "stop_sequence": nil}}
+	// Relay upstream usage (captured from the include_usage final chunk) so
+	// token and cache accounting stays observable through the translation.
+	if u, ok := chatUsageToAnthropicUsage(s.usage); ok && len(u) > 0 {
+		deltaEvent["usage"] = u
+	}
+	if err := writeSSETo(s.w, "message_delta", deltaEvent); err != nil {
 		return err
 	}
 	return writeSSETo(s.w, "message_stop", map[string]any{"type": "message_stop"})

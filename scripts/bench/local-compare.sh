@@ -108,6 +108,13 @@ targets:
     model: bench-chat
     model_by_protocol:
       anthropic-messages: bench-anthropic
+  # Same anthropic client workload, but translated to an openai-chat upstream;
+  # only serves anthropic scenarios (no model for the chat protocol), so its
+  # rows show the translation tax as a paired delta vs the same baseline.
+  - name: droid-proxy-xlat
+    base_url: http://$PROXY_ADDR
+    model_by_protocol:
+      anthropic-messages: bench-anthropic-xlat
 
 scenarios:
   - name: chat-small-nonstream
@@ -173,32 +180,6 @@ info "running benchmark scenarios (results in $OUT_DIR/)"
   --json "$OUT_DIR/local-compare.json" \
   --md "$OUT_DIR/local-compare.md" \
   | tee "$OUT_DIR/local-compare.txt"
-
-# Translated path measured separately: same anthropic client workload, but the
-# proxy translates to openai-chat upstream. Compare against droid-proxy's
-# native anthropic row above to see the translation tax.
-cat >"$WORK_DIR/bench-xlat.yaml" <<EOF
-targets:
-  - name: droid-proxy-xlat
-    base_url: http://$PROXY_ADDR
-    model: bench-anthropic-xlat
-scenarios:
-  - name: anthropic-translated-stream
-    protocol: anthropic-messages
-    stream: true
-    requests: $STREAM_REQS
-    warmup: 2
-    system_prompt_bytes: 16384
-    user_message_bytes: 1024
-    history_turns: 8
-    include_tools: true
-    cache_control: true
-EOF
-"$WORK_DIR/droid-bench" run \
-  --config "$WORK_DIR/bench-xlat.yaml" \
-  --json "$OUT_DIR/local-compare-xlat.json" \
-  --md "$OUT_DIR/local-compare-xlat.md" \
-  | tee -a "$OUT_DIR/local-compare.txt"
 
 info "running prompt-cache fidelity checks"
 "$WORK_DIR/droid-bench" cache-check \

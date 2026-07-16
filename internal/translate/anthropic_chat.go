@@ -60,10 +60,7 @@ func AnthropicToChatRequest(body []byte, upstreamModel string, extraArgs map[str
 		}
 		out["tool_choice"] = chatChoice
 	}
-	for k, v := range extraArgs {
-		out[k] = v
-	}
-	return json.Marshal(out)
+	return marshalWithExtraArgs(out, extraArgs)
 }
 
 func anthropicMessagesToChatMessages(in map[string]any) ([]any, error) {
@@ -445,5 +442,21 @@ func chatUsageToAnthropicUsage(raw any) (map[string]any, bool) {
 	if v, ok := u["completion_tokens"]; ok {
 		out["output_tokens"] = v
 	}
+	// Relay provider prompt-cache accounting so cache behavior stays
+	// observable through the translation (OpenAI reports cached prompt
+	// tokens in prompt_tokens_details.cached_tokens).
+	if v, ok := chatCachedTokens(u); ok {
+		out["cache_read_input_tokens"] = v
+	}
 	return out, true
+}
+
+// chatCachedTokens extracts usage.prompt_tokens_details.cached_tokens.
+func chatCachedTokens(u map[string]any) (any, bool) {
+	details, ok := u["prompt_tokens_details"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	v, ok := details["cached_tokens"]
+	return v, ok
 }

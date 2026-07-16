@@ -7,7 +7,10 @@ import (
 )
 
 // filler produces deterministic prose of approximately n bytes, salted so
-// different slots never collide byte-for-byte.
+// different slots never collide byte-for-byte. The salt (which carries the
+// uniqueness nonce) is never truncated — the result may exceed n when n is
+// smaller than the salt, because losing the nonce would silently defeat
+// unique_prompts.
 func filler(n int, salt string) string {
 	if n <= 0 {
 		return ""
@@ -17,6 +20,9 @@ func filler(n int, salt string) string {
 	var b strings.Builder
 	b.WriteString(salt)
 	b.WriteString(": ")
+	if n < b.Len() {
+		n = b.Len()
+	}
 	for b.Len() < n {
 		b.WriteString(words)
 	}

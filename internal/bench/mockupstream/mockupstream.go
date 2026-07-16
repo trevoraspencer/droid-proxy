@@ -38,6 +38,10 @@ type Options struct {
 	SimulatePromptCache bool
 }
 
+// maxPrefixEntries bounds the simulated prompt-cache map in a long-lived
+// mock process.
+const maxPrefixEntries = 100_000
+
 func (o Options) withDefaults() Options {
 	if o.StreamChunks <= 0 {
 		o.StreamChunks = 40
@@ -168,7 +172,11 @@ func (s *Server) capture(r *http.Request, body []byte) {
 		ReceivedAt: time.Now(),
 	})
 	if len(s.captures) > s.opts.CaptureLimit {
-		s.captures = s.captures[len(s.captures)-s.opts.CaptureLimit:]
+		// Copy into a fresh slice so evicted bodies actually become
+		// collectable instead of staying pinned by the old backing array.
+		trimmed := make([]CapturedRequest, s.opts.CaptureLimit)
+		copy(trimmed, s.captures[len(s.captures)-s.opts.CaptureLimit:])
+		s.captures = trimmed
 	}
 	s.mu.Unlock()
 }
@@ -221,6 +229,11 @@ func (s *Server) usageFor(body []byte, prefixRaws []string) Usage {
 			u.CachedTokens = cached
 			break
 		}
+	}
+	// Bound the simulated cache so a long-lived mock process cannot grow
+	// without limit; a full reset mimics a provider cache eviction.
+	if len(s.prefixes) > maxPrefixEntries {
+		s.prefixes = map[string]int{}
 	}
 	for i, key := range chain {
 		if _, ok := s.prefixes[key]; !ok {

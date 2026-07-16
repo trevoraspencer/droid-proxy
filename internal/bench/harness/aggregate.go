@@ -44,8 +44,10 @@ type RepAggregate struct {
 	Scenario string `json:"scenario"`
 	Target   string `json:"target"`
 	Baseline bool   `json:"baseline"`
-	Reps     int    `json:"reps"`
-	Errors   int    `json:"errors"`
+	// Skipped carries the skip reason when the target never ran this scenario.
+	Skipped string `json:"skipped,omitempty"`
+	Reps    int    `json:"reps"`
+	Errors  int    `json:"errors"`
 
 	TTFBp50ms  MeanSD `json:"ttfb_p50_ms"`
 	TTFTp50ms  MeanSD `json:"ttft_p50_ms"`
@@ -66,15 +68,12 @@ func Aggregate(summaries []Summary) []RepAggregate {
 	var order []cellKey
 	baselines := map[string]map[int]Summary{} // scenario → rep → baseline summary
 	for _, s := range summaries {
-		if s.Skipped != "" {
-			continue
-		}
 		k := cellKey{s.Scenario, s.Target}
 		if _, ok := cells[k]; !ok {
 			order = append(order, k)
 		}
 		cells[k] = append(cells[k], s)
-		if s.Baseline {
+		if s.Baseline && s.Skipped == "" {
 			if baselines[s.Scenario] == nil {
 				baselines[s.Scenario] = map[int]Summary{}
 			}
@@ -86,13 +85,24 @@ func Aggregate(summaries []Summary) []RepAggregate {
 	var out []RepAggregate
 	for _, k := range order {
 		group := cells[k]
-		agg := RepAggregate{Scenario: k.scenario, Target: k.target, Baseline: group[0].Baseline, Reps: len(group)}
+		agg := RepAggregate{Scenario: k.scenario, Target: k.target, Baseline: group[0].Baseline}
 		var ttfb, ttft, total []float64
 		var dTTFB, dTTFT, dTotal []float64
 		for _, s := range group {
+			if s.Skipped != "" {
+				agg.Skipped = s.Skipped
+				continue
+			}
+			agg.Reps++
 			agg.Errors += s.Errors
-			ttfb = append(ttfb, ms(s.TTFBp50))
-			total = append(total, ms(s.Totalp50))
+			// An all-error rep has zero percentiles; keep it out of the
+			// latency means (its errors are already counted above).
+			if s.TTFBp50 > 0 {
+				ttfb = append(ttfb, ms(s.TTFBp50))
+			}
+			if s.Totalp50 > 0 {
+				total = append(total, ms(s.Totalp50))
+			}
 			if s.TTFTp50 > 0 {
 				ttft = append(ttft, ms(s.TTFTp50))
 			}
@@ -131,14 +141,14 @@ func pairedDelta(v, base time.Duration) (float64, bool) {
 	return 100 * (float64(v) - float64(base)) / float64(base), true
 }
 
-func fmtMeanSD(m MeanSD, unit string) string {
+func fmtMeanSD(m MeanSD) string {
 	if m.N == 0 {
 		return "-"
 	}
 	if m.N < 2 {
-		return fmt.Sprintf("%.2f%s", m.Mean, unit)
+		return fmt.Sprintf("%.2f", m.Mean)
 	}
-	return fmt.Sprintf("%.2f±%.2f%s", m.Mean, m.SD, unit)
+	return fmt.Sprintf("%.2f±%.2f", m.Mean, m.SD)
 }
 
 // writeAggregates renders the cross-rep table grouped by scenario.
@@ -147,18 +157,22 @@ func writeAggregates(w io.Writer, aggs []RepAggregate) {
 	for _, a := range aggs {
 		if a.Scenario != scenario {
 			scenario = a.Scenario
-			fmt.Fprintf(w, "\n=== scenario: %s (per-rep p50, mean±sd over %d interleaved reps; deltas paired per rep) ===\n", scenario, a.Reps)
-			fmt.Fprintf(w, "%-22s %4s %16s %16s %16s %14s %14s %14s\n",
-				"target", "err", "ttfb p50 ms", "ttft p50 ms", "total p50 ms", "Δttfb %", "Δttft %", "Δtotal %")
+			fmt.Fprintf(w, "\n=== scenario: %s (per-rep p50, mean±sd over interleaved reps; deltas paired per rep) ===\n", scenario)
+			fmt.Fprintf(w, "%-22s %4s %4s %16s %16s %16s %14s %14s %14s\n",
+				"target", "reps", "err", "ttfb p50 ms", "ttft p50 ms", "total p50 ms", "Δttfb %", "Δttft %", "Δtotal %")
+		}
+		if a.Reps == 0 && a.Skipped != "" {
+			fmt.Fprintf(w, "%-22s SKIPPED: %s\n", a.Target, a.Skipped)
+			continue
 		}
 		mark := ""
 		if a.Baseline {
 			mark = " (baseline)"
 		}
-		fmt.Fprintf(w, "%-22s %4d %16s %16s %16s %14s %14s %14s\n",
-			a.Target+mark, a.Errors,
-			fmtMeanSD(a.TTFBp50ms, ""), fmtMeanSD(a.TTFTp50ms, ""), fmtMeanSD(a.Totalp50ms, ""),
-			fmtMeanSD(a.TTFBDeltaPct, ""), fmtMeanSD(a.TTFTDeltaPct, ""), fmtMeanSD(a.TotalDeltaPct, ""))
+		fmt.Fprintf(w, "%-22s %4d %4d %16s %16s %16s %14s %14s %14s\n",
+			a.Target+mark, a.Reps, a.Errors,
+			fmtMeanSD(a.TTFBp50ms), fmtMeanSD(a.TTFTp50ms), fmtMeanSD(a.Totalp50ms),
+			fmtMeanSD(a.TTFBDeltaPct), fmtMeanSD(a.TTFTDeltaPct), fmtMeanSD(a.TotalDeltaPct))
 	}
 	fmt.Fprintln(w)
 }
@@ -169,17 +183,21 @@ func writeAggregatesMarkdown(w io.Writer, aggs []RepAggregate) {
 	for _, a := range aggs {
 		if a.Scenario != scenario {
 			scenario = a.Scenario
-			fmt.Fprintf(w, "\n## %s (mean±sd over %d interleaved reps)\n\n", scenario, a.Reps)
-			fmt.Fprintln(w, "| target | err | ttfb p50 (ms) | ttft p50 (ms) | total p50 (ms) | Δttfb % | Δttft % | Δtotal % |")
-			fmt.Fprintln(w, "|---|---|---|---|---|---|---|---|")
+			fmt.Fprintf(w, "\n## %s (mean±sd over interleaved reps)\n\n", scenario)
+			fmt.Fprintln(w, "| target | reps | err | ttfb p50 (ms) | ttft p50 (ms) | total p50 (ms) | Δttfb % | Δttft % | Δtotal % |")
+			fmt.Fprintln(w, "|---|---|---|---|---|---|---|---|---|")
+		}
+		if a.Reps == 0 && a.Skipped != "" {
+			fmt.Fprintf(w, "| %s | - | - | - | - | - | - | - | skipped: %s |\n", a.Target, a.Skipped)
+			continue
 		}
 		name := a.Target
 		if a.Baseline {
 			name += " *(baseline)*"
 		}
-		fmt.Fprintf(w, "| %s | %d | %s | %s | %s | %s | %s | %s |\n",
-			name, a.Errors,
-			fmtMeanSD(a.TTFBp50ms, ""), fmtMeanSD(a.TTFTp50ms, ""), fmtMeanSD(a.Totalp50ms, ""),
-			fmtMeanSD(a.TTFBDeltaPct, ""), fmtMeanSD(a.TTFTDeltaPct, ""), fmtMeanSD(a.TotalDeltaPct, ""))
+		fmt.Fprintf(w, "| %s | %d | %d | %s | %s | %s | %s | %s | %s |\n",
+			name, a.Reps, a.Errors,
+			fmtMeanSD(a.TTFBp50ms), fmtMeanSD(a.TTFTp50ms), fmtMeanSD(a.Totalp50ms),
+			fmtMeanSD(a.TTFBDeltaPct), fmtMeanSD(a.TTFTDeltaPct), fmtMeanSD(a.TotalDeltaPct))
 	}
 }

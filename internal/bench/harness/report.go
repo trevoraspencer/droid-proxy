@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -98,8 +99,9 @@ func percentiles(d []time.Duration) (p50, p95, p99 time.Duration) {
 	}
 	sorted := append([]time.Duration(nil), d...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	// Nearest-rank: index ceil(p·n)−1.
 	at := func(p float64) time.Duration {
-		idx := int(p*float64(len(sorted))) - 1
+		idx := int(math.Ceil(p*float64(len(sorted)))) - 1
 		if idx < 0 {
 			idx = 0
 		}
@@ -159,10 +161,10 @@ func fmtDur(d time.Duration) string {
 
 // deltaPct formats the relative slowdown of v against baseline b.
 func deltaPct(v, b time.Duration) string {
-	if b <= 0 || v <= 0 {
+	pct, ok := pairedDelta(v, b)
+	if !ok {
 		return ""
 	}
-	pct := 100 * (float64(v) - float64(b)) / float64(b)
 	return fmt.Sprintf("%+.1f%%", pct)
 }
 

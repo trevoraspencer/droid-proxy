@@ -57,10 +57,10 @@ func (r *Runner) Run(ctx context.Context) ([]Result, error) {
 				if ctx.Err() != nil {
 					return results, ctx.Err()
 				}
-				if !t.speaks(sc.Protocol) || t.modelFor(sc.Protocol) == "" {
+				if t.modelFor(sc.Protocol) == "" {
 					results = append(results, Result{
 						Target: t.Name, Scenario: sc.Name, Baseline: t.Baseline, Rep: rep,
-						Skipped: "target does not serve protocol " + string(sc.Protocol),
+						Skipped: "target has no model for protocol " + string(sc.Protocol),
 						Started: time.Now(),
 					})
 					continue
@@ -81,15 +81,22 @@ func runCell(ctx context.Context, t Target, sc Scenario) Result {
 	res := Result{Target: t.Name, Scenario: sc.Name, Baseline: t.Baseline, Started: time.Now()}
 	model := t.modelFor(sc.Protocol)
 
-	// Warmup establishes connections and, for cache scenarios, primes provider
-	// caches. Warmup samples are discarded.
-	for i := 0; i < sc.Warmup; i++ {
+	// Build every body (warmup + measured) before the clock starts so JSON
+	// construction time is never charged to the measured wall time.
+	bodies := make([][]byte, sc.Warmup+sc.Requests)
+	for i := range bodies {
 		body, err := bodyForRequest(sc, model, i)
 		if err != nil {
 			res.Samples = append(res.Samples, Sample{Err: "build body: " + err.Error()})
 			return res
 		}
-		_ = runOne(ctx, client, t, sc, body)
+		bodies[i] = body
+	}
+
+	// Warmup establishes connections and, for cache scenarios, primes provider
+	// caches. Warmup samples are discarded.
+	for i := 0; i < sc.Warmup; i++ {
+		_ = runOne(ctx, client, t, sc, bodies[i])
 	}
 
 	type job struct {
@@ -110,12 +117,7 @@ func runCell(ctx context.Context, t Target, sc Scenario) Result {
 		}()
 	}
 	for i := 0; i < sc.Requests; i++ {
-		body, err := bodyForRequest(sc, model, sc.Warmup+i)
-		if err != nil {
-			samples[i] = Sample{Err: "build body: " + err.Error()}
-			continue
-		}
-		jobs <- job{idx: i, body: body}
+		jobs <- job{idx: i, body: bodies[sc.Warmup+i]}
 	}
 	close(jobs)
 	wg.Wait()

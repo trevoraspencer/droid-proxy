@@ -90,12 +90,13 @@ func Run(ctx context.Context, opts Options) ([]CheckResult, error) {
 	if opts.AnthropicModel != "" {
 		r.checkAnthropicCacheControl(ctx)
 		r.checkPrefixStability(ctx, "anthropic-native", "/v1/messages", opts.AnthropicModel, buildAnthropicTurn)
-		r.checkAnthropicUsagePassthrough(ctx)
+		r.checkAnthropicUsagePassthrough(ctx, "anthropic-usage-passthrough", opts.AnthropicModel)
 		r.checkAnthropicStreamIntegrity(ctx)
 	}
 	if opts.AnthropicTranslatedModel != "" {
 		r.checkPrefixStability(ctx, "anthropic-translated", "/v1/messages", opts.AnthropicTranslatedModel, buildAnthropicTurn)
 		r.checkTranslatedDeterminism(ctx)
+		r.checkAnthropicUsagePassthrough(ctx, "anthropic-translated-usage-passthrough", opts.AnthropicTranslatedModel)
 	}
 	return r.results, nil
 }
@@ -201,6 +202,10 @@ func (r *runner) oneUpstream(ctx context.Context, path string, body []byte, stre
 		return mockupstream.CapturedRequest{}, nil, err
 	}
 	if status != http.StatusOK {
+		// The proxy may have forwarded upstream before failing; consume any
+		// capture so lastSeq stays in sync and the next check is not blamed
+		// for this request's leftovers.
+		_, _ = r.captured(ctx)
 		return mockupstream.CapturedRequest{}, nil, fmt.Errorf("proxy returned %d: %s", status, truncate(respBody, 300))
 	}
 	caps, err := r.captured(ctx)
@@ -263,8 +268,14 @@ func buildAnthropicTurn(model string, turns int, stream bool) []byte {
 			}},
 		)
 	}
+	// cache_control on both the system block and the final user block mirrors
+	// how Droid places breakpoints, so passthrough is verified at message
+	// level too, not just on system.
 	messages = append(messages, map[string]any{"role": "user", "content": []any{
-		map[string]any{"type": "text", "text": "final: run the tests and summarize failures"},
+		map[string]any{
+			"type": "text", "text": "final: run the tests and summarize failures",
+			"cache_control": map[string]any{"type": "ephemeral"},
+		},
 	}})
 	body := map[string]any{
 		"model": model,
@@ -392,7 +403,12 @@ func (r *runner) checkAnthropicCacheControl(ctx context.Context) {
 		r.add(name, false, "system block bytes changed through the proxy")
 		return
 	}
-	r.add(name, true, "cache_control and system block bytes preserved through native passthrough")
+	lastBlock := fmt.Sprintf("messages.%d.content.0.cache_control", len(gjson.GetBytes(body, "messages").Array())-1)
+	if want, got := gjson.GetBytes(body, lastBlock).Raw, gjson.GetBytes(capture.Body, lastBlock).Raw; want == "" || want != got {
+		r.add(name, false, fmt.Sprintf("message-level cache_control changed upstream: want %s, got %s", want, truncate([]byte(got), 80)))
+		return
+	}
+	r.add(name, true, "cache_control preserved on system and message blocks through native passthrough")
 }
 
 // checkPrefixStability: as a conversation grows, the serialized form of
@@ -468,10 +484,11 @@ func (r *runner) checkChatUsagePassthrough(ctx context.Context) {
 }
 
 // checkAnthropicUsagePassthrough mirrors the chat usage check for the
-// Anthropic cache counters.
-func (r *runner) checkAnthropicUsagePassthrough(ctx context.Context) {
-	const name = "anthropic-usage-passthrough"
-	body := buildAnthropicTurn(r.opts.AnthropicModel, 2, false)
+// Anthropic cache counters. It runs on both the native and translated paths:
+// cache accounting that goes dark in translation is precisely the regression
+// it exists to catch.
+func (r *runner) checkAnthropicUsagePassthrough(ctx context.Context, name, model string) {
+	body := buildAnthropicTurn(model, 2, false)
 	if _, _, err := r.oneUpstream(ctx, "/v1/messages", body, false); err != nil {
 		r.add(name, false, err.Error())
 		return

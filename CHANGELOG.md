@@ -49,6 +49,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   prompt caching is enabled, and OpenAI-style upstreams cache prompt prefixes
   implicitly, so dropping the hint is the safe mapping. Translated Anthropic
   aliases now work with Droid prompt caching turned on.
+- Translated responses relay prompt-cache accounting: OpenAI
+  `prompt_tokens_details.cached_tokens` maps to Anthropic
+  `cache_read_input_tokens` (and to Responses `input_tokens_details`), and
+  translated streams now carry usage in `message_delta` /
+  `response.completed`, so cache behavior stays observable in Droid on
+  translated aliases.
+- The Responses→chat translation forwards `prompt_cache_key`, preserving
+  provider cache routing.
+- Translated routes apply `extra_args` with the same sjson-path semantics as
+  native routes (dotted keys nest; sorted, deterministic application), so one
+  model config produces the same upstream shape on every route.
 - With the per-user service installed, `droid-proxy stop` now stops through
   the service manager (`launchctl bootout` / `systemctl --user stop`) so
   KeepAlive cannot immediately resurrect the process; previously it sent

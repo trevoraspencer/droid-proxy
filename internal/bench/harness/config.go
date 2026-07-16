@@ -8,13 +8,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var envPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+var envPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}`)
 
-// expandEnv substitutes ${VAR} references so bench configs never need
-// plaintext API keys on disk.
+// expandEnv substitutes ${VAR} and ${VAR:-default} references (the same forms
+// droid-proxy's own config supports) so bench configs never need plaintext
+// API keys on disk.
 func expandEnv(s string) string {
 	return envPattern.ReplaceAllStringFunc(s, func(m string) string {
-		return os.Getenv(envPattern.FindStringSubmatch(m)[1])
+		parts := envPattern.FindStringSubmatch(m)
+		if v := os.Getenv(parts[1]); v != "" {
+			return v
+		}
+		return parts[2]
 	})
 }
 

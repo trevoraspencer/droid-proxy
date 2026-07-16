@@ -49,11 +49,10 @@ type Target struct {
 	// Baseline marks the target other targets are compared against (typically
 	// the direct/native connection). At most one target should be baseline.
 	Baseline bool `yaml:"baseline"`
-	// Protocols optionally restricts which scenario protocols run against this
-	// target (e.g. a proxy model alias that only speaks anthropic-messages).
-	Protocols []Protocol `yaml:"protocols"`
 	// ModelByProtocol optionally overrides Model per protocol, so one target
-	// can expose different aliases per API surface.
+	// can expose different aliases per API surface. A target with no Model and
+	// only ModelByProtocol entries is skipped for protocols it has no model
+	// for — that is how a target is restricted to a subset of scenarios.
 	ModelByProtocol map[Protocol]string `yaml:"model_by_protocol"`
 }
 
@@ -62,18 +61,6 @@ func (t Target) modelFor(p Protocol) string {
 		return m
 	}
 	return t.Model
-}
-
-func (t Target) speaks(p Protocol) bool {
-	if len(t.Protocols) == 0 {
-		return true
-	}
-	for _, q := range t.Protocols {
-		if q == p {
-			return true
-		}
-	}
-	return false
 }
 
 // Scenario is a deterministic workload shape.

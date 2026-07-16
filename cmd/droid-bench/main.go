@@ -77,6 +77,7 @@ func runMock(args []string) {
 	interChunk := fs.Duration("inter-chunk", 2*time.Millisecond, "simulated latency between stream chunks")
 	chunks := fs.Int("chunks", 40, "content chunks per streamed response")
 	simulateCache := fs.Bool("simulate-cache", true, "simulate provider prompt-prefix caching in usage counters")
+	captureLimit := fs.Int("capture-limit", 64, "captured requests kept in memory for /__mock/requests (large request bodies are retained; raise only for fidelity runs that need deep history)")
 	_ = fs.Parse(args)
 
 	srv := mockupstream.New(mockupstream.Options{
@@ -84,6 +85,7 @@ func runMock(args []string) {
 		InterChunkDelay:     *interChunk,
 		StreamChunks:        *chunks,
 		SimulatePromptCache: *simulateCache,
+		CaptureLimit:        *captureLimit,
 	})
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
@@ -127,7 +129,12 @@ func runBench(args []string) {
 	}
 	results, err := runner.Run(signalContext())
 	if err != nil {
-		fatal(err)
+		// An interrupt returns the completed cells alongside the error;
+		// report what was measured instead of discarding it.
+		if len(results) == 0 {
+			fatal(err)
+		}
+		fmt.Fprintf(os.Stderr, "droid-bench: run stopped early (%v); reporting %d completed cells\n", err, len(results))
 	}
 	report := harness.BuildReport(results)
 	report.WriteText(os.Stdout)
