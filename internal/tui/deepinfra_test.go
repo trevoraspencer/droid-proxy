@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -542,5 +544,163 @@ func TestDeepInfraDiscoveryNoTierInStandard(t *testing.T) {
 		if _, ok := built.ExtraArgs["service_tier"]; ok {
 			t.Errorf("Standard DeepInfra should not have service_tier in ExtraArgs")
 		}
+	}
+}
+
+// TestDeepInfraBackendDiscoverSuppressesInferenceToken proves through the real
+// backend.discover path that a non-empty synthetic inference token is
+// suppressed for unauthenticated official DeepInfra discovery. The backend
+// receives the token but the HTTP request carries no Authorization or other
+// credential header.
+func TestDeepInfraBackendDiscoverSuppressesInferenceToken(t *testing.T) {
+	var gotAuth string
+	var allHeaders http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		allHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"model_name":"meta-llama/Llama-3.3-70B-Instruct","reported_type":"text-generation"}]`))
+	}))
+	defer srv.Close()
+
+	// Use the real DeepInfra registry profile but redirect discovery to the
+	// local fake server. This exercises the real backend.discover logic.
+	ka, _ := config.LookupKnownAuth("deepinfra")
+	ka.DiscoveryBaseURL = srv.URL
+
+	// Pass a non-empty synthetic inference token. backend.discover must
+	// suppress it because DeepInfra discovery is unauthenticated.
+	syntheticToken := "deepinfra-synthetic-inference-token-SENTINEL"
+	be := &backend{}
+	ids, err := be.discover(ka, "", syntheticToken)
+	if err != nil {
+		t.Fatalf("backend.discover: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "meta-llama/Llama-3.3-70B-Instruct" {
+		t.Errorf("ids = %v, want [meta-llama/Llama-3.3-70B-Instruct]", ids)
+	}
+	if gotAuth != "" {
+		t.Errorf("Authorization = %q, want empty (synthetic token suppressed for unauthenticated discovery)", gotAuth)
+	}
+	// Scan all headers for the synthetic token sentinel.
+	for key, vals := range allHeaders {
+		for _, v := range vals {
+			if strings.Contains(v, syntheticToken) {
+				t.Errorf("header %q contains synthetic token sentinel: %q", key, v)
+			}
+			if strings.Contains(strings.ToLower(key), "auth") && v != "" {
+				t.Errorf("auth-related header %q = %q, want empty for unauthenticated discovery", key, v)
+			}
+		}
+	}
+}
+
+// TestDeepInfraBackendDiscoverFailureExcludesTokenSentinel verifies that when
+// discovery fails through the real backend.discover path, the returned error
+// and diagnostics do not contain the synthetic inference token or other
+// injected credential sentinels.
+func TestDeepInfraBackendDiscoverFailureExcludesTokenSentinel(t *testing.T) {
+	const tokenSentinel = "SYNTHETIC_DEEPINFRA_TOKEN_SENTINEL_abc123"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Server tries to echo back any credential it received.
+		auth := r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"error":"server saw auth: %s"}`, auth)))
+	}))
+	defer srv.Close()
+
+	ka, _ := config.LookupKnownAuth("deepinfra")
+	ka.DiscoveryBaseURL = srv.URL
+
+	be := &backend{}
+	_, err := be.discover(ka, "", tokenSentinel)
+	if err == nil {
+		t.Fatal("expected discovery error")
+	}
+	errMsg := err.Error()
+	if strings.Contains(errMsg, tokenSentinel) {
+		t.Errorf("discovery error leaked synthetic token sentinel: %q", errMsg)
+	}
+}
+
+// TestDeepInfraPriorityServiceTierRoundTrip verifies that an exact
+// extra_args.service_tier: priority value survives config save, reload, and
+// known-auth hydration without local enum validation altering it.
+func TestDeepInfraPriorityServiceTierRoundTrip(t *testing.T) {
+	ka, _ := config.LookupKnownAuth("deepinfra")
+	m := newFormModel(t, providerChoice{kind: pkKnown, ka: ka, label: ka.Label()}, map[string]string{
+		"upstream_model": "meta-llama/Llama-3.3-70B-Instruct",
+		"alias":          "deepinfra-priority",
+	})
+	built, err := m.buildModelFromForm()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	// Simulate a user-configured Priority tier via config editing.
+	built.ExtraArgs = map[string]any{"service_tier": "priority"}
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("models: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	be := &backend{configPath: path}
+	if err := be.addModel(built); err != nil {
+		t.Fatalf("addModel: %v", err)
+	}
+
+	// Reload through the same path the TUI uses.
+	models, err := configedit.LoadModels(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(models))
+	}
+	got := models[0]
+	if got.ExtraArgs["service_tier"] != "priority" {
+		t.Errorf("service_tier = %#v, want exact \"priority\" after save/reload/hydration", got.ExtraArgs["service_tier"])
+	}
+	// Hydration must not inject or alter the tier.
+	if got.KnownAuth != "deepinfra" {
+		t.Errorf("KnownAuth = %q, want deepinfra", got.KnownAuth)
+	}
+}
+
+// TestDeepInfraFlexServiceTierRoundTrip verifies that an exact
+// extra_args.service_tier: flex value survives config save, reload, and
+// known-auth hydration without local enum validation altering it.
+func TestDeepInfraFlexServiceTierRoundTrip(t *testing.T) {
+	ka, _ := config.LookupKnownAuth("deepinfra")
+	m := newFormModel(t, providerChoice{kind: pkKnown, ka: ka, label: ka.Label()}, map[string]string{
+		"upstream_model": "meta-llama/Llama-3.3-70B-Instruct",
+		"alias":          "deepinfra-flex",
+	})
+	built, err := m.buildModelFromForm()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	// Simulate a user-configured Flex tier via config editing.
+	built.ExtraArgs = map[string]any{"service_tier": "flex"}
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("models: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	be := &backend{configPath: path}
+	if err := be.addModel(built); err != nil {
+		t.Fatalf("addModel: %v", err)
+	}
+
+	models, err := configedit.LoadModels(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(models))
+	}
+	got := models[0]
+	if got.ExtraArgs["service_tier"] != "flex" {
+		t.Errorf("service_tier = %#v, want exact \"flex\" after save/reload/hydration", got.ExtraArgs["service_tier"])
 	}
 }

@@ -212,3 +212,76 @@ func TestDeepInfraRegistryNoProviderWideDefaults(t *testing.T) {
 		}
 	}
 }
+
+// TestDeepInfraHydrationPreservesPriorityServiceTier verifies that an exact
+// extra_args.service_tier: priority value survives known-auth hydration without
+// local enum validation altering or rejecting it. The proxy does not impose a
+// restrictive tier enum; configured values pass through unchanged.
+func TestDeepInfraHydrationPreservesPriorityServiceTier(t *testing.T) {
+	m := &Model{
+		Alias:         "deepinfra-priority-hydrate",
+		KnownAuth:     "deepinfra",
+		UpstreamModel: "meta-llama/Llama-3.3-70B-Instruct",
+		ExtraArgs:     map[string]any{"service_tier": "priority"},
+	}
+	if err := HydrateModel(m); err != nil {
+		t.Fatalf("HydrateModel: %v", err)
+	}
+	if got := m.ExtraArgs["service_tier"]; got != "priority" {
+		t.Errorf("service_tier = %#v, want exact \"priority\" after hydration", got)
+	}
+}
+
+// TestDeepInfraHydrationPreservesFlexServiceTier verifies that an exact
+// extra_args.service_tier: flex value survives known-auth hydration without
+// local enum validation altering or rejecting it.
+func TestDeepInfraHydrationPreservesFlexServiceTier(t *testing.T) {
+	m := &Model{
+		Alias:         "deepinfra-flex-hydrate",
+		KnownAuth:     "deepinfra",
+		UpstreamModel: "meta-llama/Llama-3.3-70B-Instruct",
+		ExtraArgs:     map[string]any{"service_tier": "flex"},
+	}
+	if err := HydrateModel(m); err != nil {
+		t.Fatalf("HydrateModel: %v", err)
+	}
+	if got := m.ExtraArgs["service_tier"]; got != "flex" {
+		t.Errorf("service_tier = %#v, want exact \"flex\" after hydration", got)
+	}
+}
+
+// TestDeepInfraHydrationPreservesUnknownServiceTier verifies that an
+// unrecognized service_tier value (e.g. a future tier) also survives hydration
+// without local enum validation rejecting it.
+func TestDeepInfraHydrationPreservesUnknownServiceTier(t *testing.T) {
+	m := &Model{
+		Alias:         "deepinfra-future-tier-hydrate",
+		KnownAuth:     "deepinfra",
+		UpstreamModel: "meta-llama/Llama-3.3-70B-Instruct",
+		ExtraArgs:     map[string]any{"service_tier": "future-tier-2099"},
+	}
+	if err := HydrateModel(m); err != nil {
+		t.Fatalf("HydrateModel: %v", err)
+	}
+	if got := m.ExtraArgs["service_tier"]; got != "future-tier-2099" {
+		t.Errorf("service_tier = %#v, want exact \"future-tier-2099\" (no local enum validation)", got)
+	}
+}
+
+// TestDeepInfraHydrationDoesNotInjectServiceTier verifies that hydration of a
+// Standard DeepInfra model (no service_tier configured) does not inject one.
+func TestDeepInfraHydrationDoesNotInjectServiceTier(t *testing.T) {
+	m := &Model{
+		Alias:         "deepinfra-standard-hydrate",
+		KnownAuth:     "deepinfra",
+		UpstreamModel: "meta-llama/Llama-3.3-70B-Instruct",
+	}
+	if err := HydrateModel(m); err != nil {
+		t.Fatalf("HydrateModel: %v", err)
+	}
+	if m.ExtraArgs != nil {
+		if _, ok := m.ExtraArgs["service_tier"]; ok {
+			t.Errorf("Standard DeepInfra should not have service_tier injected by hydration")
+		}
+	}
+}

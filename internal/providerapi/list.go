@@ -170,6 +170,17 @@ func parseModelIDs(body []byte, opts ListOptions) ([]string, error) {
 	typeField := strings.TrimSpace(opts.TypeField)
 	typeValue := strings.TrimSpace(opts.TypeValue)
 
+	// Validate configured discovery fields against known supported values.
+	// Unsupported fields fail explicitly rather than silently filtering every
+	// record and returning an empty catalog, which would mask a
+	// misconfiguration as "no models available".
+	if idField != "" && idField != "id" && idField != "name" && idField != "model_name" {
+		return nil, fmt.Errorf("unsupported discovery ID field %q: supported fields are id, name, model_name", idField)
+	}
+	if typeField != "" && typeField != "reported_type" {
+		return nil, fmt.Errorf("unsupported discovery type field %q: supported field is reported_type", typeField)
+	}
+
 	type modelObj struct {
 		ID           string `json:"id"`
 		Name         string `json:"name"`

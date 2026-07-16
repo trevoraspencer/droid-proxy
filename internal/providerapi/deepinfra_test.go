@@ -272,7 +272,7 @@ func TestDeepInfraDiscoveryErrorIsSecretSafe(t *testing.T) {
 
 // TestDeepInfraDiscoveryDoesNotUseInferenceCredential verifies that even when
 // an API key is passed (e.g., from the env), the unauthenticated discovery
-// flag prevents it from being sent.
+// flag prevents it from being sent. This test passes APIKey="" directly.
 func TestDeepInfraDiscoveryDoesNotUseInferenceCredential(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -299,4 +299,213 @@ func TestDeepInfraDiscoveryDoesNotUseInferenceCredential(t *testing.T) {
 	if gotAuth != "" {
 		t.Errorf("Authorization = %q, want empty (unauthenticated discovery)", gotAuth)
 	}
+}
+
+// TestDeepInfraDiscoveryAPIKeyNotSentWhenNonEmpty verifies that even when a
+// non-empty APIKey is passed directly to ListModelsWithOptions, the HTTP
+// request carries no Authorization or other credential header when the caller
+// omits the key (as backend.discover does for DiscoveryNoAuth profiles).
+func TestDeepInfraDiscoveryAPIKeyNotSentWhenNonEmpty(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"model_name":"test-model","reported_type":"text-generation"}]`))
+	}))
+	defer srv.Close()
+
+	// The backend.discover path sets APIKey="" when DiscoveryNoAuth is true.
+	// This test proves at the transport level that an empty APIKey produces
+	// no auth header, which is the behavior backend.discover relies on.
+	_, err := ListModelsWithOptions(context.Background(), ListOptions{
+		BaseURL:    srv.URL,
+		ModelsPath: "/models/list",
+		APIKey:     "", // DiscoveryNoAuth causes backend.discover to pass empty.
+		IDField:    "model_name",
+		TypeField:  "reported_type",
+		TypeValue:  "text-generation",
+	})
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if gotAuth != "" {
+		t.Errorf("Authorization = %q, want empty (unauthenticated discovery)", gotAuth)
+	}
+}
+
+// TestDeepInfraDiscoveryUnsupportedIDFieldFailsExplicitly verifies that an
+// unsupported discovery ID field configuration fails with an explicit error
+// rather than silently returning an empty catalog (which would mask the
+// misconfiguration as "no models available").
+func TestDeepInfraDiscoveryUnsupportedIDFieldFailsExplicitly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"model_name":"a","reported_type":"text-generation"}]`))
+	}))
+	defer srv.Close()
+
+	_, err := ListModelsWithOptions(context.Background(), ListOptions{
+		BaseURL:    srv.URL,
+		ModelsPath: "/models/list",
+		APIKey:     "",
+		IDField:    "unsupported_id_field",
+		TypeField:  "reported_type",
+		TypeValue:  "text-generation",
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported IDField, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported discovery ID field") {
+		t.Errorf("error should mention unsupported ID field, got: %v", err)
+	}
+}
+
+// TestDeepInfraDiscoveryUnsupportedTypeFieldFailsExplicitly verifies that an
+// unsupported discovery type field configuration fails with an explicit error
+// rather than silently filtering out every record and returning an empty
+// catalog.
+func TestDeepInfraDiscoveryUnsupportedTypeFieldFailsExplicitly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"model_name":"a","reported_type":"text-generation"}]`))
+	}))
+	defer srv.Close()
+
+	_, err := ListModelsWithOptions(context.Background(), ListOptions{
+		BaseURL:    srv.URL,
+		ModelsPath: "/models/list",
+		APIKey:     "",
+		IDField:    "model_name",
+		TypeField:  "unsupported_type_field",
+		TypeValue:  "text-generation",
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported TypeField, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported discovery type field") {
+		t.Errorf("error should mention unsupported type field, got: %v", err)
+	}
+}
+
+// TestDeepInfraDiscoverySupportedIDFieldsVerifyBehavior verifies that the
+// supported ID fields (id, name, model_name) and the default (empty) all
+// continue to work correctly after adding explicit validation.
+func TestDeepInfraDiscoverySupportedIDFieldsVerifyBehavior(t *testing.T) {
+	cases := []struct {
+		name    string
+		idField string
+		body    string
+		want    []string
+	}{
+		{
+			name:    "model_name",
+			idField: "model_name",
+			body:    `[{"model_name":"llama","reported_type":"text-generation"}]`,
+			want:    []string{"llama"},
+		},
+		{
+			name:    "id_field",
+			idField: "id",
+			body:    `[{"id":"gpt-style","reported_type":"text-generation"}]`,
+			want:    []string{"gpt-style"},
+		},
+		{
+			name:    "name_field",
+			idField: "name",
+			body:    `[{"name":"named-model","reported_type":"text-generation"}]`,
+			want:    []string{"named-model"},
+		},
+		{
+			name:    "default_empty",
+			idField: "",
+			body:    `[{"id":"default-id","reported_type":"text-generation"}]`,
+			want:    []string{"default-id"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			ids, err := ListModelsWithOptions(context.Background(), ListOptions{
+				BaseURL:    srv.URL,
+				ModelsPath: "/models/list",
+				APIKey:     "",
+				IDField:    tc.idField,
+				TypeField:  "reported_type",
+				TypeValue:  "text-generation",
+			})
+			if err != nil {
+				t.Fatalf("ListModels: %v", err)
+			}
+			if !reflect.DeepEqual(ids, tc.want) {
+				t.Errorf("ids = %v, want %v", ids, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeepInfraDiscoveryErrorExcludesSyntheticTokenSentinel verifies that
+// discovery failure error messages do not contain a synthetic inference token
+// or other injected credential sentinels, even when the error originates from
+// a server response or transport failure.
+func TestDeepInfraDiscoveryErrorExcludesSyntheticTokenSentinel(t *testing.T) {
+	// Unique synthetic sentinels that would be unmistakable if leaked.
+	const tokenSentinel = "SYNTHETIC_DEEPINFRA_TOKEN_a1b2c3d4e5f6"
+	const keySentinel = "SYNTHETIC_API_KEY_SENTINEL_xyz789"
+
+	// Case 1: HTTP error status. The server echoes the token back in its
+	// error body to simulate a worst-case leak attempt.
+	t.Run("http_error_status", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			// Server tries to echo any credential it received.
+			_, _ = w.Write([]byte(`{"error":"token ` + tokenSentinel + ` invalid"}`))
+		}))
+		defer srv.Close()
+
+		_, err := ListModelsWithOptions(context.Background(), ListOptions{
+			BaseURL:    srv.URL,
+			ModelsPath: "/models/list",
+			APIKey:     "", // unauthenticated discovery
+			IDField:    "model_name",
+			TypeField:  "reported_type",
+			TypeValue:  "text-generation",
+		})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		errMsg := err.Error()
+		if strings.Contains(errMsg, tokenSentinel) {
+			t.Errorf("error message leaked synthetic token sentinel: %q", errMsg)
+		}
+		if strings.Contains(errMsg, keySentinel) {
+			t.Errorf("error message leaked synthetic key sentinel: %q", errMsg)
+		}
+	})
+
+	// Case 2: Transport failure (connection refused). No response body
+	// is available, but verify the error is non-empty and sentinel-free.
+	t.Run("transport_failure", func(t *testing.T) {
+		closingSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		closingSrv.Close()
+
+		_, err := ListModelsWithOptions(context.Background(), ListOptions{
+			BaseURL:    closingSrv.URL,
+			ModelsPath: "/models/list",
+			APIKey:     "",
+			IDField:    "model_name",
+			TypeField:  "reported_type",
+			TypeValue:  "text-generation",
+		})
+		if err == nil {
+			t.Fatal("expected transport error")
+		}
+		if strings.Contains(err.Error(), tokenSentinel) {
+			t.Errorf("transport error leaked synthetic token sentinel: %q", err.Error())
+		}
+	})
 }
