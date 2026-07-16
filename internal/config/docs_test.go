@@ -2151,36 +2151,172 @@ func TestBasetenDocsNoStaleEndpoints(t *testing.T) {
 	}
 }
 
-// TestBasetenDocsNoModelNormalizationClaims verifies the Baseten guide does
-// not claim model normalization, mutable-catalog availability guarantees, or
-// universal capability. "Provider-wide reasoning" is acceptable when negated
-// (e.g. "No provider-wide reasoning...is applied") and is checked by the
-// sentence-level checkNoProhibitedClaims in TestBasetenDocsNoLiveValidationClaims.
-func TestBasetenDocsNoModelNormalizationClaims(t *testing.T) {
-	body := readRepoRel(t, "docs/examples/baseten.md")
-	// These phrases must never appear in any form (not even negated),
-	// because the proxy does not rewrite or normalize Baseten model IDs.
-	for _, bad := range []string{
-		"rewrites model",
-		"normalizes model",
-		"maps model IDs",
-		"translates model",
-		"all models support",
-		"every model supports",
-	} {
-		if strings.Contains(strings.ToLower(body), strings.ToLower(bad)) {
-			t.Errorf("baseten.md must not contain prohibited claim %q", bad)
+// normalizationClaimPatterns maps prohibited model-ID normalization claim
+// phrases to the negation markers that may appear in the same sentence to
+// make the claim explicitly negative (and thus acceptable). A sentence
+// containing a prohibited phrase without a co-occurring negation fails.
+// Universal-capability phrases are always prohibited (empty negation slice).
+var normalizationClaimPatterns = []struct {
+	phrase   string
+	negation []string
+}{
+	{"rewrites model", []string{"does not", "not ", "never "}},
+	{"normalizes model", []string{"does not", "not ", "never "}},
+	{"maps model", []string{"does not", "not ", "never "}},
+	{"translates model", []string{"does not", "not ", "never "}},
+	// Universal-capability claims are always prohibited (no negation escape).
+	{"all models support", []string{}},
+	{"every model supports", []string{}},
+}
+
+// checkNoModelNormalizationClaims is a reusable predicate that splits body
+// into sentences and verifies that no sentence positively claims the proxy
+// rewrites, normalizes, maps, or translates model IDs without a co-occurring
+// negation. Precise descriptions of exact opaque model preservation (e.g.,
+// "model IDs are preserved byte-for-byte") remain allowed because they do
+// not contain a prohibited normalization phrase. Universal-capability claims
+// ("all models support ...") are always rejected.
+func checkNoModelNormalizationClaims(body string) error {
+	for _, sent := range splitSentences(body) {
+		lower := strings.ToLower(sent)
+		for _, p := range normalizationClaimPatterns {
+			if !strings.Contains(lower, p.phrase) {
+				continue
+			}
+			allowed := false
+			for _, neg := range p.negation {
+				if strings.Contains(lower, neg) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("prohibited model-ID normalization claim %q appears without co-occurring negation in sentence: %q", p.phrase, strings.TrimSpace(sent))
+			}
 		}
+	}
+	return nil
+}
+
+// TestBasetenDocsNoModelNormalizationClaims verifies the Baseten guide and
+// scoped reference docs do not positively claim model-ID normalization,
+// rewriting, mapping, or translation. The check is sentence-level so a
+// negation in unrelated prose cannot mask a positive claim, and so that
+// precise descriptions of exact opaque model preservation remain allowed.
+// "Provider-wide reasoning" is acceptable when negated and is additionally
+// checked by checkNoProhibitedClaims in TestBasetenDocsNoLiveValidationClaims.
+func TestBasetenDocsNoModelNormalizationClaims(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/baseten.md",
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			if err := checkNoModelNormalizationClaims(body); err != nil {
+				t.Fatalf("%s: %v", rel, err)
+			}
+		})
+	}
+}
+
+// TestBasetenDocsNormalizationClaimsDeterministic proves the sentence-level
+// normalization predicate catches each prohibited model-ID claim (rewrites,
+// normalizes, maps, translates) even when unrelated text contains a
+// negation, and accepts precise descriptions of exact opaque model
+// preservation. This provides deterministic failing and accepted fixture
+// paths that cannot be masked by document-wide substring matches.
+func TestBasetenDocsNormalizationClaimsDeterministic(t *testing.T) {
+	tests := []struct {
+		name    string
+		doc     string
+		wantErr bool
+	}{
+		// --- Failing fixtures: positive claims without negation ---
+		{
+			name:    "rewrite positive claim fails despite negation elsewhere",
+			doc:     "# Guide\n\nThe proxy does not modify data.\n\nThe proxy rewrites model IDs to canonical names.\n",
+			wantErr: true,
+		},
+		{
+			name:    "normalize positive claim fails",
+			doc:     "# Guide\n\nBaseten normalizes model slugs automatically.\n",
+			wantErr: true,
+		},
+		{
+			name:    "map positive claim fails",
+			doc:     "# Guide\n\nThe proxy maps model IDs to standard formats.\n",
+			wantErr: true,
+		},
+		{
+			name:    "translate positive claim fails",
+			doc:     "# Guide\n\nThe proxy translates model identifiers for compatibility.\n",
+			wantErr: true,
+		},
+		{
+			name:    "universal capability always fails",
+			doc:     "# Guide\n\nAll models support reasoning output.\n",
+			wantErr: true,
+		},
+		// --- Accepted fixtures: negated claims and correct preservation ---
+		{
+			name:    "rewrite negated with never accepted",
+			doc:     "# Guide\n\nThe proxy never rewrites model IDs.\n",
+			wantErr: false,
+		},
+		{
+			name:    "rewrite negated with does not accepted",
+			doc:     "# Guide\n\nThe proxy does not rewrite model IDs.\n",
+			wantErr: false,
+		},
+		{
+			name:    "normalize negated accepted",
+			doc:     "# Guide\n\nThe proxy does not normalize model slugs.\n",
+			wantErr: false,
+		},
+		{
+			name:    "map negated accepted",
+			doc:     "# Guide\n\nThe proxy never maps model IDs to aliases.\n",
+			wantErr: false,
+		},
+		{
+			name:    "translate negated accepted",
+			doc:     "# Guide\n\nThe proxy does not translate model IDs.\n",
+			wantErr: false,
+		},
+		{
+			name:    "exact byte-for-byte preservation accepted",
+			doc:     "# Guide\n\nBaseten model IDs are preserved byte-for-byte through the picker and reload cycle.\n",
+			wantErr: false,
+		},
+		{
+			name:    "precise opaque slug preservation accepted",
+			doc:     "# Guide\n\nThe proxy preserves opaque slugs exactly without provider-prefix normalization.\n",
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkNoModelNormalizationClaims(tt.doc)
+			if tt.wantErr && err == nil {
+				t.Fatal("checkNoModelNormalizationClaims must reject this doc")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("checkNoModelNormalizationClaims must accept this doc: %v", err)
+			}
+		})
 	}
 }
 
 // TestBasetenDocsProhibitedClaimsExtendedDocs verifies generic reference docs
-// (CONFIG.md) do not contain prohibited live-validation or universal
-// capability claims. PROVIDERS.md is excluded because it legitimately
-// describes T3 protocol translation paths as a core proxy feature.
+// (CONFIG.md and FACTORY.md) do not contain prohibited live-validation or
+// universal capability claims. PROVIDERS.md is excluded because it
+// legitimately describes T3 protocol translation paths as a core proxy
+// feature.
 func TestBasetenDocsProhibitedClaimsExtendedDocs(t *testing.T) {
 	for _, rel := range []string{
 		"docs/CONFIG.md",
+		"docs/FACTORY.md",
 	} {
 		t.Run(rel, func(t *testing.T) {
 			body := readRepoRel(t, rel)
