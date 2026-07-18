@@ -15,6 +15,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   dry-run, commit, and rollback for explicit `8787` configs; verified managed
   upgrades may auto-migrate. See [docs/UPGRADE.md](docs/UPGRADE.md) for the
   full migration guide.
+- `droid-bench` performance evaluation suite (`cmd/droid-bench`): a
+  deterministic mock provider with request capture and simulated prompt
+  caching, a scenario harness that benchmarks droid-proxy against direct
+  provider connections and alternative proxies (TTFB/TTFT percentiles,
+  inter-chunk pacing, throughput, cache-hit %), and prompt-cache fidelity
+  checks (byte determinism, prefix stability, `cache_control`/usage
+  passthrough, stream integrity). New `make bench` and `make bench-compare`
+  targets, CI-covered fidelity tests, and [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+- Micro-benchmarks for the translation, SSE pump, and payload-override hot
+  paths.
+- `droid-bench run --repeat N`: interleaved repetitions of the target matrix
+  with paired per-rep deltas (mean±sd) so comparisons carry error bars and
+  shared-host drift cancels out.
 - `capabilities.factory_reasoning_effort` metadata and Factory settings sync
   support so GPT-5.6 and Grok 4.5 custom models expose reasoning controls in
   Droid while Grok Build and Composer remove stale reasoning metadata.
@@ -34,6 +47,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `extra_args` are applied to upstream payloads in sorted key order, so
+  identical client requests always produce byte-identical upstream bodies
+  (previously map iteration order could reorder appended keys per request).
+- The Anthropic→OpenAI-chat translator drops `cache_control` hints instead of
+  rejecting the request: Droid sends `cache_control` whenever Anthropic
+  prompt caching is enabled, and OpenAI-style upstreams cache prompt prefixes
+  implicitly, so dropping the hint is the safe mapping. Translated Anthropic
+  aliases now work with Droid prompt caching turned on.
+- Translated responses relay prompt-cache accounting: OpenAI
+  `prompt_tokens_details.cached_tokens` maps to Anthropic
+  `cache_read_input_tokens` (and to Responses `input_tokens_details`), and
+  translated streams now carry usage in `message_delta` /
+  `response.completed`, so cache behavior stays observable in Droid on
+  translated aliases.
+- The Responses→chat translation forwards `prompt_cache_key`, preserving
+  provider cache routing.
+- Translated routes apply `extra_args` with the same sjson-path semantics as
+  native routes (dotted keys nest; sorted, deterministic application), so one
+  model config produces the same upstream shape on every route.
 - With the per-user service installed, `droid-proxy stop` now stops through
   the service manager (`launchctl bootout` / `systemctl --user stop`) so
   KeepAlive cannot immediately resurrect the process; previously it sent

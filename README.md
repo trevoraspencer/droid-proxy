@@ -34,7 +34,7 @@ Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 
 - Factory Droid provider modes: `anthropic`, `openai`, and `generic-chat-completion-api`.
 - Health, model listing, Chat Completions, Responses, Anthropic Messages, and token-count endpoints.
-- Curated provider profiles for Anthropic, OpenAI, DeepSeek, Xiaomi MiMo, xAI, Kimi, Z.AI, Groq, Fireworks, Ollama, and vLLM.
+- Curated provider profiles for Anthropic, OpenAI, DeepSeek, Xiaomi MiMo, xAI, Kimi, Z.AI, Groq, Fireworks, Baseten, DeepInfra, Ollama, and vLLM.
 - OAuth login for Codex/ChatGPT and xAI accounts.
 - Recommended Grok 4.5 and Composer 2.5 Fast presets through the private Grok
   Build OAuth inference proxy, while preserving Grok 4.3 compatibility.
@@ -210,7 +210,7 @@ Complete docs start at [docs/README.md](docs/README.md).
 | Smoke tests | [docs/SMOKE.md](docs/SMOKE.md) |
 | Examples | [docs/examples/](docs/examples/) |
 
-Provider walkthroughs: [DeepSeek](docs/examples/deepseek.md), [OpenAI](docs/examples/openai.md), [Anthropic](docs/examples/anthropic.md), [MiMo](docs/examples/mimo.md), [Ollama](docs/examples/local-ollama.md), [vLLM](docs/examples/local-vllm.md), [xAI](docs/examples/xai.md), [Kimi](docs/examples/kimi.md), [Groq](docs/examples/groq.md), [Fireworks](docs/examples/fireworks.md), [Z.AI](docs/examples/zai.md), [Codex OAuth](docs/examples/codex-oauth.md), and [xAI OAuth](docs/examples/xai-oauth.md).
+Provider walkthroughs: [DeepSeek](docs/examples/deepseek.md), [OpenAI](docs/examples/openai.md), [Anthropic](docs/examples/anthropic.md), [MiMo](docs/examples/mimo.md), [Ollama](docs/examples/local-ollama.md), [vLLM](docs/examples/local-vllm.md), [xAI](docs/examples/xai.md), [Kimi](docs/examples/kimi.md), [Groq](docs/examples/groq.md), [Fireworks](docs/examples/fireworks.md), [Fireworks Fire Pass](docs/examples/fireworks-fire-pass.md), [Baseten](docs/examples/baseten.md), [DeepInfra](docs/examples/deepinfra.md), [Z.AI](docs/examples/zai.md), [Codex OAuth](docs/examples/codex-oauth.md), and [xAI OAuth](docs/examples/xai-oauth.md).
 
 ## Configuration Notes
 
@@ -289,7 +289,7 @@ make security-audit
 
 ## Disclaimer
 
-droid-proxy is an independent open-source project. It is not affiliated with, endorsed by, or officially supported by [Factory AI](https://factory.ai), OpenAI, Anthropic, DeepSeek, xAI, Xiaomi, Moonshot AI, Z.AI, Groq, Fireworks, Ollama, vLLM, or any other provider named in the documentation. Factory Droid and provider names are trademarks of their respective owners.
+droid-proxy is an independent open-source project. It is not affiliated with, endorsed by, or officially supported by [Factory AI](https://factory.ai), OpenAI, Anthropic, DeepSeek, xAI, Xiaomi, Moonshot AI, Z.AI, Groq, Fireworks, Baseten, DeepInfra, Ollama, vLLM, or any other provider named in the documentation. Factory Droid and provider names are trademarks of their respective owners.
 
 ## License
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -95,7 +96,9 @@ func upstreamReadFailureMessage(err error, kind string) string {
 }
 
 // applyUpstreamPayloadOverrides rewrites native provider payloads with the
-// configured upstream model and static extra_args.
+// configured upstream model and static extra_args. extra_args are applied in
+// sorted key order so identical client requests always produce byte-identical
+// upstream bodies (map iteration order would otherwise vary per request).
 func applyUpstreamPayloadOverrides(body []byte, m *config.Model) []byte {
 	out := body
 	if strings.TrimSpace(m.UpstreamModel) != "" {
@@ -103,8 +106,13 @@ func applyUpstreamPayloadOverrides(body []byte, m *config.Model) []byte {
 			out = next
 		}
 	}
-	for k, v := range m.ExtraArgs {
-		if next, err := sjson.SetBytes(out, k, v); err == nil {
+	keys := make([]string, 0, len(m.ExtraArgs))
+	for k := range m.ExtraArgs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if next, err := sjson.SetBytes(out, k, m.ExtraArgs[k]); err == nil {
 			out = next
 		}
 	}

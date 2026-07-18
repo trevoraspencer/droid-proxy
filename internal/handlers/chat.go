@@ -78,6 +78,7 @@ func (a *API) ChatCompletions(c *gin.Context) {
 		if !ok {
 			return
 		}
+		upstream.CopyHeaders(c.Writer.Header(), resp.Header)
 		WriteUpstreamStatusError(c, resp.StatusCode, body, resp.Header.Get("Content-Type"))
 		return
 	}

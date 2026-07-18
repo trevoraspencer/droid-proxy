@@ -60,10 +60,7 @@ func AnthropicToChatRequest(body []byte, upstreamModel string, extraArgs map[str
 		}
 		out["tool_choice"] = chatChoice
 	}
-	for k, v := range extraArgs {
-		out[k] = v
-	}
-	return json.Marshal(out)
+	return marshalWithExtraArgs(out, extraArgs)
 }
 
 func anthropicMessagesToChatMessages(in map[string]any) ([]any, error) {
@@ -152,9 +149,10 @@ func anthropicUserContentToChatMessages(raw any) ([]any, error) {
 			}
 			switch typ := stringValue(block["type"]); typ {
 			case "text", "":
-				if _, ok := block["cache_control"]; ok {
-					return nil, errors.New("unsupported Anthropic cache_control on content block")
-				}
+				// cache_control is a provider caching hint, not content; OpenAI
+				// Chat upstreams cache prompt prefixes implicitly, so the hint is
+				// dropped rather than rejected (Droid sends it whenever Anthropic
+				// prompt caching is enabled).
 				if text.Len() > 0 {
 					text.WriteByte('\n')
 				}
@@ -204,9 +202,8 @@ func anthropicAssistantContentToChatMessages(raw any) ([]any, error) {
 			}
 			switch typ := stringValue(block["type"]); typ {
 			case "text", "":
-				if _, ok := block["cache_control"]; ok {
-					return nil, errors.New("unsupported Anthropic cache_control on content block")
-				}
+				// cache_control hints are dropped in translation; see the user
+				// content path for rationale.
 				if text.Len() > 0 {
 					text.WriteByte('\n')
 				}
@@ -256,9 +253,8 @@ func anthropicTextBlocksToString(blocks []any) (string, error) {
 		if typ := stringValue(block["type"]); typ != "" && typ != "text" {
 			return "", fmt.Errorf("unsupported Anthropic text block type %q", typ)
 		}
-		if _, ok := block["cache_control"]; ok {
-			return "", errors.New("unsupported Anthropic cache_control on system block")
-		}
+		// cache_control hints are dropped in translation; see
+		// anthropicUserContentToChatMessages for rationale.
 		if b.Len() > 0 {
 			b.WriteByte('\n')
 		}
@@ -446,5 +442,21 @@ func chatUsageToAnthropicUsage(raw any) (map[string]any, bool) {
 	if v, ok := u["completion_tokens"]; ok {
 		out["output_tokens"] = v
 	}
+	// Relay provider prompt-cache accounting so cache behavior stays
+	// observable through the translation (OpenAI reports cached prompt
+	// tokens in prompt_tokens_details.cached_tokens).
+	if v, ok := chatCachedTokens(u); ok {
+		out["cache_read_input_tokens"] = v
+	}
 	return out, true
+}
+
+// chatCachedTokens extracts usage.prompt_tokens_details.cached_tokens.
+func chatCachedTokens(u map[string]any) (any, bool) {
+	details, ok := u["prompt_tokens_details"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	v, ok := details["cached_tokens"]
+	return v, ok
 }

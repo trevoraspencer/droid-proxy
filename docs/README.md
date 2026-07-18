@@ -23,6 +23,7 @@ Manual config is also supported: copy [config.example.yaml](../config.example.ya
 | [PROVIDERS.md](PROVIDERS.md) | Provider matrix, tiers, and OAuth summary |
 | [OAUTH.md](OAUTH.md) | Codex/ChatGPT and xAI OAuth walkthrough |
 | [SMOKE.md](SMOKE.md) | Curl checks and runtime validation |
+| [BENCHMARKS.md](BENCHMARKS.md) | Performance/caching evaluation vs native providers and alternative proxies |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Failure scenarios: localhost/IPv6 port squatters, stale config, managed-service stop/status semantics |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | Direct dependency SPDX licenses |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Development and contribution guide |
@@ -41,6 +42,9 @@ Each guide includes config, Factory settings, run commands, and a curl check.
 | Kimi | [examples/kimi.md](examples/kimi.md) | T2 |
 | Groq | [examples/groq.md](examples/groq.md) | T2 |
 | Fireworks | [examples/fireworks.md](examples/fireworks.md) | T2 |
+| Fireworks Fire Pass | [examples/fireworks-fire-pass.md](examples/fireworks-fire-pass.md) | T2 |
+| Baseten | [examples/baseten.md](examples/baseten.md) | T2 |
+| DeepInfra | [examples/deepinfra.md](examples/deepinfra.md) | T2 |
 | Z.AI | [examples/zai.md](examples/zai.md) | T2 |
 | Xiaomi MiMo | [examples/mimo.md](examples/mimo.md) | T2 |
 | Ollama | [examples/local-ollama.md](examples/local-ollama.md) | T2 |

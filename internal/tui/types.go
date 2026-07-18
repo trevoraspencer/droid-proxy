@@ -16,6 +16,7 @@ const (
 	screenDashboard screen = iota
 	screenAddProvider
 	screenAddKey
+	screenServingPath
 	screenDiscover
 	screenPickModel
 	screenForm
@@ -80,6 +81,11 @@ type model struct {
 	pickItems  []string
 	pickCursor int
 
+	servingPath string // "standard", "priority", "fast", or "" when not from a Fireworks serving-path flow
+
+	discoverGeneration int    // incremented to invalidate stale discovery results
+	discoverFeedback   string // generic actionable message shown when best-effort discovery fails or returns no models
+
 	keyInput textinput.Model
 	keyEnv   string
 	keyOnly  bool
@@ -115,8 +121,9 @@ type modelsLoadedMsg struct {
 }
 
 type discoverMsg struct {
-	ids []string
-	err error
+	ids        []string
+	err        error
+	generation int
 }
 
 type actionDoneMsg struct {

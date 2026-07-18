@@ -1,6 +1,10 @@
 # Binaries
 /droid-proxy
+/droid-bench
 /dist/
+
+# Benchmark output
+/bench-results/
 *.exe
 *.test
 *.out

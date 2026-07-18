@@ -32,6 +32,16 @@ var hopByHopHeaders = map[string]struct{}{
 	"Content-Encoding":    {},
 }
 
+// privacySensitiveIntermediaryHeaders are removed from relayed upstream responses
+// because their values can reveal internal topology, intermediary hostnames,
+// software names, versions, or comments. These are NOT hop-by-hop under RFC 7230
+// §6.1 semantics; they are filtered as a distinct privacy-sensitive
+// intermediary-metadata category to keep the proxy's boundary opaque to
+// downstream clients and captured logs.
+var privacySensitiveIntermediaryHeaders = map[string]struct{}{
+	"Via": {},
+}
+
 // reservedOutboundHeaders are never allowed to be supplied by user-controlled
 // config/request headers. Provider auth and protocol-required headers are set by
 // the proxy itself, before/after filtering as appropriate.
@@ -72,7 +82,8 @@ func IsReservedOutboundHeader(name string) bool {
 }
 
 // FilterHeaders returns a copy of src minus hop-by-hop, security-sensitive,
-// and known gateway-detector headers. Returns nil if nothing remains.
+// privacy-sensitive intermediary metadata, and known gateway-detector headers.
+// Returns nil if nothing remains.
 func FilterHeaders(src http.Header) http.Header {
 	if src == nil {
 		return nil
@@ -85,6 +96,9 @@ func FilterHeaders(src http.Header) http.Header {
 			continue
 		}
 		if _, scoped := connectionScoped[canonical]; scoped {
+			continue
+		}
+		if _, intermediary := privacySensitiveIntermediaryHeaders[canonical]; intermediary {
 			continue
 		}
 		lower := strings.ToLower(key)

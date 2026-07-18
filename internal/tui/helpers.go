@@ -254,3 +254,32 @@ func maxInt(a, b int) int {
 	}
 	return b
 }
+
+// servingPathChoice is a Fireworks serving-path option (Standard, Priority, Fast).
+type servingPathChoice struct {
+	id    string
+	label string
+	desc  string
+}
+
+// fireworksServingPaths returns the serving-path choices for Standard Fireworks.
+// Standard uses an ordinary model ID without service_tier, Priority adds
+// extra_args.service_tier: priority, and Fast uses a router model ID without
+// service_tier.
+func fireworksServingPaths() []servingPathChoice {
+	return []servingPathChoice{
+		{id: "standard", label: "Standard", desc: "ordinary model, no service tier"},
+		{id: "priority", label: "Priority", desc: "service_tier: priority"},
+		{id: "fast", label: "Fast", desc: "router model ID, no service tier"},
+	}
+}
+
+// catalogPickItems converts catalog entries into picker items, always starting
+// with the manual-entry option.
+func catalogPickItems(entries []config.CatalogEntry) []string {
+	items := []string{manualEntryLabel}
+	for _, e := range entries {
+		items = append(items, e.ID)
+	}
+	return items
+}

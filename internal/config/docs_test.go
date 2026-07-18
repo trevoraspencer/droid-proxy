@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,9 +42,12 @@ func readRepoRel(t *testing.T, rel string) string {
 func docExampleMarkdownFiles() []string {
 	return []string{
 		"docs/examples/anthropic.md",
+		"docs/examples/baseten.md",
 		"docs/examples/codex-oauth.md",
+		"docs/examples/deepinfra.md",
 		"docs/examples/deepseek.md",
 		"docs/examples/fireworks.md",
+		"docs/examples/fireworks-fire-pass.md",
 		"docs/examples/groq.md",
 		"docs/examples/kimi.md",
 		"docs/examples/local-ollama.md",
@@ -466,6 +471,9 @@ func TestDocsExamplePagesExistForKnownAuth(t *testing.T) {
 		"kimi":                "examples/kimi.md",
 		"groq":                "examples/groq.md",
 		"fireworks":           "examples/fireworks.md",
+		"fireworks-fire-pass": "examples/fireworks-fire-pass.md",
+		"baseten":             "examples/baseten.md",
+		"deepinfra":           "examples/deepinfra.md",
 		"zai":                 "examples/zai.md",
 		"zai-main-api":        "examples/zai.md",
 		"zai-coding-api":      "examples/zai.md",
@@ -973,6 +981,7 @@ func activeDocFiles() []string {
 	files = append(files, docExampleMarkdownFiles()...)
 	for _, f := range []string{
 		"docs/CLI.md",
+		"docs/BENCHMARKS.md",
 		"docs/CONFIG.md",
 		"docs/FACTORY.md",
 		"docs/OAUTH.md",
@@ -1005,6 +1014,25 @@ func TestDocsActiveDocsUseCurrentDefaultPort(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDroidBenchUsesCurrentDefaultPort(t *testing.T) {
+	mainSource := readRepoRel(t, "cmd/droid-bench/main.go")
+	if strings.Contains(mainSource, "http://127.0.0.1:8787") {
+		t.Fatal("droid-bench cache-check must not default to the retired port 8787")
+	}
+	if !strings.Contains(mainSource, "config.DefaultListenPort") {
+		t.Fatal("droid-bench cache-check must derive its default from config.DefaultListenPort")
+	}
+
+	exampleSource := readRepoRel(t, "internal/bench/harness/config.go")
+	if strings.Contains(exampleSource, "http://127.0.0.1:8787") {
+		t.Fatal("droid-bench example config must not target the retired port 8787")
+	}
+	want := fmt.Sprintf("http://127.0.0.1:%d", DefaultListenPort)
+	if !strings.Contains(exampleSource, want) {
+		t.Fatalf("droid-bench example config must target %s", want)
 	}
 }
 
@@ -1183,5 +1211,1922 @@ func TestDocsGoModVersionMatchesBootstrap(t *testing.T) {
 	}
 	if goVersion != "1.26.4" {
 		t.Fatalf("go.mod Go version = %q, want 1.26.4", goVersion)
+	}
+}
+
+// extractMarkdownSection returns the text under a "## Heading" up to the next
+// same-or-higher-level heading. Returns "" if the heading is absent.
+func extractMarkdownSection(body, heading string) string {
+	lines := strings.Split(body, "\n")
+	prefix := "## " + heading
+	var found bool
+	var out []string
+	for _, line := range lines {
+		if !found {
+			if strings.HasPrefix(line, prefix) {
+				found = true
+			}
+			continue
+		}
+		// Stop at the next ## (or higher) heading.
+		if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "# ") {
+			break
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
+// --- VAL-FIREWORKS-020: Recipes accurately separate Standard, Priority, Fast, and Fire Pass ---
+
+// TestFireworksDocsRecipesSeparatePaths verifies the Fireworks guide defines
+// Standard, Priority, baseline Fast, and Fire Pass as distinct recipes, with
+// a router-plus-priority combination only when the committed snapshot marks
+// it supported. No managed combination picker is required.
+func TestFireworksDocsRecipesSeparatePaths(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/fireworks.md")
+
+	// Standard recipe: ordinary model ID, no service_tier.
+	stdBlocks := fencedBlocks(body, "yaml")
+	if len(stdBlocks) < 4 {
+		t.Fatalf("fireworks.md must contain at least 4 YAML recipes (Standard, Priority, Fast, combination); got %d", len(stdBlocks))
+	}
+
+	// Parse all YAML blocks and look for each recipe type.
+	type recipe struct {
+		hasKnownAuth   string
+		hasServiceTier bool
+		serviceTierVal string
+		upstreamModel  string
+	}
+	recipes := []recipe{}
+	for _, block := range stdBlocks {
+		var m struct {
+			Models []struct {
+				KnownAuth     string         `yaml:"known_auth"`
+				UpstreamModel string         `yaml:"upstream_model"`
+				ExtraArgs     map[string]any `yaml:"extra_args"`
+			} `yaml:"models"`
+		}
+		if err := yaml.Unmarshal([]byte(block), &m); err != nil {
+			continue
+		}
+		for _, model := range m.Models {
+			r := recipe{
+				hasKnownAuth:  model.KnownAuth,
+				upstreamModel: model.UpstreamModel,
+			}
+			if st, ok := model.ExtraArgs["service_tier"]; ok {
+				r.hasServiceTier = true
+				if s, ok := st.(string); ok {
+					r.serviceTierVal = s
+				}
+			}
+			recipes = append(recipes, r)
+		}
+	}
+
+	// Standard: fireworks, models/... , no tier.
+	hasStandard := false
+	// Priority: fireworks, models/..., service_tier: priority.
+	hasPriority := false
+	// Fast: fireworks, routers/..., no tier.
+	hasFast := false
+	// Combination: fireworks, routers/..., service_tier: priority (snapshot-supported).
+	hasCombo := false
+
+	for _, r := range recipes {
+		isRouter := strings.Contains(r.upstreamModel, "/routers/")
+		isModel := strings.Contains(r.upstreamModel, "/models/")
+		switch {
+		case r.hasKnownAuth == "fireworks" && isModel && !r.hasServiceTier:
+			hasStandard = true
+		case r.hasKnownAuth == "fireworks" && isModel && r.serviceTierVal == "priority":
+			hasPriority = true
+		case r.hasKnownAuth == "fireworks" && isRouter && !r.hasServiceTier:
+			hasFast = true
+		case r.hasKnownAuth == "fireworks" && isRouter && r.serviceTierVal == "priority":
+			hasCombo = true
+		}
+	}
+
+	if !hasStandard {
+		t.Error("fireworks.md must define a Standard recipe (fireworks, models/..., no service_tier)")
+	}
+	if !hasPriority {
+		t.Error("fireworks.md must define a Priority recipe (fireworks, models/..., service_tier: priority)")
+	}
+	if !hasFast {
+		t.Error("fireworks.md must define a baseline Fast recipe (fireworks, routers/..., no service_tier)")
+	}
+	if !hasCombo {
+		t.Error("fireworks.md must define a snapshot-supported Fast+Priority recipe (fireworks, routers/..., service_tier: priority)")
+	}
+
+	// Must state the combination is snapshot-supported only and not inferred.
+	if !strings.Contains(body, "snapshot") {
+		t.Error("fireworks.md must state the Fast+Priority combination is snapshot-supported")
+	}
+	if !strings.Contains(body, "neither infers nor synthesizes") {
+		t.Error("fireworks.md must state the proxy neither infers nor synthesizes the combination")
+	}
+}
+
+// checkYAMLRecipeServiceTiers parses every YAML fenced block in body and
+// returns an error if any model entry has extra_args.service_tier == "fast".
+// This check is independent of surrounding prose so a negation in unrelated
+// text cannot mask a positive service_tier: fast recipe.
+func checkYAMLRecipeServiceTiers(body string) error {
+	for _, block := range fencedBlocks(body, "yaml") {
+		var m struct {
+			Models []struct {
+				Alias         string         `yaml:"alias"`
+				ExtraArgs     map[string]any `yaml:"extra_args"`
+				UpstreamModel string         `yaml:"upstream_model"`
+			} `yaml:"models"`
+		}
+		if err := yaml.Unmarshal([]byte(block), &m); err != nil {
+			continue // skip non-model YAML blocks
+		}
+		for _, model := range m.Models {
+			if st, ok := model.ExtraArgs["service_tier"]; ok {
+				if s, ok := st.(string); ok && s == "fast" {
+					return fmt.Errorf("YAML recipe for alias %q uses service_tier: fast — Fast must be a router model ID, not a service_tier value", model.Alias)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// TestFireworksDocsFastNotServiceTier verifies no YAML recipe in either
+// Fireworks guide uses service_tier: fast. The check parses every fenced
+// YAML recipe block individually so unrelated prose containing a negation
+// cannot mask a positive service_tier: fast entry.
+func TestFireworksDocsFastNotServiceTier(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/fireworks.md",
+		"docs/examples/fireworks-fire-pass.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			if err := checkYAMLRecipeServiceTiers(body); err != nil {
+				t.Fatalf("%s: %v", rel, err)
+			}
+		})
+	}
+}
+
+// TestFireworksDocsFastNotServiceTierDeterministic verifies that the
+// detection logic catches a positive service_tier: fast recipe even when
+// the surrounding text contains a negation. This proves the guard has a
+// deterministic failing test path that cannot be masked by unrelated prose.
+func TestFireworksDocsFastNotServiceTierDeterministic(t *testing.T) {
+	// Construct a doc where unrelated text says "not" but a YAML recipe
+	// uses service_tier: fast. The old document-wide check would pass
+	// because "not" appears in the body. The hardened check must fail.
+	badDoc := "# Fireworks\n\nThis is not a valid configuration.\n\n```yaml\n" +
+		`models:
+  - alias: bad-fast
+    known_auth: fireworks
+    upstream_model: accounts/fireworks/routers/glm-5p2-fast
+    extra_args:
+      service_tier: fast
+` + "```\n"
+	if err := checkYAMLRecipeServiceTiers(badDoc); err == nil {
+		t.Fatal("checkYAMLRecipeServiceTiers must reject service_tier: fast in a YAML recipe even when unrelated prose contains a negation")
+	}
+
+	// A clean doc with no service_tier: fast recipe must pass even if the
+	// prose discusses fast as a concept.
+	cleanDoc := "# Fireworks\n\nFast is a router model ID, not a service_tier value.\n\n```yaml\n" +
+		`models:
+  - alias: good-fast
+    known_auth: fireworks
+    upstream_model: accounts/fireworks/routers/glm-5p2-fast
+` + "```\n"
+	if err := checkYAMLRecipeServiceTiers(cleanDoc); err != nil {
+		t.Fatalf("checkYAMLRecipeServiceTiers must accept clean doc: %v", err)
+	}
+}
+
+// --- VAL-FIREWORKS-021: Registry, catalog, env, and docs stay synchronized ---
+
+// TestFireworksDocsFirePassExperimentalScope verifies the Fire Pass guide
+// identifies the product as experimental, limits zero-cost claims to
+// eligible routers with active pass, states the documented scope, warns about
+// mutable availability/pricing, and never implies arbitrary models are free.
+func TestFireworksDocsFirePassExperimentalScope(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/fireworks-fire-pass.md")
+
+	for _, want := range []string{
+		"experimental",
+		"mutable",
+		"availability",
+		"pricing",
+	} {
+		if !strings.Contains(strings.ToLower(body), want) {
+			t.Fatalf("fireworks-fire-pass.md must mention %q", want)
+		}
+	}
+
+	// Must limit zero-token-cost claims to eligible routers with active pass.
+	if !strings.Contains(body, "active") || !strings.Contains(body, "eligible") {
+		t.Fatal("fireworks-fire-pass.md must limit zero-cost claims to currently eligible routers with an active pass")
+	}
+
+	// Must never imply arbitrary Fireworks models become free.
+	if !strings.Contains(strings.ToLower(body), "not free") && !strings.Contains(strings.ToLower(body), "not") {
+		t.Fatal("fireworks-fire-pass.md must clarify arbitrary models are not free")
+	}
+
+	// Must mention personal/non-production scope.
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "personal") && !strings.Contains(lower, "non-production") {
+		t.Fatal("fireworks-fire-pass.md must state the personal/non-production agentic coding scope")
+	}
+}
+
+// TestFireworksDocsManualEntryGuaranteed verifies both guides document manual
+// model entry as the guaranteed onboarding path.
+func TestFireworksDocsManualEntryGuaranteed(t *testing.T) {
+	stdBody := readRepoRel(t, "docs/examples/fireworks.md")
+	fpBody := readRepoRel(t, "docs/examples/fireworks-fire-pass.md")
+
+	for _, want := range []string{"manual", "guaranteed"} {
+		if !strings.Contains(strings.ToLower(stdBody), want) {
+			t.Fatalf("fireworks.md must mention %q for manual entry", want)
+		}
+	}
+	for _, want := range []string{"manual"} {
+		if !strings.Contains(strings.ToLower(fpBody), want) {
+			t.Fatalf("fireworks-fire-pass.md must mention %q for manual entry", want)
+		}
+	}
+}
+
+// TestFireworksDocsNoLiveValidationClaims verifies no public Fireworks guidance
+// calls the compatibility path the official model-list API or implies mocked
+// success proves live availability.
+func TestFireworksDocsNoLiveValidationClaims(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/fireworks.md",
+		"docs/examples/fireworks-fire-pass.md",
+		"docs/PROVIDERS.md",
+		"docs/CONFIG.md",
+	} {
+		body := readRepoRel(t, rel)
+		lower := strings.ToLower(body)
+		// The compatibility path must be labeled best-effort, not official.
+		if strings.Contains(lower, "official fireworks list models api") || strings.Contains(lower, "official account-scoped list models api") {
+			t.Fatalf("%s must not label the compatibility path as the official model-list API", rel)
+		}
+		// Must not claim mock validation proves live availability.
+		if strings.Contains(lower, "mock validation establishes") || strings.Contains(lower, "mocked success proves") {
+			t.Fatalf("%s must not claim mock validation proves live availability", rel)
+		}
+	}
+}
+
+// TestFireworksDocsCompatibilityPathQualified verifies the Standard discovery
+// path is explicitly labeled as best-effort compatibility, not official.
+func TestFireworksDocsCompatibilityPathQualified(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/fireworks.md")
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "best-effort compatibility") {
+		t.Fatal("fireworks.md must label the discovery path as best-effort compatibility")
+	}
+}
+
+// TestFireworksEnvTemplateHasBothKeys verifies the env template contains
+// exactly one empty assignment for each Fireworks credential.
+func TestFireworksEnvTemplateHasBothKeys(t *testing.T) {
+	body := readRepoRel(t, ".env.local.example")
+	for _, key := range []string{"FIREWORKS_API_KEY", "FIREWORKS_FIRE_PASS_API_KEY"} {
+		// Count empty assignments: KEY=""
+		pattern := key + `=""`
+		count := strings.Count(body, pattern)
+		if count != 1 {
+			t.Fatalf(".env.local.example must contain exactly one empty %s assignment, got %d", key, count)
+		}
+	}
+}
+
+// TestFireworksDocsIndexLinksFirePass verifies the docs index and README link
+// to the Fire Pass example.
+func TestFireworksDocsIndexLinksFirePass(t *testing.T) {
+	for _, rel := range []string{"docs/README.md", "README.md"} {
+		body := readRepoRel(t, rel)
+		if !strings.Contains(body, "fireworks-fire-pass.md") {
+			t.Fatalf("%s must link to fireworks-fire-pass.md", rel)
+		}
+	}
+}
+
+// --- VAL-FIREWORKS-021: Catalog source records are pinned and deterministic ---
+
+// TestFireworksCatalogSourceRecordsPinned verifies both catalogs have a
+// committed official source URL and as-of date.
+func TestFireworksCatalogSourceRecordsPinned(t *testing.T) {
+	fpSrc := FireworksFirePassCatalogSource()
+	if fpSrc.URL == "" {
+		t.Error("Fire Pass catalog source URL must not be empty")
+	}
+	if fpSrc.AsOf == "" {
+		t.Error("Fire Pass catalog source as-of date must not be empty")
+	}
+	if !strings.HasPrefix(fpSrc.URL, "https://") {
+		t.Errorf("Fire Pass source URL must be https: %q", fpSrc.URL)
+	}
+
+	fastSrc := FireworksFastCatalogSource()
+	if fastSrc.URL == "" {
+		t.Error("Fast catalog source URL must not be empty")
+	}
+	if fastSrc.AsOf == "" {
+		t.Error("Fast catalog source as-of date must not be empty")
+	}
+	if !strings.HasPrefix(fastSrc.URL, "https://") {
+		t.Errorf("Fast source URL must be https: %q", fastSrc.URL)
+	}
+
+	// Sources must be independent (different URL or different label).
+	if fpSrc.URL == fastSrc.URL && fpSrc.Label == fastSrc.Label {
+		t.Error("Fire Pass and Fast sources must be independent (different URL or label)")
+	}
+}
+
+// TestFireworksCatalogsUseIndependentMembership verifies Fire Pass and Fast
+// catalogs use independent official-source membership and may overlap, but
+// Fire Pass excludes routers not in its own catalog.
+func TestFireworksCatalogsUseIndependentMembership(t *testing.T) {
+	fpCatalog := FireworksFirePassCatalog()
+	fastCatalog := FireworksFastCatalog()
+
+	// Canonical router must be present in Fire Pass.
+	fpHasCanonical := false
+	for _, e := range fpCatalog {
+		if e.ID == "accounts/fireworks/routers/glm-5p2-fast" {
+			fpHasCanonical = true
+		}
+	}
+	if !fpHasCanonical {
+		t.Error("Fire Pass catalog must contain accounts/fireworks/routers/glm-5p2-fast")
+	}
+
+	// Canonical router must be present in Fast.
+	fastHasCanonical := false
+	for _, e := range fastCatalog {
+		if e.ID == "accounts/fireworks/routers/glm-5p2-fast" {
+			fastHasCanonical = true
+		}
+	}
+	if !fastHasCanonical {
+		t.Error("Fast catalog must contain accounts/fireworks/routers/glm-5p2-fast")
+	}
+
+	// Overlap is allowed and tested (both have glm-5p2-fast).
+	if fpHasCanonical && fastHasCanonical {
+		// Good: overlap is tested.
+	}
+
+	// Fire Pass entries must all be router IDs (not ordinary model IDs).
+	for _, e := range fpCatalog {
+		if !strings.Contains(e.ID, "/routers/") {
+			t.Errorf("Fire Pass catalog entry %q must be a router ID", e.ID)
+		}
+	}
+	// Fast entries must all be router IDs.
+	for _, e := range fastCatalog {
+		if !strings.Contains(e.ID, "/routers/") {
+			t.Errorf("Fast catalog entry %q must be a router ID", e.ID)
+		}
+	}
+}
+
+// TestFireworksSnapshotSupportedFastPriorityExact verifies the snapshot
+// marks only the documented router as supported for Fast+Priority. The
+// check asserts exact cardinality and exact membership so adding or removing
+// an entry is a deterministic test failure.
+func TestFireworksSnapshotSupportedFastPriorityExact(t *testing.T) {
+	supported := FireworksSnapshotSupportedFastPriority()
+	want := []string{
+		"accounts/fireworks/routers/glm-5p2-fast",
+	}
+	if len(supported) != len(want) {
+		t.Fatalf("snapshot-supported Fast+Priority cardinality = %d, want exactly %d (got %v)", len(supported), len(want), supported)
+	}
+	for i, id := range want {
+		if supported[i] != id {
+			t.Errorf("snapshot-supported[%d] = %q, want %q", i, supported[i], id)
+		}
+	}
+	// Slices.Equal provides a clean cardinality+membership assertion.
+	if !slices.Equal(supported, want) {
+		t.Fatalf("snapshot-supported Fast+Priority = %v, want exactly %v", supported, want)
+	}
+}
+
+// --- VAL-FIREWORKS-022: Pass-through and security boundaries documented ---
+
+// TestFireworksDocsPassThroughFieldsDocumented verifies the guide identifies
+// extra_args as top-level pass-through and covers the agreed field set.
+func TestFireworksDocsPassThroughFieldsDocumented(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/fireworks.md")
+	lower := strings.ToLower(body)
+
+	// Must identify extra_args as top-level pass-through.
+	if !strings.Contains(lower, "pass-through") && !strings.Contains(lower, "passthrough") {
+		t.Fatal("fireworks.md must identify extra_args as top-level pass-through")
+	}
+	if !strings.Contains(lower, "top-level") {
+		t.Fatal("fireworks.md must state extra_args are merged at the top level")
+	}
+
+	// Must cover the agreed field set.
+	requiredFields := []string{
+		"service_tier",
+		"reasoning_effort",
+		"reasoning_history",
+		"thinking",
+		"prompt_cache_key",
+		"prompt_cache_isolation_key",
+		"perf_metrics_in_response",
+		"context_length_exceeded_behavior",
+		"response_format",
+		"min_p",
+		"top_k",
+		"repetition_penalty",
+		"tools",
+		"tool_choice",
+		"parallel_tool_calls",
+		"stream",
+		"stream_options",
+	}
+	for _, field := range requiredFields {
+		if !strings.Contains(lower, field) {
+			t.Fatalf("fireworks.md must document pass-through field %q", field)
+		}
+	}
+}
+
+// prohibitedClaimPatterns maps prohibited claim phrases to the negation
+// markers that may appear in the same sentence to make the claim explicitly
+// negative (and thus acceptable). A sentence containing a prohibited phrase
+// without a co-occurring negation marker fails.
+var prohibitedClaimPatterns = []struct {
+	phrase   string
+	negation []string
+}{
+	// Translation claims — the proxy must not translate between protocols.
+	{"translates", []string{"does not", "not "}},
+	{"translate ", []string{"does not", "not "}},
+	// Static / synthesized affinity claims.
+	{"session affinity", []string{"does not", "not invent", "not "}},
+	{"static affinity", []string{"does not", "not invent", "not "}},
+	{"synthesized affinity", []string{"does not", "not invent", "not "}},
+	// Live-validation claims — mock-only validation is not live.
+	{"mock validation establishes", []string{}}, // always prohibited
+	{"mocked success proves", []string{}},       // always prohibited
+	{"establishes live", []string{}},            // always prohibited
+	// Universal-capability claims — capabilities are model-dependent.
+	{"all models support", []string{}},   // always prohibited
+	{"every model supports", []string{}}, // always prohibited
+}
+
+// checkNoProhibitedClaims splits body into sentences and verifies that no
+// sentence contains a prohibited claim without a co-occurring negation. This
+// prevents a document-wide negation from masking a positive prohibited claim.
+func checkNoProhibitedClaims(body string) error {
+	// Split on sentence boundaries while preserving enough context.
+	// We split on newlines and periods followed by space+capital, then
+	// also check each line as a unit for table rows.
+	sentences := splitSentences(body)
+	for _, sent := range sentences {
+		lower := strings.ToLower(sent)
+		for _, p := range prohibitedClaimPatterns {
+			if !strings.Contains(lower, p.phrase) {
+				continue
+			}
+			// If the phrase is present, verify a negation is in the same sentence.
+			allowed := false
+			for _, neg := range p.negation {
+				if strings.Contains(lower, neg) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("prohibited claim %q appears without co-occurring negation in sentence: %q", p.phrase, strings.TrimSpace(sent))
+			}
+		}
+	}
+	return nil
+}
+
+// splitSentences splits markdown text into sentence-like units for claim
+// checking. It preserves table rows and list items as individual units and
+// splits prose on sentence boundaries.
+func splitSentences(text string) []string {
+	// First split on newlines to get lines.
+	lines := strings.Split(text, "\n")
+	var sentences []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		// For prose lines, further split on ". " boundaries.
+		// But keep table rows and list items as whole lines.
+		if strings.HasPrefix(trimmed, "|") || strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "```") {
+			sentences = append(sentences, line)
+			continue
+		}
+		// Split on period-space for prose.
+		parts := strings.Split(line, ". ")
+		sentences = append(sentences, parts...)
+	}
+	return sentences
+}
+
+// TestFireworksDocsNoProhibitedClaims verifies no Fireworks documentation
+// sentence contains a prohibited translation, static-affinity,
+// live-validation, or universal-capability claim without a co-occurring
+// negation in the same sentence. The check is scoped to Fireworks-specific
+// guides; PROVIDERS.md legitimately describes T3 protocol translation paths
+// as a core proxy feature and is not a Fireworks pass-through violation.
+func TestFireworksDocsNoProhibitedClaims(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/fireworks.md",
+		"docs/examples/fireworks-fire-pass.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			if err := checkNoProhibitedClaims(body); err != nil {
+				t.Fatalf("%s: %v", rel, err)
+			}
+		})
+	}
+}
+
+// TestFireworksDocsProhibitedClaimsDeterministic verifies the sentence-level
+// check catches a positive prohibited claim even when unrelated text elsewhere
+// contains a negation. This proves the guard cannot be masked by a
+// document-wide substring match.
+func TestFireworksDocsProhibitedClaimsDeterministic(t *testing.T) {
+	// A doc where "not" appears in one sentence and "translates" in a
+	// different sentence must fail. The old document-wide check would pass
+	// because "not" is present in the body.
+	badDoc := "# Guide\n\nThe proxy does not modify your data.\n\nThe proxy translates between protocols automatically.\n"
+	if err := checkNoProhibitedClaims(badDoc); err == nil {
+		t.Fatal("checkNoProhibitedClaims must reject 'translates' in a sentence without a co-occurring negation")
+	}
+
+	// A doc where "translates" appears with "does not" in the same sentence
+	// must pass (explicitly negative claim).
+	goodDoc := "# Guide\n\nThe proxy does not translate between protocols.\n"
+	if err := checkNoProhibitedClaims(goodDoc); err != nil {
+		t.Fatalf("checkNoProhibitedClaims must accept explicitly negative claim: %v", err)
+	}
+
+	// "all models support" with no negation must always fail.
+	badUniversal := "# Guide\n\nAll models support reasoning output.\n"
+	if err := checkNoProhibitedClaims(badUniversal); err == nil {
+		t.Fatal("checkNoProhibitedClaims must reject universal-capability claim 'all models support'")
+	}
+
+	// "mocked success proves" with no negation must always fail.
+	badLive := "# Guide\n\nMocked success proves live provider availability.\n"
+	if err := checkNoProhibitedClaims(badLive); err == nil {
+		t.Fatal("checkNoProhibitedClaims must reject live-validation claim 'mocked success proves'")
+	}
+}
+
+// factorySyncRequiredExclusions lists every value that must be explicitly
+// excluded from the Factory-sync entry, and the markdown text that should
+// appear within the Factory-sync section to document that exclusion.
+var factorySyncRequiredExclusions = []struct {
+	desc   string // human-readable description of the excluded value
+	marker string // substring that must appear within the Factory-sync section
+}{
+	{"Fireworks upstream URL", "upstream URL"},
+	{"known_auth", "known_auth"},
+	{"upstream model/router ID", "router ID"},
+	{"service_tier", "service_tier"},
+	{"extra_args", "extra_args"},
+	{"env-var name", "env-var name"},
+	{"upstream credential", "credential"},
+}
+
+// checkFactorySyncSectionExclusions extracts the "Factory sync" section from
+// body and verifies each required exclusion marker is present within that
+// section. This prevents a document-wide substring from masking a missing
+// exclusion within the section.
+func checkFactorySyncSectionExclusions(body string) error {
+	section := extractMarkdownSection(body, "Factory sync")
+	if section == "" {
+		return fmt.Errorf("no '## Factory sync' section found")
+	}
+	for _, ex := range factorySyncRequiredExclusions {
+		if !strings.Contains(section, ex.marker) {
+			return fmt.Errorf("Factory sync section must state exclusion of %s (looking for %q within the section)", ex.desc, ex.marker)
+		}
+	}
+	return nil
+}
+
+// TestFireworksDocsFactorySyncExcludesUpstream verifies each required
+// Factory-sync exclusion is asserted within the Factory-sync documentation
+// section. The check is section-scoped so a document-wide mention of
+// "credential" in an unrelated section cannot mask a missing exclusion.
+func TestFireworksDocsFactorySyncExcludesUpstream(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/fireworks.md",
+		"docs/examples/fireworks-fire-pass.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			if err := checkFactorySyncSectionExclusions(body); err != nil {
+				t.Fatalf("%s: %v", rel, err)
+			}
+		})
+	}
+}
+
+// TestFireworksDocsFactorySyncExcludesDeterministic verifies that the
+// section-scoped check catches a missing exclusion even when the value
+// appears elsewhere in the document. This proves the guard cannot be masked
+// by a document-wide substring match.
+func TestFireworksDocsFactorySyncExcludesDeterministic(t *testing.T) {
+	// Construct a doc where "credential" appears in a different section
+	// but is missing from the Factory-sync section. The old document-wide
+	// check would pass; the hardened section-scoped check must fail.
+	badDoc := "# Guide\n\n## Overview\n\nYour credential is private.\n\n## Factory sync\n\n" +
+		"Factory sync writes the local alias and baseUrl.\n\n## Notes\n\nDone.\n"
+	if err := checkFactorySyncSectionExclusions(badDoc); err == nil {
+		t.Fatal("checkFactorySyncSectionExclusions must reject a Factory-sync section missing required exclusions")
+	}
+
+	// A doc with all exclusions in the section must pass.
+	goodDoc := "# Guide\n\n## Factory sync\n\n" +
+		"Factory sync never includes the upstream URL, known_auth, " +
+		"the model/router ID, service_tier, any extra_args, " +
+		"the env-var name, or the upstream credential.\n"
+	if err := checkFactorySyncSectionExclusions(goodDoc); err != nil {
+		t.Fatalf("checkFactorySyncSectionExclusions must accept complete section: %v", err)
+	}
+}
+
+// --- VAL-BASETEN-017: Baseten registry and public artifacts stay synchronized ---
+
+// TestBasetenDocsFactorySyncExcludesUpstream verifies the Baseten Factory-sync
+// section explicitly documents that it excludes upstream secrets and metadata.
+func TestBasetenDocsFactorySyncExcludesUpstream(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	section := extractMarkdownSection(body, "Factory sync")
+	if section == "" {
+		t.Fatal("docs/examples/baseten.md must contain a '## Factory sync' section")
+	}
+	for _, marker := range []string{
+		"upstream URL",
+		"known_auth",
+		"upstream model",
+		"extra_args",
+		"env-var name",
+		"credential",
+	} {
+		if !strings.Contains(section, marker) {
+			t.Errorf("baseten.md Factory sync section must mention exclusion of %q", marker)
+		}
+	}
+}
+
+// TestBasetenDocsManualEntryGuaranteed verifies the Baseten guide documents
+// manual entry as always available.
+func TestBasetenDocsManualEntryGuaranteed(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	for _, want := range []string{
+		"manual",
+		"Manual",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("baseten.md must mention manual entry")
+		}
+	}
+}
+
+// TestBasetenDocsNoLiveValidationClaims verifies the Baseten guide does not
+// claim live provider validation.
+func TestBasetenDocsNoLiveValidationClaims(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	if err := checkNoProhibitedClaims(body); err != nil {
+		t.Fatalf("baseten.md: %v", err)
+	}
+}
+
+// TestBasetenDocsScopedToSharedModelAPI verifies the guide scopes the native
+// profile to shared Model APIs and directs custom deployments to custom endpoints.
+func TestBasetenDocsScopedToSharedModelAPI(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	for _, want := range []string{
+		"shared Model API",
+		"custom",
+		"dedicated",
+	} {
+		if !strings.Contains(strings.ToLower(body), strings.ToLower(want)) {
+			t.Errorf("baseten.md must mention %q", want)
+		}
+	}
+	// The native recipe must have known_auth: baseten and no base_url.
+	nativeSection := extractMarkdownSection(body, "Recipe")
+	if nativeSection == "" {
+		t.Fatal("baseten.md must contain a '## Recipe' section")
+	}
+	yamlBlocks := fencedBlocks(nativeSection, "yaml")
+	found := false
+	for _, block := range yamlBlocks {
+		if strings.Contains(block, "known_auth: baseten") && !strings.Contains(block, "base_url:") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("baseten.md native recipe must have known_auth: baseten and no base_url")
+	}
+}
+
+// TestBasetenDocsNativeAndCustomAreDistinct verifies the guide presents both
+// a native profile recipe (with known_auth: baseten) and a custom deployment
+// recipe (with explicit base_url/api_key_env and no known_auth).
+func TestBasetenDocsNativeAndCustomAreDistinct(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	// Custom deployment section must exist.
+	customSection := extractMarkdownSection(body, "Custom deployment recipe")
+	if customSection == "" {
+		t.Fatal("baseten.md must contain a '## Custom deployment recipe' section")
+	}
+	yamlBlocks := fencedBlocks(customSection, "yaml")
+	found := false
+	for _, block := range yamlBlocks {
+		if strings.Contains(block, "base_url:") && strings.Contains(block, "api_key_env:") && !strings.Contains(block, "known_auth: baseten") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("baseten.md custom deployment recipe must have base_url and api_key_env without known_auth: baseten")
+	}
+}
+
+// TestBasetenDocsAgentReadyScoped verifies the guide describes agent_ready as
+// configured/resolved metadata, not proof of universal model support.
+func TestBasetenDocsAgentReadyScoped(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	if !strings.Contains(body, "agent_ready") {
+		t.Fatal("baseten.md must mention agent_ready")
+	}
+	if !strings.Contains(strings.ToLower(body), "configured") || !strings.Contains(strings.ToLower(body), "model-dependent") {
+		t.Errorf("baseten.md must describe agent_ready as configured metadata and note model-dependence")
+	}
+}
+
+// TestBasetenEnvTemplateHasKey verifies the env template contains exactly one
+// empty BASETEN_API_KEY assignment.
+func TestBasetenEnvTemplateHasKey(t *testing.T) {
+	body := readRepoRel(t, ".env.local.example")
+	pattern := `BASETEN_API_KEY=""`
+	count := strings.Count(body, pattern)
+	if count != 1 {
+		t.Errorf("BASETEN_API_KEY empty assignment count = %d, want 1", count)
+	}
+}
+
+// TestBasetenDocsRegistrySynchronized verifies the Baseten registry tuple
+// matches the PROVIDERS.md matrix row.
+func TestBasetenDocsRegistrySynchronized(t *testing.T) {
+	ka, ok := LookupKnownAuth("baseten")
+	if !ok {
+		t.Fatal("baseten profile missing from registry")
+	}
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	for _, want := range []string{
+		ka.BaseURL,
+		ka.APIKeyEnv,
+		string(ka.UpstreamProtocol),
+		"generic-chat-completion-api",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("baseten.md must contain %q", want)
+		}
+	}
+}
+
+// TestBasetenDocsReadmeAndProviderLinks verify the README and docs/README.md
+// link to the Baseten example.
+func TestBasetenDocsReadmeAndProviderLinks(t *testing.T) {
+	for _, rel := range []string{"README.md", "docs/README.md"} {
+		body := readRepoRel(t, rel)
+		if !strings.Contains(body, "baseten.md") {
+			t.Errorf("%s must link to examples/baseten.md", rel)
+		}
+	}
+}
+
+// TestBasetenDocsRecipeHydratesWithSyntheticKey parses the native recipe YAML
+// from baseten.md and verifies it hydrates with a synthetic BASETEN_API_KEY.
+// This directly tests VAL-BASETEN-017's "hydrates with a synthetic key" claim.
+func TestBasetenDocsRecipeHydratesWithSyntheticKey(t *testing.T) {
+	t.Setenv("BASETEN_API_KEY", "synthetic-baseten-key-12345")
+
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	recipeSection := extractMarkdownSection(body, "Recipe")
+	if recipeSection == "" {
+		t.Fatal("baseten.md must contain a '## Recipe' section")
+	}
+	blocks := fencedBlocks(recipeSection, "yaml")
+	if len(blocks) == 0 {
+		t.Fatal("baseten.md Recipe section must contain at least one YAML block")
+	}
+
+	// Parse the native recipe block (contains known_auth: baseten).
+	type recipeYAML struct {
+		Models []Model `yaml:"models"`
+	}
+	var nativeFound bool
+	for _, block := range blocks {
+		var ry recipeYAML
+		if err := yaml.Unmarshal([]byte(block), &ry); err != nil {
+			continue
+		}
+		for _, m := range ry.Models {
+			if m.KnownAuth != "baseten" {
+				continue
+			}
+			nativeFound = true
+			// Hydrate the model from the registry.
+			model := m
+			if err := HydrateModel(&model); err != nil {
+				t.Fatalf("hydration failed for native recipe: %v", err)
+			}
+			// Verify exact tuple after hydration.
+			if model.BaseURL != "https://inference.baseten.co/v1" {
+				t.Errorf("hydrated BaseURL = %q, want https://inference.baseten.co/v1", model.BaseURL)
+			}
+			if model.APIKeyEnv != "BASETEN_API_KEY" {
+				t.Errorf("hydrated APIKeyEnv = %q, want BASETEN_API_KEY", model.APIKeyEnv)
+			}
+			if model.UpstreamProtocol != UpstreamOpenAIChat {
+				t.Errorf("hydrated UpstreamProtocol = %q, want openai-chat", model.UpstreamProtocol)
+			}
+			if model.FactoryProvider != "generic-chat-completion-api" {
+				t.Errorf("FactoryProvider = %q, want generic-chat-completion-api", model.FactoryProvider)
+			}
+			// No provider-wide defaults injected.
+			if len(model.ExtraArgs) != 0 {
+				t.Errorf("ExtraArgs should be empty after hydration, got %v", model.ExtraArgs)
+			}
+			if len(model.ExtraHeaders) != 0 {
+				t.Errorf("ExtraHeaders should be empty after hydration, got %v", model.ExtraHeaders)
+			}
+			// Upstream model must be preserved exactly (opaque slug).
+			if m.UpstreamModel != model.UpstreamModel {
+				t.Errorf("upstream model changed during hydration: %q -> %q", m.UpstreamModel, model.UpstreamModel)
+			}
+		}
+	}
+	if !nativeFound {
+		t.Fatal("baseten.md Recipe section must contain a native recipe with known_auth: baseten")
+	}
+}
+
+// TestBasetenDocsCustomRecipeDoesNotInheritProfile verifies the custom
+// deployment recipe in baseten.md does not carry known_auth: baseten and
+// has its own explicit base_url/api_key_env.
+func TestBasetenDocsCustomRecipeDoesNotInheritProfile(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	customSection := extractMarkdownSection(body, "Custom deployment recipe")
+	if customSection == "" {
+		t.Fatal("baseten.md must contain a '## Custom deployment recipe' section")
+	}
+	blocks := fencedBlocks(customSection, "yaml")
+	if len(blocks) == 0 {
+		t.Fatal("baseten.md Custom deployment recipe section must contain at least one YAML block")
+	}
+
+	type recipeYAML struct {
+		Models []Model `yaml:"models"`
+	}
+	var customFound bool
+	for _, block := range blocks {
+		var ry recipeYAML
+		if err := yaml.Unmarshal([]byte(block), &ry); err != nil {
+			continue
+		}
+		for _, m := range ry.Models {
+			if m.KnownAuth == "baseten" {
+				t.Errorf("custom deployment recipe must not have known_auth: baseten (alias %q)", m.Alias)
+			}
+			if m.BaseURL != "" && m.APIKeyEnv != "" && m.KnownAuth == "" {
+				customFound = true
+			}
+		}
+	}
+	if !customFound {
+		t.Fatal("baseten.md Custom deployment recipe must have a model with explicit base_url and api_key_env and no known_auth")
+	}
+}
+
+// TestBasetenDocsNoStaleEndpoints verifies no Baseten doc uses a stale or
+// incorrect endpoint or env var name.
+func TestBasetenDocsNoStaleEndpoints(t *testing.T) {
+	staleURLs := []string{
+		// Must always use the inference subdomain prefix.
+		"https://baseten.co/v1",
+		"https://api.baseten.co/v1",
+		// Must not use model API without the /v1 path.
+		"https://inference.baseten.co/chat",
+	}
+	staleEnvNames := []string{
+		"BASETEN_KEY",
+		"BASETEN_TOKEN",
+		"BASETEN_SECRET",
+		"BASETEN_API_TOKEN",
+	}
+	docsToCheck := append([]string{
+		"docs/examples/baseten.md",
+		"docs/PROVIDERS.md",
+		"README.md",
+		"docs/README.md",
+		".env.local.example",
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+	}, docExampleMarkdownFiles()...)
+	for _, rel := range docsToCheck {
+		body := readRepoRel(t, rel)
+		for _, stale := range staleURLs {
+			if strings.Contains(body, stale) {
+				t.Errorf("%s contains stale Baseten URL %q", rel, stale)
+			}
+		}
+		for _, stale := range staleEnvNames {
+			if strings.Contains(body, stale) {
+				t.Errorf("%s contains stale Baseten env name %q", rel, stale)
+			}
+		}
+	}
+}
+
+// normalizationClaimPatterns maps prohibited model-ID normalization claim
+// phrases to the negation markers that may appear in the same sentence to
+// make the claim explicitly negative (and thus acceptable). A sentence
+// containing a prohibited phrase without a co-occurring negation fails.
+// Universal-capability phrases are always prohibited (empty negation slice).
+var normalizationClaimPatterns = []struct {
+	phrase   string
+	negation []string
+}{
+	{"rewrites model", []string{"does not", "not ", "never "}},
+	{"normalizes model", []string{"does not", "not ", "never "}},
+	{"maps model", []string{"does not", "not ", "never "}},
+	{"translates model", []string{"does not", "not ", "never "}},
+	// Universal-capability claims are always prohibited (no negation escape).
+	{"all models support", []string{}},
+	{"every model supports", []string{}},
+}
+
+// checkNoModelNormalizationClaims is a reusable predicate that splits body
+// into sentences and verifies that no sentence positively claims the proxy
+// rewrites, normalizes, maps, or translates model IDs without a co-occurring
+// negation. Precise descriptions of exact opaque model preservation (e.g.,
+// "model IDs are preserved byte-for-byte") remain allowed because they do
+// not contain a prohibited normalization phrase. Universal-capability claims
+// ("all models support ...") are always rejected.
+func checkNoModelNormalizationClaims(body string) error {
+	for _, sent := range splitSentences(body) {
+		lower := strings.ToLower(sent)
+		for _, p := range normalizationClaimPatterns {
+			if !strings.Contains(lower, p.phrase) {
+				continue
+			}
+			allowed := false
+			for _, neg := range p.negation {
+				if strings.Contains(lower, neg) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("prohibited model-ID normalization claim %q appears without co-occurring negation in sentence: %q", p.phrase, strings.TrimSpace(sent))
+			}
+		}
+	}
+	return nil
+}
+
+// TestBasetenDocsNoModelNormalizationClaims verifies the Baseten guide and
+// scoped reference docs do not positively claim model-ID normalization,
+// rewriting, mapping, or translation. The check is sentence-level so a
+// negation in unrelated prose cannot mask a positive claim, and so that
+// precise descriptions of exact opaque model preservation remain allowed.
+// "Provider-wide reasoning" is acceptable when negated and is additionally
+// checked by checkNoProhibitedClaims in TestBasetenDocsNoLiveValidationClaims.
+func TestBasetenDocsNoModelNormalizationClaims(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/baseten.md",
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			if err := checkNoModelNormalizationClaims(body); err != nil {
+				t.Fatalf("%s: %v", rel, err)
+			}
+		})
+	}
+}
+
+// TestBasetenDocsNormalizationClaimsDeterministic proves the sentence-level
+// normalization predicate catches each prohibited model-ID claim (rewrites,
+// normalizes, maps, translates) even when unrelated text contains a
+// negation, and accepts precise descriptions of exact opaque model
+// preservation. This provides deterministic failing and accepted fixture
+// paths that cannot be masked by document-wide substring matches.
+func TestBasetenDocsNormalizationClaimsDeterministic(t *testing.T) {
+	tests := []struct {
+		name    string
+		doc     string
+		wantErr bool
+	}{
+		// --- Failing fixtures: positive claims without negation ---
+		{
+			name:    "rewrite positive claim fails despite negation elsewhere",
+			doc:     "# Guide\n\nThe proxy does not modify data.\n\nThe proxy rewrites model IDs to canonical names.\n",
+			wantErr: true,
+		},
+		{
+			name:    "normalize positive claim fails",
+			doc:     "# Guide\n\nBaseten normalizes model slugs automatically.\n",
+			wantErr: true,
+		},
+		{
+			name:    "map positive claim fails",
+			doc:     "# Guide\n\nThe proxy maps model IDs to standard formats.\n",
+			wantErr: true,
+		},
+		{
+			name:    "translate positive claim fails",
+			doc:     "# Guide\n\nThe proxy translates model identifiers for compatibility.\n",
+			wantErr: true,
+		},
+		{
+			name:    "universal capability always fails",
+			doc:     "# Guide\n\nAll models support reasoning output.\n",
+			wantErr: true,
+		},
+		// --- Accepted fixtures: negated claims and correct preservation ---
+		{
+			name:    "rewrite negated with never accepted",
+			doc:     "# Guide\n\nThe proxy never rewrites model IDs.\n",
+			wantErr: false,
+		},
+		{
+			name:    "rewrite negated with does not accepted",
+			doc:     "# Guide\n\nThe proxy does not rewrite model IDs.\n",
+			wantErr: false,
+		},
+		{
+			name:    "normalize negated accepted",
+			doc:     "# Guide\n\nThe proxy does not normalize model slugs.\n",
+			wantErr: false,
+		},
+		{
+			name:    "map negated accepted",
+			doc:     "# Guide\n\nThe proxy never maps model IDs to aliases.\n",
+			wantErr: false,
+		},
+		{
+			name:    "translate negated accepted",
+			doc:     "# Guide\n\nThe proxy does not translate model IDs.\n",
+			wantErr: false,
+		},
+		{
+			name:    "exact byte-for-byte preservation accepted",
+			doc:     "# Guide\n\nBaseten model IDs are preserved byte-for-byte through the picker and reload cycle.\n",
+			wantErr: false,
+		},
+		{
+			name:    "precise opaque slug preservation accepted",
+			doc:     "# Guide\n\nThe proxy preserves opaque slugs exactly without provider-prefix normalization.\n",
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkNoModelNormalizationClaims(tt.doc)
+			if tt.wantErr && err == nil {
+				t.Fatal("checkNoModelNormalizationClaims must reject this doc")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("checkNoModelNormalizationClaims must accept this doc: %v", err)
+			}
+		})
+	}
+}
+
+// TestBasetenDocsProhibitedClaimsExtendedDocs verifies generic reference docs
+// (CONFIG.md and FACTORY.md) do not contain prohibited live-validation or
+// universal capability claims. PROVIDERS.md is excluded because it
+// legitimately describes T3 protocol translation paths as a core proxy
+// feature.
+func TestBasetenDocsProhibitedClaimsExtendedDocs(t *testing.T) {
+	for _, rel := range []string{
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			body := readRepoRel(t, rel)
+			// Run the sentence-level prohibited-claims check.
+			if err := checkNoProhibitedClaims(body); err != nil {
+				t.Fatalf("%s: %v", rel, err)
+			}
+		})
+	}
+}
+
+// TestBasetenDocsUsesCurrentPort verifies Baseten docs use port 9787 and
+// never the old default 8787 as an operational target.
+func TestBasetenDocsUsesCurrentPort(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/baseten.md")
+	if !strings.Contains(body, "127.0.0.1:9787") {
+		t.Error("baseten.md must reference the current default port 127.0.0.1:9787")
+	}
+	if strings.Contains(body, "127.0.0.1:8787") {
+		t.Error("baseten.md must not reference the old default port 127.0.0.1:8787")
+	}
+}
+
+// --- VAL-DEEPINFRA-017: DeepInfra registry and public artifacts stay synchronized ---
+
+// TestDeepInfraDocsRegistrySynchronized verifies the DeepInfra guide matches
+// the exact registry tuple: base URL, env var, protocol, Factory mode, and
+// discovery contract.
+func TestDeepInfraDocsRegistrySynchronized(t *testing.T) {
+	ka, ok := LookupKnownAuth("deepinfra")
+	if !ok {
+		t.Fatal("deepinfra profile missing from registry")
+	}
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+
+	// Registry tuple elements must appear in their authoritative sections,
+	// not just anywhere in the document. A document-wide substring match
+	// could be masked by the value appearing in an unrelated section.
+	overview := extractMarkdownSection(body, "Overview")
+	if overview == "" {
+		t.Fatal("deepinfra.md must contain an '## Overview' section")
+	}
+	for _, want := range []string{
+		ka.BaseURL,
+		string(ka.UpstreamProtocol),
+		"generic-chat-completion-api",
+	} {
+		if !strings.Contains(overview, want) {
+			t.Errorf("deepinfra.md Overview section must contain %q", want)
+		}
+	}
+
+	prereqs := extractMarkdownSection(body, "Prerequisites")
+	if prereqs == "" {
+		t.Fatal("deepinfra.md must contain a '## Prerequisites' section")
+	}
+	if !strings.Contains(prereqs, ka.APIKeyEnv) {
+		t.Errorf("deepinfra.md Prerequisites section must contain %q", ka.APIKeyEnv)
+	}
+}
+
+// TestDeepInfraDocsDiscoveryContract verifies the guide documents the exact
+// official discovery contract within the "Model discovery and manual entry"
+// section: unauthenticated GET /models/list with Accept: application/json,
+// bare-array response, model_name ID field, exact text-generation filtering,
+// and manual fallback. The check is section-scoped so a mention of these
+// fields in unrelated prose (e.g. the Notes section) cannot mask a missing
+// contract element within the authoritative discovery section.
+func TestDeepInfraDocsDiscoveryContract(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	section := extractMarkdownSection(body, "Model discovery and manual entry")
+	if section == "" {
+		t.Fatal("deepinfra.md must contain a '## Model discovery and manual entry' section")
+	}
+	for _, want := range []string{
+		"/models/list",
+		"Accept: application/json",
+		"unauthenticated",
+		"model_name",
+		"reported_type",
+		"text-generation",
+	} {
+		if !strings.Contains(section, want) {
+			t.Errorf("deepinfra.md Model discovery section must document contract field %q", want)
+		}
+	}
+}
+
+// TestDeepInfraDocsNoStaleDiscoveryRoutes verifies no DeepInfra doc references
+// stale or incorrect discovery endpoints or env var names.
+func TestDeepInfraDocsNoStaleDiscoveryRoutes(t *testing.T) {
+	staleEndpoints := []string{
+		"/v1/models",
+		"/v1/openai/models",
+		"DEEPINFRA_API_KEY",
+		"DEEPINFRA_KEY",
+		"DEEPINFRA_API_TOKEN",
+	}
+	docsToCheck := append([]string{
+		"docs/examples/deepinfra.md",
+		"docs/PROVIDERS.md",
+		"README.md",
+		"docs/README.md",
+		".env.local.example",
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+	}, docExampleMarkdownFiles()...)
+	for _, rel := range docsToCheck {
+		// Skip deepinfra.md itself for the model-list route check since it
+		// legitimately discusses forbidden routes in a negative context.
+		if rel == "docs/examples/deepinfra.md" {
+			body := readRepoRel(t, rel)
+			for _, stale := range []string{"DEEPINFRA_API_KEY", "DEEPINFRA_KEY", "DEEPINFRA_API_TOKEN"} {
+				if strings.Contains(body, stale) {
+					t.Errorf("%s contains stale DeepInfra env name %q", rel, stale)
+				}
+			}
+			continue
+		}
+		body := readRepoRel(t, rel)
+		for _, stale := range staleEndpoints {
+			// Allow /v1/models in generic docs that are not DeepInfra-specific
+			// and discuss the local proxy /v1/models endpoint.
+			if stale == "/v1/models" && rel != "docs/examples/deepinfra.md" {
+				continue
+			}
+			if strings.Contains(body, stale) {
+				t.Errorf("%s contains stale DeepInfra reference %q", rel, stale)
+			}
+		}
+	}
+}
+
+// TestDeepInfraDocsNoLiveValidationClaims verifies no DeepInfra public guidance
+// implies mock validation proves live availability. PROVIDERS.md is excluded
+// because it legitimately describes T3 protocol translation paths as a core
+// proxy feature.
+func TestDeepInfraDocsNoLiveValidationClaims(t *testing.T) {
+	for _, rel := range []string{
+		"docs/examples/deepinfra.md",
+		"docs/CONFIG.md",
+		"docs/FACTORY.md",
+	} {
+		body := readRepoRel(t, rel)
+		if err := checkNoProhibitedClaims(body); err != nil {
+			t.Fatalf("%s: %v", rel, err)
+		}
+	}
+	// deepinfra.md must qualify mock validation with either "not live" or
+	// "mock-only" wording. The predicate is parenthesized explicitly so the
+	// qualification cannot be masked by operator-precedence ambiguity.
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	if err := checkDeepInfraMockOnlyQualified(body); err != nil {
+		t.Errorf("deepinfra.md: %v", err)
+	}
+}
+
+// TestDeepInfraDocsManualEntryGuaranteed verifies the guide documents manual
+// entry as always available within the "Model discovery and manual entry"
+// section, scoped so a mention in unrelated prose cannot mask a missing
+// guarantee in the authoritative section.
+func TestDeepInfraDocsManualEntryGuaranteed(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	section := extractMarkdownSection(body, "Model discovery and manual entry")
+	if section == "" {
+		t.Fatal("deepinfra.md must contain a '## Model discovery and manual entry' section")
+	}
+	for _, want := range []string{"manual", "guaranteed"} {
+		if !strings.Contains(strings.ToLower(section), want) {
+			t.Errorf("deepinfra.md Model discovery section must mention %q for manual entry", want)
+		}
+	}
+}
+
+// TestDeepInfraDocsOpaqueIDsPreserved verifies the guide documents that
+// Hugging Face-style IDs, version suffixes, and deploy_id values are
+// preserved without normalization.
+func TestDeepInfraDocsOpaqueIDsPreserved(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	for _, want := range []string{"opaque", "deploy_id"} {
+		if !strings.Contains(strings.ToLower(body), want) {
+			t.Errorf("deepinfra.md must mention %q", want)
+		}
+	}
+	// Must not positively claim model-ID normalization.
+	if err := checkNoModelNormalizationClaims(body); err != nil {
+		t.Fatalf("deepinfra.md: %v", err)
+	}
+}
+
+// TestDeepInfraEnvTemplateHasToken verifies the env template contains exactly
+// one empty DEEPINFRA_TOKEN assignment.
+func TestDeepInfraEnvTemplateHasToken(t *testing.T) {
+	body := readRepoRel(t, ".env.local.example")
+	pattern := `DEEPINFRA_TOKEN=""`
+	count := strings.Count(body, pattern)
+	if count != 1 {
+		t.Fatalf(".env.local.example must contain exactly one empty DEEPINFRA_TOKEN assignment, got %d", count)
+	}
+}
+
+// TestDeepInfraDocsReadmeAndProviderLinks verify the README and docs/README.md
+// link to the DeepInfra example.
+func TestDeepInfraDocsReadmeAndProviderLinks(t *testing.T) {
+	for _, rel := range []string{"README.md", "docs/README.md"} {
+		body := readRepoRel(t, rel)
+		if !strings.Contains(body, "deepinfra.md") {
+			t.Errorf("%s must link to examples/deepinfra.md", rel)
+		}
+	}
+}
+
+// TestDeepInfraDocsFactorySyncExcludesUpstream verifies the DeepInfra
+// Factory-sync section explicitly documents exclusions.
+func TestDeepInfraDocsFactorySyncExcludesUpstream(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	section := extractMarkdownSection(body, "Factory sync")
+	if section == "" {
+		t.Fatal("deepinfra.md must contain a '## Factory sync' section")
+	}
+	for _, marker := range []string{
+		"upstream URL",
+		"known_auth",
+		"upstream model",
+		"extra_args",
+		"env-var name",
+		"credential",
+	} {
+		if !strings.Contains(section, marker) {
+			t.Errorf("deepinfra.md Factory sync section must mention exclusion of %q", marker)
+		}
+	}
+}
+
+// TestDeepInfraDocsUsesCurrentPort verifies DeepInfra docs use port 9787 and
+// never the old default 8787.
+func TestDeepInfraDocsUsesCurrentPort(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	if !strings.Contains(body, "127.0.0.1:9787") {
+		t.Error("deepinfra.md must reference the current default port 127.0.0.1:9787")
+	}
+	if strings.Contains(body, "127.0.0.1:8787") {
+		t.Error("deepinfra.md must not reference the old default port 127.0.0.1:8787")
+	}
+}
+
+// TestDeepInfraDocsRecipeHydratesWithSyntheticToken parses the native recipe
+// YAML from deepinfra.md and verifies it hydrates with a synthetic token.
+// Standard recipes hydrate with no ExtraArgs; Priority/Flex recipes preserve
+// their configured service_tier.
+func TestDeepInfraDocsRecipeHydratesWithSyntheticToken(t *testing.T) {
+	t.Setenv("DEEPINFRA_TOKEN", "synthetic-deepinfra-token-12345")
+
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	recipeSection := extractMarkdownSection(body, "Recipe")
+	if recipeSection == "" {
+		t.Fatal("deepinfra.md must contain a '## Recipe' section")
+	}
+	blocks := fencedBlocks(recipeSection, "yaml")
+	if len(blocks) == 0 {
+		t.Fatal("deepinfra.md Recipe section must contain at least one YAML block")
+	}
+
+	type recipeYAML struct {
+		Models []Model `yaml:"models"`
+	}
+	var nativeFound bool
+	for _, block := range blocks {
+		var ry recipeYAML
+		if err := yaml.Unmarshal([]byte(block), &ry); err != nil {
+			continue
+		}
+		for _, m := range ry.Models {
+			if m.KnownAuth != "deepinfra" {
+				continue
+			}
+			nativeFound = true
+			model := m
+			if err := HydrateModel(&model); err != nil {
+				t.Fatalf("hydration failed for native recipe: %v", err)
+			}
+			if model.BaseURL != "https://api.deepinfra.com/v1/openai" {
+				t.Errorf("hydrated BaseURL = %q, want https://api.deepinfra.com/v1/openai", model.BaseURL)
+			}
+			if model.APIKeyEnv != "DEEPINFRA_TOKEN" {
+				t.Errorf("hydrated APIKeyEnv = %q, want DEEPINFRA_TOKEN", model.APIKeyEnv)
+			}
+			if model.UpstreamProtocol != UpstreamOpenAIChat {
+				t.Errorf("hydrated UpstreamProtocol = %q, want openai-chat", model.UpstreamProtocol)
+			}
+			if model.FactoryProvider != "generic-chat-completion-api" {
+				t.Errorf("FactoryProvider = %q, want generic-chat-completion-api", model.FactoryProvider)
+			}
+			// The DeepInfra registry profile has no ExtraArgs, so hydration
+			// does not inject any. Explicit model ExtraArgs (like service_tier
+			// on Priority/Flex recipes) are preserved as-is.
+			if m.UpstreamModel != model.UpstreamModel {
+				t.Errorf("upstream model changed during hydration: %q -> %q", m.UpstreamModel, model.UpstreamModel)
+			}
+		}
+	}
+	if !nativeFound {
+		t.Fatal("deepinfra.md Recipe section must contain a native recipe with known_auth: deepinfra")
+	}
+}
+
+// --- VAL-DEEPINFRA-018: DeepInfra tier and model-dependent guidance is accurate ---
+
+// TestDeepInfraDocsTierRecipesSeparate verifies the guide defines Standard
+// (no service_tier), Priority (exact "priority"), and Flex (exact "flex")
+// as distinct recipes, and documents effective tier literals.
+func TestDeepInfraDocsTierRecipesSeparate(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+
+	// Parse all YAML blocks looking for tier recipes.
+	type recipe struct {
+		hasServiceTier bool
+		serviceTierVal string
+	}
+	recipes := []recipe{}
+	for _, block := range fencedBlocks(body, "yaml") {
+		var m struct {
+			Models []struct {
+				ExtraArgs map[string]any `yaml:"extra_args"`
+			} `yaml:"models"`
+		}
+		if err := yaml.Unmarshal([]byte(block), &m); err != nil {
+			continue
+		}
+		for _, model := range m.Models {
+			r := recipe{}
+			if st, ok := model.ExtraArgs["service_tier"]; ok {
+				r.hasServiceTier = true
+				if s, ok := st.(string); ok {
+					r.serviceTierVal = s
+				}
+			}
+			recipes = append(recipes, r)
+		}
+	}
+
+	hasStandard := false
+	hasPriority := false
+	hasFlex := false
+	for _, r := range recipes {
+		switch {
+		case !r.hasServiceTier:
+			hasStandard = true
+		case r.serviceTierVal == "priority":
+			hasPriority = true
+		case r.serviceTierVal == "flex":
+			hasFlex = true
+		}
+	}
+	if !hasStandard {
+		t.Error("deepinfra.md must define a Standard recipe (no service_tier)")
+	}
+	if !hasPriority {
+		t.Error("deepinfra.md must define a Priority recipe (service_tier: priority)")
+	}
+	if !hasFlex {
+		t.Error("deepinfra.md must define a Flex recipe (service_tier: flex)")
+	}
+
+	// Tier literal documentation and authoritative/effective-standard claims
+	// must appear within the "Serving paths and tiers" section, not just
+	// anywhere in the document. This scopes the serving-path assertions so
+	// a mention in unrelated prose (e.g. Notes) cannot mask a missing claim
+	// in the authoritative serving-path section.
+	servingSection := extractMarkdownSection(body, "Serving paths and tiers")
+	if servingSection == "" {
+		t.Fatal("deepinfra.md must contain a '## Serving paths and tiers' section")
+	}
+	for _, want := range []string{`"priority"`, `"flex"`, `"default"`} {
+		if !strings.Contains(servingSection, want) {
+			t.Errorf("deepinfra.md Serving paths section must document effective tier literal %s", want)
+		}
+	}
+	if !strings.Contains(strings.ToLower(servingSection), "authoritative") {
+		t.Error("deepinfra.md Serving paths section must identify response service_tier as authoritative")
+	}
+	if !strings.Contains(strings.ToLower(servingSection), "effective standard") {
+		t.Error("deepinfra.md Serving paths section must label the default fallback as effective Standard")
+	}
+}
+
+// TestDeepInfraDocsFlexEnumContradiction verifies the guide records the known
+// official-page contradiction between the Chat overview and the OpenAPI tier
+// enum regarding Flex, and resolves it in favor of pass-through.
+func TestDeepInfraDocsFlexEnumContradiction(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	lower := strings.ToLower(body)
+	// Must mention the contradiction.
+	if !strings.Contains(lower, "contradiction") && !strings.Contains(lower, "discrepancy") {
+		t.Error("deepinfra.md must mention the known official-page contradiction about Flex")
+	}
+	// Must mention the OpenAPI tier enum.
+	if !strings.Contains(lower, "openapi") || !strings.Contains(lower, "enum") {
+		t.Error("deepinfra.md must mention the OpenAPI tier enum omitting flex")
+	}
+	// Must resolve in favor of pass-through rather than a restrictive enum.
+	if !strings.Contains(lower, "pass-through") && !strings.Contains(lower, "passthrough") {
+		t.Error("deepinfra.md must resolve the contradiction in favor of pass-through")
+	}
+}
+
+// TestDeepInfraDocsNoProviderWideDefaults verifies the guide does not claim
+// provider-wide reasoning, capability, or output-limit defaults.
+func TestDeepInfraDocsNoProviderWideDefaults(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	if err := checkNoProhibitedClaims(body); err != nil {
+		t.Fatalf("deepinfra.md: %v", err)
+	}
+	// Must mention model-dependence.
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "model-dependent") {
+		t.Error("deepinfra.md must state capabilities are model-dependent")
+	}
+}
+
+// TestDeepInfraDocsMaxOutputTokensQualified verifies the guide describes
+// max_output_tokens as configured model metadata or documented local sync
+// fallback, not a DeepInfra guarantee.
+func TestDeepInfraDocsMaxOutputTokensQualified(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	if !strings.Contains(body, "max_output_tokens") {
+		t.Fatal("deepinfra.md must mention max_output_tokens")
+	}
+	// Must not imply it is a DeepInfra guarantee.
+	lower := strings.ToLower(body)
+	if strings.Contains(lower, "deepinfra guarantees") {
+		t.Error("deepinfra.md must not claim DeepInfra guarantees max_output_tokens")
+	}
+}
+
+// TestDeepInfraDocsTuiDefaultStandard verifies the guide explains the default
+// TUI flow creates Standard while Priority/Flex use documented config entries.
+func TestDeepInfraDocsTuiDefaultStandard(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	lower := strings.ToLower(body)
+	// Must mention that the default TUI creates Standard (no tier).
+	if !strings.Contains(lower, "standard") || !strings.Contains(lower, "tui") && !strings.Contains(lower, "onboarding") && !strings.Contains(lower, "default") {
+		t.Error("deepinfra.md must explain the default TUI/onboarding creates Standard")
+	}
+}
+
+// --- VAL-DEEPINFRA-020: DeepInfra behavioral sources are pinned and qualified ---
+
+// TestDeepInfraSourceRecordPinned verifies the committed source record has
+// official URLs and a retrieval date covering all required behavioral facts.
+func TestDeepInfraSourceRecordPinned(t *testing.T) {
+	rec := DeepInfraSourceRecord()
+	if rec.InferenceBaseURL != "https://api.deepinfra.com/v1/openai" {
+		t.Errorf("InferenceBaseURL = %q", rec.InferenceBaseURL)
+	}
+	if rec.DiscoveryURL != "https://api.deepinfra.com/models/list" {
+		t.Errorf("DiscoveryURL = %q", rec.DiscoveryURL)
+	}
+	if rec.DiscoveryMethod != "GET" {
+		t.Errorf("DiscoveryMethod = %q", rec.DiscoveryMethod)
+	}
+	if rec.DiscoveryIDField != "model_name" {
+		t.Errorf("DiscoveryIDField = %q", rec.DiscoveryIDField)
+	}
+	if rec.DiscoveryTypeField != "reported_type" {
+		t.Errorf("DiscoveryTypeField = %q", rec.DiscoveryTypeField)
+	}
+	if rec.DiscoveryTypeValue != "text-generation" {
+		t.Errorf("DiscoveryTypeValue = %q", rec.DiscoveryTypeValue)
+	}
+	if rec.CredentialEnv != "DEEPINFRA_TOKEN" {
+		t.Errorf("CredentialEnv = %q", rec.CredentialEnv)
+	}
+	if rec.RequestTierPriority != "priority" {
+		t.Errorf("RequestTierPriority = %q", rec.RequestTierPriority)
+	}
+	if rec.RequestTierFlex != "flex" {
+		t.Errorf("RequestTierFlex = %q", rec.RequestTierFlex)
+	}
+	if rec.EffectiveTierPriority != "priority" {
+		t.Errorf("EffectiveTierPriority = %q", rec.EffectiveTierPriority)
+	}
+	if rec.EffectiveTierFlex != "flex" {
+		t.Errorf("EffectiveTierFlex = %q", rec.EffectiveTierFlex)
+	}
+	if rec.EffectiveTierDefault != "default" && !strings.Contains(rec.EffectiveTierDefault, "default") {
+		t.Errorf("EffectiveTierDefault = %q, want default", rec.EffectiveTierDefault)
+	}
+	if rec.FlexEnumContraction == "" {
+		t.Error("FlexEnumContraction must be recorded")
+	}
+	if rec.PassthroughDecision == "" {
+		t.Error("PassthroughDecision must be recorded")
+	}
+	if len(rec.ReasoningFields) == 0 {
+		t.Error("ReasoningFields must not be empty")
+	}
+	if len(rec.CacheFields) == 0 {
+		t.Error("CacheFields must not be empty")
+	}
+	if rec.OpaqueIDNote == "" {
+		t.Error("OpaqueIDNote must be recorded")
+	}
+	if rec.ModelDependentNote == "" {
+		t.Error("ModelDependentNote must be recorded")
+	}
+}
+
+// TestDeepInfraSourceURLsAndDate verifies the source URLs and date are pinned.
+func TestDeepInfraSourceURLsAndDate(t *testing.T) {
+	urls, asOf := DeepInfraSourceURLs()
+	if len(urls) == 0 {
+		t.Fatal("source URLs must not be empty")
+	}
+	for _, u := range urls {
+		if !strings.HasPrefix(u, "https://") {
+			t.Errorf("source URL must be https: %q", u)
+		}
+	}
+	if asOf == "" {
+		t.Fatal("as-of date must not be empty")
+	}
+}
+
+// TestDeepInfraSourceRecordAgreesWithRegistry verifies the source record
+// agrees with the registry profile.
+func TestDeepInfraSourceRecordAgreesWithRegistry(t *testing.T) {
+	rec := DeepInfraSourceRecord()
+	ka, ok := LookupKnownAuth("deepinfra")
+	if !ok {
+		t.Fatal("deepinfra profile missing")
+	}
+	if rec.InferenceBaseURL != ka.BaseURL {
+		t.Errorf("source InferenceBaseURL %q != registry BaseURL %q", rec.InferenceBaseURL, ka.BaseURL)
+	}
+	if rec.CredentialEnv != ka.APIKeyEnv {
+		t.Errorf("source CredentialEnv %q != registry APIKeyEnv %q", rec.CredentialEnv, ka.APIKeyEnv)
+	}
+	if rec.DiscoveryIDField != ka.DiscoveryIDField {
+		t.Errorf("source DiscoveryIDField %q != registry %q", rec.DiscoveryIDField, ka.DiscoveryIDField)
+	}
+	if rec.DiscoveryTypeField != ka.DiscoveryTypeField {
+		t.Errorf("source DiscoveryTypeField %q != registry %q", rec.DiscoveryTypeField, ka.DiscoveryTypeField)
+	}
+	if rec.DiscoveryTypeValue != ka.DiscoveryTypeValue {
+		t.Errorf("source DiscoveryTypeValue %q != registry %q", rec.DiscoveryTypeValue, ka.DiscoveryTypeValue)
+	}
+	// Discovery URL must resolve to the registry fields.
+	discoveryURL := strings.TrimRight(ka.DiscoveryBaseURL, "/") + ka.ModelsPath
+	if rec.DiscoveryURL != discoveryURL {
+		t.Errorf("source DiscoveryURL %q != registry-resolved %q", rec.DiscoveryURL, discoveryURL)
+	}
+}
+
+// TestDeepInfraSourceRecordAgreesWithDocs verifies the source record agrees
+// with the provider guide.
+func TestDeepInfraSourceRecordAgreesWithDocs(t *testing.T) {
+	rec := DeepInfraSourceRecord()
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	if !strings.Contains(body, rec.InferenceBaseURL) {
+		t.Errorf("deepinfra.md must contain inference base URL %q", rec.InferenceBaseURL)
+	}
+	if !strings.Contains(body, rec.DiscoveryURL) {
+		t.Errorf("deepinfra.md must contain discovery URL %q", rec.DiscoveryURL)
+	}
+	if !strings.Contains(body, rec.CredentialEnv) {
+		t.Errorf("deepinfra.md must contain credential env %q", rec.CredentialEnv)
+	}
+	for _, field := range rec.ReasoningFields {
+		if !strings.Contains(body, field) {
+			t.Errorf("deepinfra.md must document reasoning field %q", field)
+		}
+	}
+	for _, field := range rec.CacheFields {
+		if !strings.Contains(body, field) {
+			t.Errorf("deepinfra.md must document cache field %q", field)
+		}
+	}
+}
+
+// TestDeepInfraDocsPassThroughFieldsDocumented verifies the guide identifies
+// extra_args as top-level pass-through and covers reasoning and cache fields.
+func TestDeepInfraDocsPassThroughFieldsDocumented(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	lower := strings.ToLower(body)
+
+	if !strings.Contains(lower, "pass-through") && !strings.Contains(lower, "passthrough") {
+		t.Fatal("deepinfra.md must identify extra_args as top-level pass-through")
+	}
+	for _, field := range []string{
+		"service_tier",
+		"reasoning_effort",
+		"reasoning_content",
+		"prompt_cache_key",
+		"chat_template_kwargs",
+		"stream",
+		"tools",
+		"response_format",
+	} {
+		if !strings.Contains(lower, field) {
+			t.Errorf("deepinfra.md must document pass-through field %q", field)
+		}
+	}
+}
+
+// TestDeepInfraDocsNoProhibitedClaims verifies no DeepInfra documentation
+// sentence contains prohibited translation, live-validation, or universal
+// capability claims without a co-occurring negation.
+func TestDeepInfraDocsNoProhibitedClaims(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	if err := checkNoProhibitedClaims(body); err != nil {
+		t.Fatalf("deepinfra.md: %v", err)
+	}
+}
+
+// TestDeepInfraDocsForbiddenRoutesForbidden verifies the guide states it does
+// not fall back to /v1/models or undocumented aliases for discovery.
+func TestDeepInfraDocsForbiddenRoutesForbidden(t *testing.T) {
+	body := readRepoRel(t, "docs/examples/deepinfra.md")
+	lower := strings.ToLower(body)
+	hasForbiddenRouteNegativeContext := strings.Contains(lower, "does not fall back") ||
+		strings.Contains(lower, "does not use /v1/models") ||
+		strings.Contains(lower, "no fallback")
+	if !hasForbiddenRouteNegativeContext {
+		t.Error("deepinfra.md must state it does not fall back to /v1/models or undocumented aliases")
+	}
+}
+
+// checkDeepInfraMockOnlyQualified verifies a doc qualifies mock validation
+// with either "not live" or "mock-only" wording. The predicate is
+// parenthesized explicitly: the doc must contain "mock" AND at least one of
+// "not live" or "mock-only". An incomplete qualification (e.g., "mock" alone
+// without a live/mock-only qualifier) is rejected deterministically. This
+// replaces the previous implicit-precedence boolean expression that relied on
+// Go's && binding tighter than ||.
+func checkDeepInfraMockOnlyQualified(body string) error {
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "mock") {
+		return fmt.Errorf("doc must mention mock validation")
+	}
+	if (!strings.Contains(lower, "not live")) && (!strings.Contains(lower, "mock-only")) {
+		return fmt.Errorf("doc must qualify mock validation with either 'not live' or 'mock-only' wording")
+	}
+	return nil
+}
+
+// TestDeepInfraDocsMockOnlyQualificationDeterministic proves the mock-only
+// qualification predicate accepts docs with either "not live" or "mock-only"
+// wording (alongside "mock") and rejects incomplete qualifications
+// deterministically. This prevents a document that merely mentions "mock"
+// without a live/mock-only qualifier from passing the guard.
+func TestDeepInfraDocsMockOnlyQualificationDeterministic(t *testing.T) {
+	tests := []struct {
+		name    string
+		doc     string
+		wantErr bool
+	}{
+		// --- Failing fixtures: incomplete mock-only qualification ---
+		{
+			name:    "mock without qualifier fails",
+			doc:     "# Guide\n\nDiscovery is mock-validated in this build.\n",
+			wantErr: true,
+		},
+		{
+			name:    "no mock mention at all fails",
+			doc:     "# Guide\n\nDiscovery uses local fakes only.\n",
+			wantErr: true,
+		},
+		// --- Accepted fixtures: complete mock-only qualification ---
+		{
+			name:    "mock with not-live qualifier accepted",
+			doc:     "# Guide\n\nDiscovery is mock-validated and not live.\n",
+			wantErr: false,
+		},
+		{
+			name:    "mock with mock-only qualifier accepted",
+			doc:     "# Guide\n\nThis is mock-only validation.\n",
+			wantErr: false,
+		},
+		{
+			name:    "precise guide wording accepted",
+			doc:     "# Guide\n\nDiscovery is mock-validated in this build. This mission validates through local fakes, not live credentialed calls.\n",
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkDeepInfraMockOnlyQualified(tt.doc)
+			if tt.wantErr && err == nil {
+				t.Fatal("checkDeepInfraMockOnlyQualified must reject this doc")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("checkDeepInfraMockOnlyQualified must accept this doc: %v", err)
+			}
+		})
+	}
+}
+
+// TestDeepInfraDocsClaimsDeterministic proves the sentence-level guards catch
+// DeepInfra-specific positive live-validation, universal-capability, and
+// model-normalization claims even when unrelated text contains a negation,
+// and that accepted fixtures with precise mock-only and opaque-ID
+// preservation wording pass. This provides deterministic failing and accepted
+// fixture paths that cannot be masked by document-wide substring matches.
+func TestDeepInfraDocsClaimsDeterministic(t *testing.T) {
+	tests := []struct {
+		name    string
+		doc     string
+		wantErr bool
+	}{
+		// --- Failing: prohibited live-validation claims ---
+		{
+			name:    "mock validation establishes fails despite negation elsewhere",
+			doc:     "# Guide\n\nThe proxy does not modify data.\n\nMock validation establishes live provider availability.\n",
+			wantErr: true,
+		},
+		{
+			name:    "mocked success proves fails",
+			doc:     "# Guide\n\nMocked success proves live provider availability.\n",
+			wantErr: true,
+		},
+		{
+			name:    "establishes live fails",
+			doc:     "# Guide\n\nThis test establishes live model support.\n",
+			wantErr: true,
+		},
+		// --- Failing: universal-capability claims ---
+		{
+			name:    "all models support fails",
+			doc:     "# Guide\n\nAll models support reasoning output.\n",
+			wantErr: true,
+		},
+		{
+			name:    "every model supports fails",
+			doc:     "# Guide\n\nEvery model supports tool calling.\n",
+			wantErr: true,
+		},
+		// --- Failing: model-normalization claims ---
+		{
+			name:    "rewrites model fails despite negation elsewhere",
+			doc:     "# Guide\n\nThe proxy does not modify data.\n\nThe proxy rewrites model IDs to canonical names.\n",
+			wantErr: true,
+		},
+		{
+			name:    "normalizes model fails",
+			doc:     "# Guide\n\nDeepInfra normalizes model slugs automatically.\n",
+			wantErr: true,
+		},
+		// --- Accepted: negated claims and correct preservation ---
+		{
+			name:    "negated live-validation accepted",
+			doc:     "# Guide\n\nMock success does not establish live provider availability.\n",
+			wantErr: false,
+		},
+		{
+			name:    "mock-only qualification accepted",
+			doc:     "# Guide\n\nThis is mock-only validation, not live.\n",
+			wantErr: false,
+		},
+		{
+			name:    "opaque-ID byte-for-byte preservation accepted",
+			doc:     "# Guide\n\nDeepInfra model IDs are preserved byte-for-byte through the picker and reload cycle.\n",
+			wantErr: false,
+		},
+		{
+			name:    "precise opaque slug preservation accepted",
+			doc:     "# Guide\n\nThe proxy preserves opaque slugs exactly without provider-prefix normalization.\n",
+			wantErr: false,
+		},
+		{
+			name:    "model-dependent caveat accepted",
+			doc:     "# Guide\n\nCapabilities are model-dependent and mutable.\n",
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Run both the prohibited-claims and normalization-claim guards.
+			err1 := checkNoProhibitedClaims(tt.doc)
+			err2 := checkNoModelNormalizationClaims(tt.doc)
+			combinedErr := errors.Join(err1, err2)
+			if tt.wantErr && combinedErr == nil {
+				t.Fatal("guards must reject this doc")
+			}
+			if !tt.wantErr && combinedErr != nil {
+				t.Fatalf("guards must accept this doc: %v", combinedErr)
+			}
+		})
 	}
 }
