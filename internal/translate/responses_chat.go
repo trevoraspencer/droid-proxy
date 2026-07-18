@@ -36,7 +36,9 @@ func ResponsesToChatRequest(body []byte, upstreamModel string, extraArgs map[str
 	}
 	out["messages"] = messages
 
-	copyIfPresent(out, in, "temperature", "top_p", "stop")
+	// prompt_cache_key is accepted by Chat Completions too; forwarding it
+	// preserves provider cache routing through the translation.
+	copyIfPresent(out, in, "temperature", "top_p", "stop", "prompt_cache_key")
 	if v, ok := in["max_output_tokens"]; ok {
 		out["max_tokens"] = v
 	}
@@ -56,10 +58,7 @@ func ResponsesToChatRequest(body []byte, upstreamModel string, extraArgs map[str
 		}
 		out["tool_choice"] = chatChoice
 	}
-	for k, v := range extraArgs {
-		out[k] = v
-	}
-	return json.Marshal(out)
+	return marshalWithExtraArgs(out, extraArgs)
 }
 
 func responsesInputToChatMessages(in map[string]any) ([]any, error) {
@@ -380,6 +379,9 @@ func chatUsageToResponsesUsage(raw any) (map[string]any, bool) {
 	}
 	if v, ok := u["total_tokens"]; ok {
 		out["total_tokens"] = v
+	}
+	if v, ok := chatCachedTokens(u); ok {
+		out["input_tokens_details"] = map[string]any{"cached_tokens": v}
 	}
 	return out, true
 }
