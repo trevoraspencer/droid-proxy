@@ -1,7 +1,9 @@
 package harness
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 
@@ -30,7 +32,16 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	var cfg Config
-	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("parse %s: multiple YAML documents are not supported", path)
+		}
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	for i := range cfg.Targets {
@@ -61,7 +72,7 @@ targets:
 
   # droid-proxy with an equivalent model alias configured.
   - name: droid-proxy
-    base_url: http://127.0.0.1:8787
+    base_url: http://127.0.0.1:9787
     model: deepseek-v4-flash
     api_key: x
 

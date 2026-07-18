@@ -148,6 +148,9 @@ func readStream(resp *http.Response, p Protocol, start time.Time, s *Sample) {
 					sawTerminal = true
 				}
 			} else {
+				if eventErr := streamEventError(data, p); eventErr != "" && s.Err == "" {
+					s.Err = eventErr
+				}
 				if isContentDelta(data, p) {
 					now := time.Now()
 					if s.Chunks == 0 {
@@ -189,6 +192,30 @@ func readStream(resp *http.Response, p Protocol, start time.Time, s *Sample) {
 	}
 }
 
+// streamEventError reports terminal protocol events that represent a failed
+// request. A successful HTTP status does not make a failed SSE response a
+// successful benchmark sample.
+func streamEventError(data []byte, p Protocol) string {
+	if p != ProtocolOpenAIResponses {
+		return ""
+	}
+	eventType := gjson.GetBytes(data, "type").String()
+	if eventType != "response.failed" && eventType != "response.incomplete" && eventType != "error" {
+		return ""
+	}
+	message := gjson.GetBytes(data, "response.error.message").String()
+	if message == "" {
+		message = gjson.GetBytes(data, "error.message").String()
+	}
+	if message == "" {
+		message = gjson.GetBytes(data, "message").String()
+	}
+	if message == "" {
+		message = eventType
+	}
+	return "response stream failed: " + message
+}
+
 // isTerminalEvent reports whether an SSE data payload is the protocol's
 // end-of-stream marker (the chat [DONE] sentinel is handled by the caller).
 func isTerminalEvent(data []byte, p Protocol) bool {
@@ -227,12 +254,9 @@ func mergeStreamUsage(data []byte, p Protocol, u *Usage) {
 	case ProtocolAnthropicMessages:
 		switch gjson.GetBytes(data, "type").String() {
 		case "message_start":
-			usage := gjson.GetBytes(data, "message.usage")
-			u.PromptTokens = usage.Get("input_tokens").Int()
-			u.CachedTokens = usage.Get("cache_read_input_tokens").Int()
-			u.CacheWriteTokens = usage.Get("cache_creation_input_tokens").Int()
+			mergeAnthropicUsage(gjson.GetBytes(data, "message.usage"), u)
 		case "message_delta":
-			u.CompletionTokens = gjson.GetBytes(data, "usage.output_tokens").Int()
+			mergeAnthropicUsage(gjson.GetBytes(data, "usage"), u)
 		}
 	case ProtocolOpenAIResponses:
 		if gjson.GetBytes(data, "type").String() == "response.completed" {
@@ -241,6 +265,21 @@ func mergeStreamUsage(data []byte, p Protocol, u *Usage) {
 			u.CompletionTokens = usage.Get("output_tokens").Int()
 			u.CachedTokens = usage.Get("input_tokens_details.cached_tokens").Int()
 		}
+	}
+}
+
+func mergeAnthropicUsage(usage gjson.Result, u *Usage) {
+	if value := usage.Get("input_tokens"); value.Exists() {
+		u.PromptTokens = value.Int()
+	}
+	if value := usage.Get("output_tokens"); value.Exists() {
+		u.CompletionTokens = value.Int()
+	}
+	if value := usage.Get("cache_read_input_tokens"); value.Exists() {
+		u.CachedTokens = value.Int()
+	}
+	if value := usage.Get("cache_creation_input_tokens"); value.Exists() {
+		u.CacheWriteTokens = value.Int()
 	}
 }
 

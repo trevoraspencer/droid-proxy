@@ -172,6 +172,23 @@ func (c *Config) Validate() error {
 		if !sc.Protocol.valid() {
 			return fmt.Errorf("scenario %q: protocol must be one of openai-chat, anthropic-messages, openai-responses", sc.Name)
 		}
+		for _, limit := range []struct {
+			name  string
+			value int
+		}{
+			{"requests", sc.Requests},
+			{"concurrency", sc.Concurrency},
+			{"warmup", sc.Warmup},
+			{"system_prompt_bytes", sc.SystemPromptBytes},
+			{"user_message_bytes", sc.UserMessageBytes},
+			{"history_turns", sc.HistoryTurns},
+			{"max_tokens", sc.MaxTokens},
+			{"timeout_seconds", sc.TimeoutSeconds},
+		} {
+			if limit.value < 0 {
+				return fmt.Errorf("scenario %q: %s must not be negative", sc.Name, limit.name)
+			}
+		}
 		sc.applyDefaults()
 	}
 	return nil

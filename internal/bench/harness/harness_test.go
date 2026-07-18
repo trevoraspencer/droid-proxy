@@ -3,12 +3,70 @@ package harness
 import (
 	"bytes"
 	"context"
+	"io"
+	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/trevoraspencer/droid-proxy/internal/bench/mockupstream"
 )
+
+func TestLoadConfigRejectsUnknownAndInvalidWorkloadFields(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		scenario string
+		want     string
+	}{
+		{"unknown", "request: 1", "field request not found"},
+		{"negative", "requests: -1", "requests must not be negative"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "bench.yaml")
+			raw := "targets:\n  - name: local\n    base_url: http://127.0.0.1:1\n    model: m\nscenarios:\n  - name: paid-call-shape\n    protocol: openai-chat\n    " + tc.scenario + "\n"
+			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadConfig(path)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("LoadConfig error = %v, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestResponsesFailureEventMarksStreamSampleFailed(t *testing.T) {
+	t.Parallel()
+
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"provider rejected request\"}}}\n\n"))}
+	sample := Sample{Status: http.StatusOK}
+	readStream(resp, ProtocolOpenAIResponses, time.Now(), &sample)
+	if sample.ok() {
+		t.Fatalf("failed Responses event counted as success: %+v", sample)
+	}
+	if !strings.Contains(sample.Err, "provider rejected request") {
+		t.Fatalf("failure message was not retained: %q", sample.Err)
+	}
+}
+
+func TestAnthropicMessageDeltaMergesCompleteUsage(t *testing.T) {
+	t.Parallel()
+
+	var usage Usage
+	mergeStreamUsage([]byte(`{"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":2,"cache_creation_input_tokens":3}}}`), ProtocolAnthropicMessages, &usage)
+	mergeStreamUsage([]byte(`{"type":"message_delta","usage":{"input_tokens":20,"output_tokens":7,"cache_read_input_tokens":11,"cache_creation_input_tokens":5}}`), ProtocolAnthropicMessages, &usage)
+	want := (Usage{PromptTokens: 20, CompletionTokens: 7, CachedTokens: 11, CacheWriteTokens: 5})
+	if usage != want {
+		t.Fatalf("usage = %+v, want %+v", usage, want)
+	}
+}
 
 // TestRunnerAgainstMock exercises the full measurement pipeline (payload
 // build, SSE timing, usage extraction, summarization, report rendering)

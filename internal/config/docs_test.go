@@ -981,6 +981,7 @@ func activeDocFiles() []string {
 	files = append(files, docExampleMarkdownFiles()...)
 	for _, f := range []string{
 		"docs/CLI.md",
+		"docs/BENCHMARKS.md",
 		"docs/CONFIG.md",
 		"docs/FACTORY.md",
 		"docs/OAUTH.md",
@@ -1013,6 +1014,25 @@ func TestDocsActiveDocsUseCurrentDefaultPort(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDroidBenchUsesCurrentDefaultPort(t *testing.T) {
+	mainSource := readRepoRel(t, "cmd/droid-bench/main.go")
+	if strings.Contains(mainSource, "http://127.0.0.1:8787") {
+		t.Fatal("droid-bench cache-check must not default to the retired port 8787")
+	}
+	if !strings.Contains(mainSource, "config.DefaultListenPort") {
+		t.Fatal("droid-bench cache-check must derive its default from config.DefaultListenPort")
+	}
+
+	exampleSource := readRepoRel(t, "internal/bench/harness/config.go")
+	if strings.Contains(exampleSource, "http://127.0.0.1:8787") {
+		t.Fatal("droid-bench example config must not target the retired port 8787")
+	}
+	want := fmt.Sprintf("http://127.0.0.1:%d", DefaultListenPort)
+	if !strings.Contains(exampleSource, want) {
+		t.Fatalf("droid-bench example config must target %s", want)
 	}
 }
 

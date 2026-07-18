@@ -91,6 +91,16 @@ prompt caching through any proxy. It sends canonical requests through the
 proxy to a capture-enabled mock and asserts on what the proxy forwarded and
 returned:
 
+If the proxy has `client_auth` enabled, provide the credential through the
+environment rather than the process argument list:
+
+```bash
+DROID_PROXY_CLIENT_KEY=... droid-bench cache-check [model flags]
+```
+
+The mock intentionally binds only to loopback because its capture endpoint
+returns full request bodies. Each captured body is limited to 16 MiB.
+
 | Check | Property | Why it matters |
 |---|---|---|
 | `chat-field-passthrough` | `messages`, sampling params, `prompt_cache_key`, unknown fields reach upstream byte-identical | Dropped fields disable provider-side caching/routing features |

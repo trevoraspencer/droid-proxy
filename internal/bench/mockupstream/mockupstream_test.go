@@ -135,3 +135,21 @@ func TestResetClearsCacheAndCaptures(t *testing.T) {
 		t.Fatalf("cache should be cold after reset, got %d cached tokens", got)
 	}
 }
+
+func TestRequestBodyLimitRejectsBeforeCapture(t *testing.T) {
+	t.Parallel()
+
+	s := New(Options{MaxRequestBodyBytes: 32})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	status, raw := post(t, ts.URL+"/v1/chat/completions", strings.Repeat("x", 33))
+	if status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d: %s", status, http.StatusRequestEntityTooLarge, raw)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.captures) != 0 {
+		t.Fatalf("oversized request was retained in capture ring: %d captures", len(s.captures))
+	}
+}

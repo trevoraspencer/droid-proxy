@@ -15,12 +15,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/trevoraspencer/droid-proxy/internal/bench/fidelity"
 	"github.com/trevoraspencer/droid-proxy/internal/bench/harness"
 	"github.com/trevoraspencer/droid-proxy/internal/bench/mockupstream"
+	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
 
 func main() {
@@ -77,8 +79,11 @@ func runMock(args []string) {
 	interChunk := fs.Duration("inter-chunk", 2*time.Millisecond, "simulated latency between stream chunks")
 	chunks := fs.Int("chunks", 40, "content chunks per streamed response")
 	simulateCache := fs.Bool("simulate-cache", true, "simulate provider prompt-prefix caching in usage counters")
-	captureLimit := fs.Int("capture-limit", 64, "captured requests kept in memory for /__mock/requests (large request bodies are retained; raise only for fidelity runs that need deep history)")
+	captureLimit := fs.Int("capture-limit", 64, "captured requests kept in memory for /__mock/requests (each body is capped at 16 MiB)")
 	_ = fs.Parse(args)
+	if err := validateMockListenAddr(*listen); err != nil {
+		fatal(err)
+	}
 
 	srv := mockupstream.New(mockupstream.Options{
 		TTFT:                *ttft,
@@ -105,6 +110,24 @@ func runMock(args []string) {
 	if err := httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		fatal(err)
 	}
+}
+
+// validateMockListenAddr keeps the capture endpoints local-only. They expose
+// complete benchmark request bodies by design and do not implement auth, so a
+// wildcard or LAN listener would disclose prompts and tool payloads.
+func validateMockListenAddr(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid -listen address %q: %w", addr, err)
+	}
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("-listen must use a loopback host because the mock exposes captured request bodies (got %q)", host)
+	}
+	return nil
 }
 
 func runBench(args []string) {
@@ -162,12 +185,13 @@ func runBench(args []string) {
 
 func runCacheCheck(args []string) {
 	fs := flag.NewFlagSet("cache-check", flag.ExitOnError)
-	proxy := fs.String("proxy", "http://127.0.0.1:8787", "base URL of the proxy under test")
+	defaultProxyBase := fmt.Sprintf("http://127.0.0.1:%d", config.DefaultListenPort)
+	proxy := fs.String("proxy", defaultProxyBase, "base URL of the proxy under test")
 	mock := fs.String("mock", "http://127.0.0.1:18100", "base URL of the droid-bench mock upstream the proxy forwards to")
 	chatModel := fs.String("chat-model", "", "proxy model alias for the openai-chat passthrough path (empty skips)")
 	anthropicModel := fs.String("anthropic-model", "", "proxy model alias for the native anthropic-messages path (empty skips)")
 	anthropicXlat := fs.String("anthropic-translated-model", "", "proxy model alias for the anthropic→openai-chat translated path (empty skips)")
-	clientKey := fs.String("client-key", "", "proxy client_auth API key, if enabled")
+	clientKeyEnv := fs.String("client-key-env", "DROID_PROXY_CLIENT_KEY", "environment variable containing the proxy client_auth API key, if enabled")
 	repeats := fs.Int("repeats", 3, "repeat count for determinism checks")
 	_ = fs.Parse(args)
 
@@ -180,7 +204,7 @@ func runCacheCheck(args []string) {
 		ChatModel:                *chatModel,
 		AnthropicModel:           *anthropicModel,
 		AnthropicTranslatedModel: *anthropicXlat,
-		ClientAPIKey:             *clientKey,
+		ClientAPIKey:             os.Getenv(*clientKeyEnv),
 		Repeats:                  *repeats,
 	})
 	if err != nil {

@@ -494,6 +494,12 @@ func TestDeepInfraCustomEndpointIsDistinct(t *testing.T) {
 // The token write is a completed private credential step that a later failure
 // must not roll back.
 func TestDeepInfraStageSafeCredentialWrite(t *testing.T) {
+	// backend.setKey writes through the production managed-secret store, whose
+	// location is resolved from HOME at call time. Isolate HOME so this test can
+	// never add or replace a developer's real managed credential.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
 	// Simulate: token written successfully, then model save fails (duplicate alias).
 	ka, _ := config.LookupKnownAuth("deepinfra")
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -506,6 +512,13 @@ func TestDeepInfraStageSafeCredentialWrite(t *testing.T) {
 	// Token write succeeds.
 	if err := be.setKey("DEEPINFRA_TOKEN", "deepinfra-stage-token"); err != nil {
 		t.Fatalf("setKey: %v", err)
+	}
+	managed, err := os.ReadFile(filepath.Join(home, ".droid-proxy", "env"))
+	if err != nil {
+		t.Fatalf("read isolated managed env: %v", err)
+	}
+	if !strings.Contains(string(managed), `export DEEPINFRA_TOKEN="deepinfra-stage-token"`) {
+		t.Fatal("isolated managed env does not contain the completed token write")
 	}
 
 	// Add a model successfully.

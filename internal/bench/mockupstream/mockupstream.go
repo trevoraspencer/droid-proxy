@@ -32,6 +32,9 @@ type Options struct {
 	StreamChunks int
 	// CaptureLimit bounds the in-memory captured request ring. Zero means 512.
 	CaptureLimit int
+	// MaxRequestBodyBytes bounds each body before it is retained. Zero means
+	// 16 MiB, which is ample for the benchmark's largest generated workload.
+	MaxRequestBodyBytes int64
 	// SimulatePromptCache enables provider-style prompt-prefix caching: the
 	// conversation prefix (everything except the last message) is hashed, and
 	// repeat prefixes report cached tokens in usage.
@@ -42,12 +45,17 @@ type Options struct {
 // mock process.
 const maxPrefixEntries = 100_000
 
+const defaultMaxRequestBodyBytes int64 = 16 << 20
+
 func (o Options) withDefaults() Options {
 	if o.StreamChunks <= 0 {
 		o.StreamChunks = 40
 	}
 	if o.CaptureLimit <= 0 {
 		o.CaptureLimit = 512
+	}
+	if o.MaxRequestBodyBytes <= 0 {
+		o.MaxRequestBodyBytes = defaultMaxRequestBodyBytes
 	}
 	return o
 }
@@ -181,14 +189,19 @@ func (s *Server) capture(r *http.Request, body []byte) {
 	s.mu.Unlock()
 }
 
-func readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+func (s *Server) readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return nil, false
 	}
 	defer func() { _ = r.Body.Close() }()
+	r.Body = http.MaxBytesReader(w, r.Body, s.opts.MaxRequestBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		if _, tooLarge := err.(*http.MaxBytesError); tooLarge {
+			http.Error(w, fmt.Sprintf("request body exceeds %d bytes", s.opts.MaxRequestBodyBytes), http.StatusRequestEntityTooLarge)
+			return nil, false
+		}
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
 		return nil, false
 	}
@@ -323,7 +336,7 @@ func (s *sseWriter) raw(line string) {
 // --- OpenAI Chat Completions ---
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
-	body, ok := readBody(w, r)
+	body, ok := s.readBody(w, r)
 	if !ok {
 		return
 	}
@@ -395,7 +408,7 @@ func chatUsage(u Usage) map[string]any {
 // --- Anthropic Messages ---
 
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
-	body, ok := readBody(w, r)
+	body, ok := s.readBody(w, r)
 	if !ok {
 		return
 	}
@@ -464,7 +477,7 @@ func anthropicUsage(u Usage) map[string]any {
 // --- OpenAI Responses ---
 
 func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
-	body, ok := readBody(w, r)
+	body, ok := s.readBody(w, r)
 	if !ok {
 		return
 	}
@@ -537,7 +550,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 // --- Anthropic token counting ---
 
 func (s *Server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
-	body, ok := readBody(w, r)
+	body, ok := s.readBody(w, r)
 	if !ok {
 		return
 	}
