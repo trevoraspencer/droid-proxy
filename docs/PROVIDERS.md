@@ -51,6 +51,9 @@ Anything you set explicitly in `config.yaml` always wins.
 | `kimi` | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | `openai-chat` | T2 | [kimi.md](examples/kimi.md) |
 | `groq` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | `openai-chat` | T2 | [groq.md](examples/groq.md) |
 | `fireworks` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | `openai-chat` | T2 | [fireworks.md](examples/fireworks.md) |
+| `fireworks-fire-pass` | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_FIRE_PASS_API_KEY` | `openai-chat` | T2 | [fireworks-fire-pass.md](examples/fireworks-fire-pass.md) |
+| `baseten` | `https://inference.baseten.co/v1` | `BASETEN_API_KEY` | `openai-chat` | T2 | [baseten.md](examples/baseten.md) |
+| `deepinfra` | `https://api.deepinfra.com/v1/openai` | `DEEPINFRA_TOKEN` | `openai-chat` | T2 | [deepinfra.md](examples/deepinfra.md) |
 | `zai` | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` | `openai-chat` | T2 (legacy main API alias) | [zai.md](examples/zai.md) |
 | `zai-main-api` | `https://api.z.ai/api/paas/v4` | `ZAI_MAIN_API_KEY` | `openai-chat` | T2 | [zai.md](examples/zai.md) |
 | `zai-coding-api` | `https://api.z.ai/api/coding/paas/v4` | `ZAI_CODING_API_KEY` | `openai-chat` | T2 (GLM Coding Plan) | [zai.md](examples/zai.md) |

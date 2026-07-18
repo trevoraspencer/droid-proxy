@@ -20,11 +20,11 @@ func (m model) loadCmd() tea.Cmd {
 	}
 }
 
-func (m model) discoverCmd(sel providerChoice, key string) tea.Cmd {
+func (m model) discoverCmd(sel providerChoice, key string, generation int) tea.Cmd {
 	be := m.be
 	return func() tea.Msg {
 		ids, err := be.discover(sel.ka, sel.ka.BaseURL, key)
-		return discoverMsg{ids: ids, err: err}
+		return discoverMsg{ids: ids, err: err, generation: generation}
 	}
 }
 
@@ -84,19 +84,38 @@ func (m model) startAddFlow() (tea.Model, tea.Cmd) {
 }
 
 func (m model) beginDiscover() (tea.Model, tea.Cmd) {
+	m.discoverGeneration++
+	gen := m.discoverGeneration
 	m.screen = screenDiscover
 	key := os.Getenv(strings.TrimSpace(m.sel.ka.APIKeyEnv))
-	return m, tea.Batch(m.spin.Tick, m.discoverCmd(m.sel, key))
+	return m, tea.Batch(m.spin.Tick, m.discoverCmd(m.sel, key, gen))
 }
 
 func (m model) onDiscover(msg discoverMsg) (tea.Model, tea.Cmd) {
+	// Ignore stale discovery results from a cancelled or superseded request.
+	if msg.generation != m.discoverGeneration {
+		return m, nil
+	}
 	m.pickCursor = 0
 	if msg.err != nil || len(msg.ids) == 0 {
 		m.buildForm()
+		m.discoverFeedback = discoveryFallbackMessage(msg.err)
 		m.screen = screenForm
 		return m, textinput.Blink
 	}
+	m.discoverFeedback = ""
 	m.pickItems = append([]string{manualEntryLabel}, msg.ids...)
 	m.screen = screenPickModel
 	return m, nil
+}
+
+// discoveryFallbackMessage returns a concise, actionable, generic, and
+// secret-safe message for display when best-effort model discovery fails or
+// returns no models. It never includes the raw error, URLs, HTTP status
+// details, response bodies, or credentials.
+func discoveryFallbackMessage(err error) string {
+	if err != nil {
+		return "Model discovery was unavailable. Enter a model ID manually below."
+	}
+	return "No models were found via discovery. Enter a model ID manually below."
 }

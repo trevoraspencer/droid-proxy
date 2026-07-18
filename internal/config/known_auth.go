@@ -6,6 +6,27 @@ import (
 	"strings"
 )
 
+// DiscoveryPolicy controls how the TUI discovers available models for a
+// provider profile.
+type DiscoveryPolicy string
+
+const (
+	// DiscoveryRemote calls the configured model-list endpoint and falls back
+	// to manual entry. This is the default when the field is empty.
+	DiscoveryRemote DiscoveryPolicy = ""
+	// DiscoveryStatic presents curated catalog choices without a network call,
+	// always alongside manual entry.
+	DiscoveryStatic DiscoveryPolicy = "static"
+	// DiscoveryManual skips discovery and goes directly to manual entry.
+	DiscoveryManual DiscoveryPolicy = "manual"
+)
+
+// CatalogEntry is a curated model or router ID with an optional display label.
+type CatalogEntry struct {
+	ID    string
+	Label string
+}
+
 // KnownAuth describes a canonical provider's defaults: base URL, env var that
 // holds the API key, and the default upstream protocol it speaks. These are
 // used by config loading to fill in fields the user did not specify explicitly.
@@ -28,6 +49,26 @@ type KnownAuth struct {
 	AuthScheme string
 	// ExtraHeaders are appended to every outgoing request to this provider.
 	ExtraHeaders map[string]string
+	// DiscoveryPolicy controls TUI model discovery behavior for this profile.
+	// Empty means remote best-effort discovery (the default).
+	DiscoveryPolicy DiscoveryPolicy
+	// StaticModels is the curated catalog used when DiscoveryPolicy is static.
+	StaticModels []CatalogEntry
+	// DiscoveryBaseURL overrides BaseURL for model discovery when set,
+	// separating the discovery origin from the inference base URL.
+	DiscoveryBaseURL string
+	// DiscoveryNoAuth skips sending the inference credential during discovery.
+	// Used when catalog discovery is unauthenticated (e.g. DeepInfra /models/list).
+	DiscoveryNoAuth bool
+	// DiscoveryIDField is the JSON field name for model IDs in the discovery
+	// response. Empty means "id" (the OpenAI-compatible default).
+	DiscoveryIDField string
+	// DiscoveryTypeField is the JSON field name for type-based filtering in the
+	// discovery response. Empty means no type filtering.
+	DiscoveryTypeField string
+	// DiscoveryTypeValue is the required value for DiscoveryTypeField. Only
+	// records whose exact field value matches are retained.
+	DiscoveryTypeValue string
 }
 
 // knownAuthRegistry holds canonical defaults for providers droid-proxy ships
@@ -71,6 +112,33 @@ var knownAuthRegistry = map[string]KnownAuth{
 	"fireworks": {
 		Name: "fireworks", BaseURL: "https://api.fireworks.ai/inference/v1",
 		APIKeyEnv: "FIREWORKS_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
+	},
+	"fireworks-fire-pass": {
+		Name: "fireworks-fire-pass", BaseURL: "https://api.fireworks.ai/inference/v1",
+		APIKeyEnv:        "FIREWORKS_FIRE_PASS_API_KEY",
+		UpstreamProtocol: UpstreamOpenAIChat,
+		DiscoveryPolicy:  DiscoveryStatic,
+		StaticModels:     fireworksFirePassCatalog(),
+	},
+	"baseten": {
+		Name: "baseten", BaseURL: "https://inference.baseten.co/v1",
+		APIKeyEnv: "BASETEN_API_KEY", UpstreamProtocol: UpstreamOpenAIChat,
+	},
+	"deepinfra": {
+		Name:             "deepinfra",
+		BaseURL:          "https://api.deepinfra.com/v1/openai",
+		APIKeyEnv:        "DEEPINFRA_TOKEN",
+		UpstreamProtocol: UpstreamOpenAIChat,
+		// Discovery is separated from inference: the public catalog lives at
+		// a different origin and is unauthenticated.
+		DiscoveryBaseURL: "https://api.deepinfra.com",
+		ModelsPath:       "/models/list",
+		DiscoveryNoAuth:  true,
+		// The official bare-array response uses model_name for IDs and
+		// reported_type for filtering to text-generation rows only.
+		DiscoveryIDField:   "model_name",
+		DiscoveryTypeField: "reported_type",
+		DiscoveryTypeValue: "text-generation",
 	},
 	"zai": {
 		Name: "zai", BaseURL: "https://api.z.ai/api/paas/v4",
@@ -136,6 +204,9 @@ var knownAuthLabels = map[string]string{
 	"kimi":                "Kimi (Moonshot)",
 	"groq":                "Groq",
 	"fireworks":           "Fireworks AI",
+	"fireworks-fire-pass": "Fireworks AI (Fire Pass)",
+	"baseten":             "Baseten",
+	"deepinfra":           "DeepInfra",
 	"zai":                 "Z.AI (main, legacy alias)",
 	"zai-main-api":        "Z.AI (main API)",
 	"zai-coding-api":      "Z.AI (GLM Coding Plan)",

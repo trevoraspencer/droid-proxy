@@ -66,6 +66,8 @@ func (m model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.keyAddProvider(msg)
 	case screenAddKey:
 		return m.keyAddKey(msg)
+	case screenServingPath:
+		return m.keyServingPath(msg)
 	case screenPickModel:
 		return m.keyPickModel(msg)
 	case screenForm:
@@ -80,7 +82,12 @@ func (m model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.keyMessage(msg)
 	case screenDiscover:
 		if msg.String() == "esc" {
-			m.screen = screenDashboard
+			m.discoverGeneration++ // invalidate any in-flight discovery result
+			if m.servingPath != "" {
+				m.screen = screenServingPath
+			} else {
+				m.screen = screenDashboard
+			}
 		}
 		return m, nil
 	}

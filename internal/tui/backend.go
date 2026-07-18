@@ -169,16 +169,28 @@ func (b *backend) syncFactory(models []*config.Model) error {
 
 // discover queries the provider's model-list endpoint for the selected profile.
 func (b *backend) discover(ka config.KnownAuth, baseURL, apiKey string) ([]string, error) {
-	if strings.TrimSpace(baseURL) == "" {
+	// Use DiscoveryBaseURL when the profile separates discovery from inference
+	// (e.g. DeepInfra's unauthenticated /models/list at a different origin).
+	if strings.TrimSpace(ka.DiscoveryBaseURL) != "" {
+		baseURL = ka.DiscoveryBaseURL
+	} else if strings.TrimSpace(baseURL) == "" {
 		baseURL = ka.BaseURL
+	}
+	// Skip the inference credential for unauthenticated discovery profiles.
+	discoveryKey := apiKey
+	if ka.DiscoveryNoAuth {
+		discoveryKey = ""
 	}
 	return providerapi.ListModelsWithOptions(context.Background(), providerapi.ListOptions{
 		BaseURL:      baseURL,
 		ModelsPath:   ka.ModelsPath,
-		APIKey:       apiKey,
+		APIKey:       discoveryKey,
 		AuthHeader:   ka.AuthHeader,
 		AuthScheme:   ka.AuthScheme,
 		ExtraHeaders: ka.ExtraHeaders,
+		IDField:      ka.DiscoveryIDField,
+		TypeField:    ka.DiscoveryTypeField,
+		TypeValue:    ka.DiscoveryTypeValue,
 	})
 }
 

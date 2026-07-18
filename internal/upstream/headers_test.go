@@ -29,6 +29,33 @@ func TestFilterHeaders_DropsHopByHop(t *testing.T) {
 	}
 }
 
+func TestFilterHeaders_DropsViaIntermediaryMetadata(t *testing.T) {
+	// Via is privacy-sensitive intermediary metadata, NOT hop-by-hop under RFC
+	// 7230 semantics. It must be removed uniformly while safe request and retry
+	// metadata survives.
+	src := http.Header{}
+	src.Set("Content-Type", "application/json")
+	src.Set("Via", "1.1 internal-edge-7.cluster.local (squid/5.7)")
+	src.Set("X-Request-Id", "req-via-keep-001")
+	src.Set("Retry-After", "90")
+	got := FilterHeaders(src)
+	if got.Get("Via") != "" {
+		t.Errorf("Via intermediary metadata not dropped: %q", got.Get("Via"))
+	}
+	if got := got.Get("X-Request-Id"); got != "req-via-keep-001" {
+		t.Errorf("safe X-Request-Id dropped: %q", got)
+	}
+	if got.Get("Retry-After") != "90" {
+		t.Errorf("safe Retry-After dropped: %q", got.Get("Retry-After"))
+	}
+	// Via must NOT be classified as hop-by-hop: prove it is absent from the
+	// hopByHopHeaders set so removal is a distinct intermediary-metadata
+	// category, not an RFC hop-by-hop misclassification.
+	if _, misclassified := hopByHopHeaders["Via"]; misclassified {
+		t.Errorf("Via must not be in hopByHopHeaders; it is privacy-sensitive intermediary metadata, not hop-by-hop")
+	}
+}
+
 func TestFilterHeaders_DropsGatewayPrefixes(t *testing.T) {
 	src := http.Header{
 		"X-Litellm-Foo":   {"bar"},
