@@ -99,7 +99,8 @@ DROID_PROXY_CLIENT_KEY=... droid-bench cache-check [model flags]
 ```
 
 The mock intentionally binds only to loopback because its capture endpoint
-returns full request bodies. Each captured body is limited to 16 MiB.
+returns full request bodies. Each captured body is limited to 16 MiB, and the
+capture ring is limited to 64 MiB total.
 
 | Check | Property | Why it matters |
 |---|---|---|

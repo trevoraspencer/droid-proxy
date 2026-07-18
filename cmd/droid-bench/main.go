@@ -79,7 +79,7 @@ func runMock(args []string) {
 	interChunk := fs.Duration("inter-chunk", 2*time.Millisecond, "simulated latency between stream chunks")
 	chunks := fs.Int("chunks", 40, "content chunks per streamed response")
 	simulateCache := fs.Bool("simulate-cache", true, "simulate provider prompt-prefix caching in usage counters")
-	captureLimit := fs.Int("capture-limit", 64, "captured requests kept in memory for /__mock/requests (each body is capped at 16 MiB)")
+	captureLimit := fs.Int("capture-limit", 64, "captured requests kept in memory for /__mock/requests (also bounded to 64 MiB total)")
 	_ = fs.Parse(args)
 	if err := validateMockListenAddr(*listen); err != nil {
 		fatal(err)

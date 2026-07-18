@@ -153,3 +153,27 @@ func TestRequestBodyLimitRejectsBeforeCapture(t *testing.T) {
 		t.Fatalf("oversized request was retained in capture ring: %d captures", len(s.captures))
 	}
 }
+
+func TestCaptureRingEvictsByAggregateBodyBytes(t *testing.T) {
+	t.Parallel()
+
+	s := New(Options{
+		CaptureLimit:        100,
+		MaxRequestBodyBytes: 32,
+		CaptureBytesLimit:   64,
+	})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	for i := 0; i < 3; i++ {
+		post(t, ts.URL+"/v1/chat/completions", strings.Repeat(string(rune('a'+i)), 32))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.captureBytes != 64 {
+		t.Fatalf("retained body bytes = %d, want 64", s.captureBytes)
+	}
+	if len(s.captures) != 2 || s.captures[0].Seq != 2 || s.captures[1].Seq != 3 {
+		t.Fatalf("capture ring did not retain only the newest bodies: %+v", s.captures)
+	}
+}

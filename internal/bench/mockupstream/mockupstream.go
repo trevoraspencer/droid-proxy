@@ -35,6 +35,9 @@ type Options struct {
 	// MaxRequestBodyBytes bounds each body before it is retained. Zero means
 	// 16 MiB, which is ample for the benchmark's largest generated workload.
 	MaxRequestBodyBytes int64
+	// CaptureBytesLimit bounds all request bodies retained by the capture ring.
+	// Zero means 64 MiB. The effective per-request limit never exceeds it.
+	CaptureBytesLimit int64
 	// SimulatePromptCache enables provider-style prompt-prefix caching: the
 	// conversation prefix (everything except the last message) is hashed, and
 	// repeat prefixes report cached tokens in usage.
@@ -47,6 +50,8 @@ const maxPrefixEntries = 100_000
 
 const defaultMaxRequestBodyBytes int64 = 16 << 20
 
+const defaultCaptureBytesLimit int64 = 64 << 20
+
 func (o Options) withDefaults() Options {
 	if o.StreamChunks <= 0 {
 		o.StreamChunks = 40
@@ -56,6 +61,12 @@ func (o Options) withDefaults() Options {
 	}
 	if o.MaxRequestBodyBytes <= 0 {
 		o.MaxRequestBodyBytes = defaultMaxRequestBodyBytes
+	}
+	if o.CaptureBytesLimit <= 0 {
+		o.CaptureBytesLimit = defaultCaptureBytesLimit
+	}
+	if o.MaxRequestBodyBytes > o.CaptureBytesLimit {
+		o.MaxRequestBodyBytes = o.CaptureBytesLimit
 	}
 	return o
 }
@@ -85,7 +96,9 @@ type Server struct {
 	mu       sync.Mutex
 	seq      int
 	captures []CapturedRequest
-	prefixes map[string]int
+	// captureBytes is the sum of retained capture body lengths.
+	captureBytes int64
+	prefixes     map[string]int
 }
 
 // New builds a mock provider server.
@@ -133,6 +146,7 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	s.captures = nil
+	s.captureBytes = 0
 	s.seq = 0
 	s.prefixes = map[string]int{}
 	s.mu.Unlock()
@@ -171,6 +185,7 @@ func (s *Server) capture(r *http.Request, body []byte) {
 	}
 	s.mu.Lock()
 	s.seq++
+	s.captureBytes += int64(len(body))
 	s.captures = append(s.captures, CapturedRequest{
 		Seq:        s.seq,
 		Method:     r.Method,
@@ -179,11 +194,16 @@ func (s *Server) capture(r *http.Request, body []byte) {
 		Body:       append([]byte(nil), body...),
 		ReceivedAt: time.Now(),
 	})
-	if len(s.captures) > s.opts.CaptureLimit {
+	evicted := 0
+	for len(s.captures)-evicted > s.opts.CaptureLimit || s.captureBytes > s.opts.CaptureBytesLimit {
+		s.captureBytes -= int64(len(s.captures[evicted].Body))
+		evicted++
+	}
+	if evicted > 0 {
 		// Copy into a fresh slice so evicted bodies actually become
 		// collectable instead of staying pinned by the old backing array.
-		trimmed := make([]CapturedRequest, s.opts.CaptureLimit)
-		copy(trimmed, s.captures[len(s.captures)-s.opts.CaptureLimit:])
+		trimmed := make([]CapturedRequest, len(s.captures)-evicted)
+		copy(trimmed, s.captures[evicted:])
 		s.captures = trimmed
 	}
 	s.mu.Unlock()
