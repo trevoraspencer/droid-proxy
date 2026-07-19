@@ -41,7 +41,49 @@ func WriteRuntimeMetadata(meta RuntimeMetadata) error {
 		return fmt.Errorf("marshal runtime metadata: %w", err)
 	}
 	raw = append(raw, '\n')
-	return os.WriteFile(RuntimeFile(), raw, 0o600)
+	return writeRuntimeMetadataAtomic(RuntimeFile(), raw)
+}
+
+func writeRuntimeMetadataAtomic(path string, raw []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create runtime metadata temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	tmpClosed := false
+	defer func() {
+		if !tmpClosed {
+			_ = tmp.Close()
+		}
+		_ = os.Remove(tmpPath)
+	}()
+
+	if err := tmp.Chmod(0o600); err != nil {
+		return fmt.Errorf("chmod runtime metadata temp file: %w", err)
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		return fmt.Errorf("write runtime metadata temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync runtime metadata temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close runtime metadata temp file: %w", err)
+	}
+	tmpClosed = true
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace runtime metadata: %w", err)
+	}
+
+	// The rename makes readers see either the old complete file or the new
+	// complete file. Syncing the containing directory makes that replacement
+	// durable across a crash on filesystems that support directory fsync.
+	if dirFile, err := os.Open(dir); err == nil {
+		_ = dirFile.Sync()
+		_ = dirFile.Close()
+	}
+	return nil
 }
 
 func ReadRuntimeMetadata() (RuntimeMetadata, error) {
