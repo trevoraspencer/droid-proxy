@@ -208,11 +208,12 @@ func (c *Config) Validate() error {
 	}
 	seen := make(map[string]struct{}, len(c.Models))
 	for _, m := range c.Models {
-		if _, dup := seen[m.Alias]; dup && m.Alias != "" {
+		aliasKey := strings.ToLower(strings.TrimSpace(m.Alias))
+		if _, dup := seen[aliasKey]; dup && aliasKey != "" {
 			errs = append(errs, fmt.Sprintf("duplicate model alias %q", m.Alias))
 			continue
 		}
-		seen[m.Alias] = struct{}{}
+		seen[aliasKey] = struct{}{}
 		if err := m.Validate(); err != nil {
 			errs = append(errs, err.Error())
 		}

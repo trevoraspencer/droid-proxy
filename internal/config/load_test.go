@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -482,6 +483,63 @@ models:
 	_, err := parse([]byte(in))
 	if err == nil || !strings.Contains(err.Error(), "duplicate model alias") {
 		t.Fatalf("expected duplicate alias error, got: %v", err)
+	}
+}
+
+func TestLoad_DuplicateAliasesMatchRouterNormalization(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		first  string
+		second string
+	}{
+		{name: "case collision", first: "GPT", second: "gpt"},
+		{name: "whitespace collision", first: "gpt", second: "  gpt  "},
+		{name: "case and whitespace collision", first: " GPT ", second: "gpt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := fmt.Sprintf(`
+models:
+  - alias: %q
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+  - alias: %q
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:2/v1
+`, tc.first, tc.second)
+
+			_, err := parse([]byte(in))
+			wantErr := fmt.Sprintf("duplicate model alias %q", tc.second)
+			if err == nil || !strings.Contains(err.Error(), wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", wantErr, err)
+			}
+		})
+	}
+}
+
+func TestLoad_DistinctNormalizedAliasesRemainValid(t *testing.T) {
+	in := `
+models:
+  - alias: " GPT "
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+  - alias: claude
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:2/v1
+`
+
+	cfg, err := parse([]byte(in))
+	if err != nil {
+		t.Fatalf("expected distinct normalized aliases to remain valid, got: %v", err)
+	}
+	if got := cfg.Models[0].Alias; got != " GPT " {
+		t.Fatalf("configured alias changed to %q, want original %q", got, " GPT ")
+	}
+	if got := cfg.Models[1].Alias; got != "claude" {
+		t.Fatalf("configured alias changed to %q, want original %q", got, "claude")
 	}
 }
 
