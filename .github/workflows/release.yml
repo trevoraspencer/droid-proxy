@@ -23,8 +23,8 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -114,7 +114,7 @@ jobs:
         working-directory: dist
         run: sha256sum --check checksums.txt
       - name: Attest build provenance
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-path: |
             dist/droid-proxy_*.tar.gz
@@ -122,27 +122,27 @@ jobs:
             dist/checksums.txt
             dist/droid-proxy_*.spdx.json
       - name: Attest Darwin amd64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-path: dist/droid-proxy_darwin_amd64.tar.gz
           sbom-path: dist/droid-proxy_darwin_amd64.spdx.json
       - name: Attest Darwin arm64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-path: dist/droid-proxy_darwin_arm64.tar.gz
           sbom-path: dist/droid-proxy_darwin_arm64.spdx.json
       - name: Attest Linux amd64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-path: dist/droid-proxy_linux_amd64.tar.gz
           sbom-path: dist/droid-proxy_linux_amd64.spdx.json
       - name: Attest Linux arm64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-path: dist/droid-proxy_linux_arm64.tar.gz
           sbom-path: dist/droid-proxy_linux_arm64.spdx.json
       - name: Upload release assets
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.build.outputs.version }}
           target_commitish: ${{ github.sha }}
