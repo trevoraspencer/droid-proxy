@@ -15,6 +15,8 @@ import (
 	"github.com/trevoraspencer/droid-proxy/internal/oauth"
 )
 
+const maxPoolHealthResponseBytes int64 = 1 << 20 // 1 MiB
+
 func runAuthPool(args []string) {
 	fs := flag.NewFlagSet("auth pool", flag.ExitOnError)
 	configPath := fs.String("config", defaultConfigPath(), "path to config.yaml")
@@ -69,9 +71,12 @@ func fetchPoolHealth(baseURL string, cfg *config.Config) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("pool-health returned %d", resp.StatusCode)
 	}
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxPoolHealthResponseBytes+1))
 	if err != nil {
 		return "", err
+	}
+	if int64(len(raw)) > maxPoolHealthResponseBytes {
+		return "", fmt.Errorf("pool-health response exceeds %d-byte limit", maxPoolHealthResponseBytes)
 	}
 	return formatPoolHealthJSON(raw)
 }
