@@ -29,16 +29,46 @@ func ParseEnvLine(line string) (key, value string, ok bool, err error) {
 	if line == "" || strings.HasPrefix(line, "#") {
 		return "", "", false, nil
 	}
-	line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+	line = trimEnvExportPrefix(line)
 	key, value, ok = strings.Cut(line, "=")
 	if !ok {
 		return "", "", false, fmt.Errorf("invalid env line %q", line)
 	}
-	key = strings.TrimSpace(key)
 	if key == "" {
 		return "", "", false, fmt.Errorf("empty env key")
 	}
+	if !isEnvKey(key) {
+		return "", "", false, fmt.Errorf("invalid env key %q", key)
+	}
 	return key, ParseEnvValue(value), true, nil
+}
+
+func trimEnvExportPrefix(line string) string {
+	const prefix = "export"
+	if !strings.HasPrefix(line, prefix) || len(line) == len(prefix) {
+		return line
+	}
+	if next := line[len(prefix)]; next != ' ' && next != '\t' {
+		return line
+	}
+	return strings.TrimSpace(line[len(prefix)+1:])
+}
+
+func isEnvKey(key string) bool {
+	if key == "" || !isASCIILetterOrUnderscore(key[0]) {
+		return false
+	}
+	for i := 1; i < len(key); i++ {
+		c := key[i]
+		if !isASCIILetterOrUnderscore(c) && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetterOrUnderscore(c byte) bool {
+	return c == '_' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z'
 }
 
 // LoadEnvFile reads KEY=VALUE lines from path into the process environment.
