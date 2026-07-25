@@ -1,0 +1,12 @@
+droid-proxy
+Copyright (c) 2026 Trevor Spencer
+
+This project is licensed under the MIT License. See LICENSE for the full text.
+
+This software bundles third-party open-source components. Direct dependencies
+and their SPDX license identifiers are listed in
+docs/THIRD_PARTY_LICENSES.md.
+
+Each bundled component is licensed under its own terms. Source code for
+dependencies is available from their respective module repositories and the Go
+module proxy.

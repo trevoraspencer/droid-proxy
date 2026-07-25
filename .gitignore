@@ -1,0 +1,53 @@
+# Binaries
+/droid-proxy
+/dist/
+*.exe
+*.test
+*.out
+
+# Go cache / build
+/.cache/
+/coverage.out
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local config
+config.yaml
+config.local.yaml
+config.local.yaml.live-e2e-backup.*
+.env
+.env.local
+.env.live-e2e.local
+.env.*
+!.env.local.example
+secrets.env
+**/*.live-e2e-backup.*
+
+# Keys and certificates (never commit)
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Local logs and archives
+*.log
+*.tgz
+*.tar.gz
+
+# Factory local validation (never commit)
+/.factory/
+
+# Factory validation reports
+/.factory/validation/
+
+# Local scratch artifacts
+notes/
+scratch/
+tmp/
