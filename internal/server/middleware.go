@@ -18,20 +18,35 @@ import (
 	"github.com/trevoraspencer/droid-proxy/internal/logging"
 )
 
-const requestIDHeader = "X-Request-ID"
-const requestIDKey = "request_id"
+const (
+	requestIDHeader   = "X-Request-ID"
+	requestIDKey      = "request_id"
+	requestIDMaxBytes = 128
+)
 
 // RequestID assigns a request id from the inbound header or generates one.
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := strings.TrimSpace(c.GetHeader(requestIDHeader))
-		if id == "" {
+		if !validRequestID(id) {
 			id = randomID()
 		}
 		c.Set(requestIDKey, id)
 		c.Writer.Header().Set(requestIDHeader, id)
 		c.Next()
 	}
+}
+
+func validRequestID(id string) bool {
+	if id == "" || len(id) > requestIDMaxBytes {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		if id[i] < 0x21 || id[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func randomID() string {
@@ -49,11 +64,11 @@ func AccessLog(logger *logrus.Logger) gin.HandlerFunc {
 		c.Next()
 		fields := logrus.Fields{
 			"method":     c.Request.Method,
-			"path":       c.Request.URL.Path,
+			"path":       logging.Redact(c.Request.URL.Path),
 			"status":     c.Writer.Status(),
 			"bytes":      c.Writer.Size(),
 			"duration":   time.Since(start).String(),
-			"request_id": c.GetString(requestIDKey),
+			"request_id": logging.Redact(c.GetString(requestIDKey)),
 		}
 		if ua := c.GetHeader("User-Agent"); ua != "" {
 			fields["ua"] = logging.Redact(ua)
@@ -104,7 +119,7 @@ func TraceLog(cfg *config.Config, logger *logrus.Logger) gin.HandlerFunc {
 		c.Writer = tw
 		c.Next()
 		fields := logrus.Fields{
-			"request_id": c.GetString(requestIDKey),
+			"request_id": logging.Redact(c.GetString(requestIDKey)),
 			"method":     c.Request.Method,
 			"path":       logging.Redact(c.Request.URL.Redacted()),
 			"status":     c.Writer.Status(),
@@ -207,13 +222,13 @@ func ClientAuth(cfg *config.Config) gin.HandlerFunc {
 		}
 		got := raw
 		if scheme != "" {
-			prefix := scheme + " "
-			if !strings.HasPrefix(raw, prefix) {
+			var ok bool
+			got, ok = authCredential(raw, scheme)
+			if !ok {
 				handlers.WriteJSONError(c, http.StatusUnauthorized, "authentication_error", "expected scheme "+scheme)
 				c.Abort()
 				return
 			}
-			got = strings.TrimSpace(strings.TrimPrefix(raw, prefix))
 		}
 		if !clientAPIKeyMatches(got, keys) {
 			handlers.WriteJSONError(c, http.StatusUnauthorized, "authentication_error", "invalid api key")
@@ -222,6 +237,15 @@ func ClientAuth(cfg *config.Config) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func authCredential(raw, expectedScheme string) (string, bool) {
+	separator := strings.IndexAny(raw, " \t")
+	if separator <= 0 || !strings.EqualFold(raw[:separator], expectedScheme) {
+		return "", false
+	}
+	credential := strings.TrimSpace(raw[separator:])
+	return credential, credential != ""
 }
 
 func clientAPIKeyMatches(got string, keys [][sha256.Size]byte) bool {

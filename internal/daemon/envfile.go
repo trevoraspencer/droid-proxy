@@ -37,7 +37,7 @@ func ParseEnvLine(line string) (key, value string, ok bool, err error) {
 	if key == "" {
 		return "", "", false, fmt.Errorf("empty env key")
 	}
-	if !isEnvKey(key) {
+	if !ValidEnvKey(key) {
 		return "", "", false, fmt.Errorf("invalid env key %q", key)
 	}
 	return key, ParseEnvValue(value), true, nil
@@ -54,7 +54,10 @@ func trimEnvExportPrefix(line string) string {
 	return strings.TrimSpace(line[len(prefix)+1:])
 }
 
-func isEnvKey(key string) bool {
+// ValidEnvKey reports whether key is a portable shell environment-variable
+// name: an ASCII letter or underscore followed by ASCII letters, digits, or
+// underscores.
+func ValidEnvKey(key string) bool {
 	if key == "" || !isASCIILetterOrUnderscore(key[0]) {
 		return false
 	}

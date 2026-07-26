@@ -11,7 +11,7 @@ Thanks for helping improve `droid-proxy`. This project is a localhost HTTP proxy
 
 ## Development Setup
 
-Requirements: Go 1.26.4 or newer.
+Requirements: Go 1.26.5 or newer.
 
 ```bash
 git clone https://github.com/trevoraspencer/droid-proxy.git

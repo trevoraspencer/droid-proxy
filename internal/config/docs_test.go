@@ -979,7 +979,7 @@ func activeDocFiles() []string {
 	var files []string
 	files = append(files, "README.md", "config.example.yaml")
 	files = append(files, docExampleMarkdownFiles()...)
-	for _, f := range []string{
+	files = append(files, []string{
 		"docs/CLI.md",
 		"docs/BENCHMARKS.md",
 		"docs/CONFIG.md",
@@ -990,9 +990,7 @@ func activeDocFiles() []string {
 		"docs/SMOKE.md",
 		"docs/UPGRADE.md",
 		"docs/TROUBLESHOOTING.md",
-	} {
-		files = append(files, f)
-	}
+	}...)
 	return files
 }
 
@@ -1078,19 +1076,6 @@ func TestDocsSmokeUsesCurrentPort(t *testing.T) {
 }
 
 // --- VAL-PORT-027: Historical 8787 references remain accurate and classified ---
-
-// classifiedOldPortFiles lists tracked files where 8787 is allowed to appear
-// because the reference is explicitly historical, a migration fixture, a
-// compatibility test, or third-party conflict context.
-func classifiedOldPortFiles() map[string]string {
-	return map[string]string{
-		"docs/TROUBLESHOOTING.md":                 "third-party conflict context (Cursor MCP, Wrangler, Dask) and historical default",
-		"docs/spec-gpt56-reasoning-controls.md":   "superseded design document",
-		"CHANGELOG.md":                            "historical changelog entries",
-		"scripts/live-e2e/merge-custom-models.jq": "legacy harness retirement pattern",
-		"scripts/security-audit.sh":               "secret-scan exclusion pattern",
-	}
-}
 
 func TestDocsTroubleshootingClassifiesOldPort(t *testing.T) {
 	body := readRepoRel(t, "docs/TROUBLESHOOTING.md")
@@ -1209,8 +1194,8 @@ func TestDocsGoModVersionMatchesBootstrap(t *testing.T) {
 	if goVersion == "" {
 		t.Fatal("go.mod does not declare a Go version")
 	}
-	if goVersion != "1.26.4" {
-		t.Fatalf("go.mod Go version = %q, want 1.26.4", goVersion)
+	if goVersion != "1.26.5" {
+		t.Fatalf("go.mod Go version = %q, want 1.26.5", goVersion)
 	}
 }
 
@@ -1583,11 +1568,6 @@ func TestFireworksCatalogsUseIndependentMembership(t *testing.T) {
 	}
 	if !fastHasCanonical {
 		t.Error("Fast catalog must contain accounts/fireworks/routers/glm-5p2-fast")
-	}
-
-	// Overlap is allowed and tested (both have glm-5p2-fast).
-	if fpHasCanonical && fastHasCanonical {
-		// Good: overlap is tested.
 	}
 
 	// Fire Pass entries must all be router IDs (not ordinary model IDs).

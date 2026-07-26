@@ -20,6 +20,14 @@ import (
 const maxModelsResponseBytes int64 = 4 << 20
 const defaultModelsPath = "models"
 
+var modelsHTTPClient = &http.Client{
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		// Model discovery carries provider API keys. Do not forward them to a
+		// redirect target; providers must return the catalog directly.
+		return http.ErrUseLastResponse
+	},
+}
+
 // ListOptions controls model discovery against a provider profile.
 type ListOptions struct {
 	BaseURL      string
@@ -92,7 +100,7 @@ func ListModelsWithOptions(ctx context.Context, opts ListOptions) ([]string, err
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := modelsHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

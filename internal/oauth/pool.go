@@ -374,14 +374,6 @@ func (p *AccountPool) updateEntry(entry *AccountEntry, tok *Token, now time.Time
 		entry.Refreshable = entry.HasRefreshToken
 	}
 
-	// If the account was re-enabled via file change, mark healthy again
-	if !entry.Disabled && !entry.Healthy {
-		// Keep unhealthy unless the token itself changed meaningfully
-		// (token reload after re-login may fix the issue)
-		// For now, we keep the unhealthy state but allow recovery via
-		// successful refresh or explicit recovery.
-	}
-
 	// If provider changed away from Codex, entry stays but won't be eligible
 	// Selector and matching update immediately.
 

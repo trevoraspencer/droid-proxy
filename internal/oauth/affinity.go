@@ -1,8 +1,10 @@
 package oauth
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,7 +26,11 @@ type affinityFile struct {
 	Entries map[string]affinityRecord `json:"entries"`
 }
 
-const affinityFileVersion = 1
+const (
+	affinityFileVersion  = 1
+	affinityIDMaxBytes   = 256
+	affinityFileMaxBytes = 64 << 20
+)
 
 // AffinityStore maps Codex conversation IDs to token file paths.
 type AffinityStore struct {
@@ -90,12 +96,20 @@ func ResolveAffinityPath(cfg *config.Config, authDir string) (string, error) {
 }
 
 func (s *AffinityStore) load() error {
-	raw, err := os.ReadFile(s.path)
+	f, err := os.Open(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return fmt.Errorf("read affinity file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(f, affinityFileMaxBytes+1))
+	if err != nil {
+		return fmt.Errorf("read affinity file: %w", err)
+	}
+	if len(raw) > affinityFileMaxBytes {
+		return fmt.Errorf("read affinity file: file exceeds %d bytes", affinityFileMaxBytes)
 	}
 	var file affinityFile
 	if err := json.Unmarshal(raw, &file); err != nil {
@@ -106,7 +120,8 @@ func (s *AffinityStore) load() error {
 	}
 	now := s.nowFunc()
 	for id, rec := range file.Entries {
-		if strings.TrimSpace(id) == "" || strings.TrimSpace(rec.AccountPath) == "" {
+		id = normalizeAffinityID(id)
+		if id == "" || strings.TrimSpace(rec.AccountPath) == "" {
 			continue
 		}
 		if s.ttl > 0 && !rec.UpdatedAt.IsZero() && now.Sub(rec.UpdatedAt) > s.ttl {
@@ -114,6 +129,7 @@ func (s *AffinityStore) load() error {
 		}
 		s.entries[id] = rec
 	}
+	s.enforceMaxLocked()
 	return nil
 }
 
@@ -138,7 +154,7 @@ func (s *AffinityStore) Lookup(conversationID string) string {
 	if s == nil {
 		return ""
 	}
-	conversationID = strings.TrimSpace(conversationID)
+	conversationID = normalizeAffinityID(conversationID)
 	if conversationID == "" {
 		return ""
 	}
@@ -156,7 +172,7 @@ func (s *AffinityStore) Unbind(conversationID string) error {
 	if s == nil {
 		return nil
 	}
-	conversationID = strings.TrimSpace(conversationID)
+	conversationID = normalizeAffinityID(conversationID)
 	if conversationID == "" {
 		return nil
 	}
@@ -174,7 +190,7 @@ func (s *AffinityStore) Bind(conversationID, accountPath string) error {
 	if s == nil {
 		return nil
 	}
-	conversationID = strings.TrimSpace(conversationID)
+	conversationID = normalizeAffinityID(conversationID)
 	accountPath = strings.TrimSpace(accountPath)
 	if conversationID == "" || accountPath == "" {
 		return nil
@@ -187,6 +203,15 @@ func (s *AffinityStore) Bind(conversationID, accountPath string) error {
 	}
 	s.enforceMaxLocked()
 	return s.saveLocked()
+}
+
+func normalizeAffinityID(id string) string {
+	id = strings.TrimSpace(id)
+	if len(id) <= affinityIDMaxBytes {
+		return id
+	}
+	sum := sha256.Sum256([]byte(id))
+	return fmt.Sprintf("sha256:%x", sum[:])
 }
 
 // Prune removes stale bindings: expired TTL, unknown account paths, over max entries.

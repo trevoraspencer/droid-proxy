@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -11,41 +12,49 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+
+	"github.com/trevoraspencer/droid-proxy/internal/userhome"
 )
 
 const launchdLabel = "com.droid-proxy.agent"
 
-var plistTemplate = template.Must(template.New("plist").Parse(`<?xml version="1.0" encoding="UTF-8"?>
+var plistTemplate = template.Must(template.New("plist").Funcs(template.FuncMap{"xml": xmlEscape}).Parse(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>{{.Label}}</string>
+    <string>{{xml .Label}}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{{.Executable}}</string>
+        <string>{{xml .Executable}}</string>
         <string>start</string>
         <string>--foreground</string>
         <string>--config</string>
-        <string>{{.ConfigPath}}</string>
+        <string>{{xml .ConfigPath}}</string>
 {{- if .EnvFile }}
         <string>--env-file</string>
-        <string>{{.EnvFile}}</string>
+        <string>{{xml .EnvFile}}</string>
 {{- end }}
     </array>
     <key>WorkingDirectory</key>
-    <string>{{.WorkDir}}</string>
+    <string>{{xml .WorkDir}}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>{{.LogDir}}/stdout.log</string>
+    <string>{{xml .LogDir}}/stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>{{.LogDir}}/stderr.log</string>
+    <string>{{xml .LogDir}}/stderr.log</string>
 </dict>
 </plist>
 `))
+
+func xmlEscape(value string) string {
+	var buf bytes.Buffer
+	_ = xml.EscapeText(&buf, []byte(value))
+	return buf.String()
+}
 
 var launchAgentLoader = loadLaunchAgent
 
@@ -59,7 +68,7 @@ type plistData struct {
 }
 
 func plistPath() string {
-	return filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", launchdLabel+".plist")
+	return filepath.Join(userhome.Dir(), "Library", "LaunchAgents", launchdLabel+".plist")
 }
 
 func LaunchdPlistPath() string {
@@ -233,6 +242,10 @@ func writeLaunchdPlist(path string, data plistData) error {
 		_ = tmp.Close()
 		return fmt.Errorf("writing plist: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("syncing plist: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("closing plist: %w", err)
 	}
@@ -242,6 +255,7 @@ func writeLaunchdPlist(path string, data plistData) error {
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("installing plist: %w", err)
 	}
+	syncDirectory(dir)
 	return nil
 }
 
@@ -254,7 +268,7 @@ func loadLaunchAgent(path string) error {
 	}
 	if strings.Contains(string(out), "already") || strings.Contains(string(out), "Existing") {
 		_ = exec.Command("launchctl", "bootout", domain, path).Run()
-		out, err = exec.Command("launchctl", "bootstrap", domain, path).CombinedOutput()
+		_, err = exec.Command("launchctl", "bootstrap", domain, path).CombinedOutput()
 		if err == nil {
 			return nil
 		}

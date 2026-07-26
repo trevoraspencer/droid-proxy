@@ -3,6 +3,7 @@ package oauth
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
+
+const tokenFileMaxBytes int64 = 4 << 20
 
 func (m *Manager) LoadToken(provider config.OAuthProvider, account string) (*Token, error) {
 	tokens, err := m.LoadTokens(provider)
@@ -113,7 +116,7 @@ func (m *Manager) LoadTokens(provider config.OAuthProvider) ([]*Token, error) {
 }
 
 func (m *Manager) loadTokenPath(path string) (*Token, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := readFileLimited(path, tokenFileMaxBytes)
 	if err != nil {
 		return nil, fmt.Errorf("read auth token: %w", err)
 	}
@@ -123,6 +126,22 @@ func (m *Manager) loadTokenPath(path string) (*Token, error) {
 	}
 	token.path = path
 	return &token, nil
+}
+
+func readFileLimited(path string, maxBytes int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > maxBytes {
+		return nil, fmt.Errorf("file exceeds %d bytes", maxBytes)
+	}
+	return raw, nil
 }
 
 // LoadTokenAtPath loads and parses a single token file at the given path.

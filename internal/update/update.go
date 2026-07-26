@@ -245,8 +245,23 @@ func buildBinary(ctx context.Context, runner Runner, repo, binary, commit string
 	if _, err := runner.Run(ctx, repo, "go", "build", "-ldflags", ldflags, "-o", tmpPath, "./cmd/droid-proxy"); err != nil {
 		return fmt.Errorf("building updated droid-proxy: %w", err)
 	}
+	built, err := os.Open(tmpPath)
+	if err != nil {
+		return fmt.Errorf("opening updated droid-proxy: %w", err)
+	}
+	if err := built.Sync(); err != nil {
+		_ = built.Close()
+		return fmt.Errorf("syncing updated droid-proxy: %w", err)
+	}
+	if err := built.Close(); err != nil {
+		return fmt.Errorf("closing updated droid-proxy: %w", err)
+	}
 	if err := os.Rename(tmpPath, binary); err != nil {
 		return fmt.Errorf("installing updated binary: %w", err)
+	}
+	if dir, err := os.Open(filepath.Dir(binary)); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
 	}
 	return nil
 }

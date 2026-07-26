@@ -87,6 +87,27 @@ func TestListModelsSendsAuthAndParses(t *testing.T) {
 	}
 }
 
+func TestListModelsDoesNotForwardAPIKeyAcrossRedirects(t *testing.T) {
+	var targetAuth string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"data":[{"id":"should-not-be-reached"}]}`))
+	}))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+
+	_, err := ListModels(context.Background(), source.URL, "secret", "", "")
+	if err == nil || !strings.Contains(err.Error(), "307") {
+		t.Fatalf("redirect error = %v", err)
+	}
+	if targetAuth != "" {
+		t.Fatalf("redirect target received Authorization %q", targetAuth)
+	}
+}
+
 func TestListModelsErrorStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

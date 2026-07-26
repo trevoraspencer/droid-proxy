@@ -1,3 +1,4 @@
+//lint:file-ignore ST1005 Translator errors are serialized as compatibility-sensitive wire messages.
 package translate
 
 import (
@@ -50,6 +51,33 @@ type ChatStreamForwardOptions struct {
 	Context     context.Context
 	KeepAlive   time.Duration
 	IdleTimeout time.Duration
+	MaxBytes    int64
+}
+
+type chatWireLine struct {
+	text  string
+	bytes int64
+}
+
+func splitChatWireLine(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, data[:i+1], nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+func decodeChatWireLine(raw []byte) string {
+	line := raw
+	if len(line) > 0 && line[len(line)-1] == '\n' {
+		line = line[:len(line)-1]
+	}
+	if len(line) > 0 && line[len(line)-1] == '\r' {
+		line = line[:len(line)-1]
+	}
+	return string(line)
 }
 
 func ForwardChatStreamToResponsesWithOptions(r io.Reader, w io.Writer, flush func(), model string, opts ChatStreamForwardOptions) error {
@@ -404,7 +432,7 @@ func readChatStreamEventsIncremental(r io.Reader, opts ChatStreamForwardOptions,
 		return onEvent(ev)
 	}
 
-	lines := make(chan string, 32)
+	lines := make(chan chatWireLine, 1)
 	errs := make(chan error, 1)
 	scanCtx, scanCancel := context.WithCancel(ctx)
 	defer scanCancel()
@@ -417,9 +445,11 @@ func readChatStreamEventsIncremental(r io.Reader, opts ChatStreamForwardOptions,
 	go func() {
 		defer close(lines)
 		scanner := bufio.NewScanner(r)
-		scanner.Buffer(make([]byte, 64*1024), 50*1024*1024)
+		scanner.Split(splitChatWireLine)
+		scanner.Buffer(make([]byte, 64*1024), 50*1024*1024+2)
 		for scanner.Scan() {
-			line := scanner.Text()
+			raw := append([]byte(nil), scanner.Bytes()...)
+			line := chatWireLine{text: decodeChatWireLine(raw), bytes: int64(len(raw))}
 			select {
 			case lines <- line:
 			case <-scanCtx.Done():
@@ -456,13 +486,14 @@ func readChatStreamEventsIncremental(r io.Reader, opts ChatStreamForwardOptions,
 		}
 		idleTimer.Reset(opts.IdleTimeout)
 	}
+	var totalBytes int64
 	for {
 		select {
 		case <-ctx.Done():
 			scanCancel()
 			closeReader()
 			return ctx.Err()
-		case line, ok := <-lines:
+		case scanned, ok := <-lines:
 			if !ok {
 				select {
 				case err := <-errs:
@@ -482,6 +513,13 @@ func readChatStreamEventsIncremental(r io.Reader, opts ChatStreamForwardOptions,
 				}
 				return nil
 			}
+			totalBytes += scanned.bytes
+			if opts.MaxBytes > 0 && totalBytes > opts.MaxBytes {
+				scanCancel()
+				closeReader()
+				return errors.New("Chat stream exceeded configured response body cap")
+			}
+			line := scanned.text
 			if strings.TrimSpace(line) == "" {
 				if err := flush(); err != nil {
 					scanCancel()

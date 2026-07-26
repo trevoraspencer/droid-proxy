@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/userhome"
 )
 
 // PlanOptions configures a migration plan.
@@ -190,17 +191,29 @@ func writeFilePreservingMode(path string, data []byte) error {
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Chmod(tmpName, mode); err != nil {
+	if err := os.Rename(tmpName, path); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if dirFile, err := os.Open(dir); err == nil {
+		_ = dirFile.Sync()
+		_ = dirFile.Close()
+	}
+	return nil
 }
 
 // loadConfigModels loads just the models from a config file for Factory
@@ -224,8 +237,7 @@ func loadConfigModels(path string) ([]*config.Model, error) {
 
 // defaultFactoryPath returns the canonical Factory settings path.
 func defaultFactoryPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".factory", "settings.json")
+	return filepath.Join(userhome.Dir(), ".factory", "settings.json")
 }
 
 // sanitizeURL masks credentials in a URL for safe display. Since migration

@@ -65,7 +65,7 @@ The `/v1` prefix is optional on non-health routes.
 curl -fsSL https://github.com/trevoraspencer/droid-proxy/releases/latest/download/install.sh | sh
 ```
 
-The installer downloads the latest macOS or Linux release archive, verifies `checksums.txt`, rejects unsafe archive paths or link entries before extraction, installs `droid-proxy` to `~/.local/bin/droid-proxy`, and creates a per-user config if one does not already exist. Re-running the command upgrades the binary and preserves existing config, OAuth tokens, logs, and managed secrets.
+The installer downloads the latest macOS or Linux release archive, verifies `checksums.txt`, rejects unsafe paths, duplicate names, and non-regular archive entries before extraction, installs `droid-proxy` to `~/.local/bin/droid-proxy`, and creates a per-user config if one does not already exist. Re-running the command upgrades the binary and preserves existing config, OAuth tokens, logs, and managed secrets.
 
 Inspect the script first if preferred:
 
@@ -113,7 +113,7 @@ cd droid-proxy
 make install-user
 ```
 
-Source builds require Go 1.26.4 or newer. See [docs/UPGRADE.md](docs/UPGRADE.md) for release upgrades, source installs, and service repair.
+Source builds require Go 1.26.5 or newer. See [docs/UPGRADE.md](docs/UPGRADE.md) for release upgrades, source installs, and service repair.
 
 ## Quickstart
 
@@ -214,7 +214,7 @@ Provider walkthroughs: [DeepSeek](docs/examples/deepseek.md), [OpenAI](docs/exam
 
 ## Configuration Notes
 
-- `${VAR}` and `${VAR:-default}` expansion is supported in string fields.
+- `${VAR}` and `${VAR:-default}` expansion is supported in string fields. Expanded values remain within their original YAML field and cannot introduce new keys or documents.
 - `client_auth` protects the proxy from other local processes when enabled.
 - `oauth.auth_dir` controls OAuth token storage.
 - `oauth.load_balancing` controls Codex account selection: `sticky`, `round-robin`, `fill-first`, `least-connections`, or `random`.

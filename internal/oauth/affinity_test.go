@@ -1,8 +1,10 @@
 package oauth
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +37,38 @@ func TestAffinityStore_BindAndLookup(t *testing.T) {
 	}
 	if got := store2.Lookup("conv-a"); got != "/tmp/a.json" {
 		t.Fatalf("reloaded lookup = %q", got)
+	}
+}
+
+func TestAffinityStoreHashesOversizedConversationIDs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "conversation_affinity.json")
+	store, err := NewAffinityStore(AffinityOptions{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	longID := strings.Repeat("conversation-", 1000)
+	if err := store.Bind(longID, "/tmp/a.json"); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Lookup(longID); got != "/tmp/a.json" {
+		t.Fatalf("lookup of oversized ID = %q", got)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), longID) {
+		t.Fatal("oversized conversation ID was persisted verbatim")
+	}
+	var file affinityFile
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatal(err)
+	}
+	for id := range file.Entries {
+		if len(id) > len("sha256:")+64 || !strings.HasPrefix(id, "sha256:") {
+			t.Fatalf("persisted affinity ID = %q", id)
+		}
 	}
 }
 

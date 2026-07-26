@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -33,18 +35,40 @@ func Load(path string) (*Config, error) {
 }
 
 func parse(raw []byte) (*Config, error) {
-	expanded := expandEnv(string(raw))
 	cfg := &Config{}
 	var root yaml.Node
-	if err := yaml.Unmarshal([]byte(expanded), &root); err != nil {
-		return nil, fmt.Errorf("parse yaml: %w", err)
+	nodeDec := yaml.NewDecoder(bytes.NewReader(raw))
+	firstErr := nodeDec.Decode(&root)
+	if firstErr != nil && firstErr != io.EOF {
+		return nil, fmt.Errorf("parse yaml: %w", firstErr)
 	}
-	dec := yaml.NewDecoder(strings.NewReader(expanded))
+	if firstErr == nil {
+		var trailing yaml.Node
+		if err := nodeDec.Decode(&trailing); err != io.EOF {
+			if err == nil {
+				return nil, fmt.Errorf("parse yaml: multiple documents are not supported")
+			}
+			return nil, fmt.Errorf("parse yaml: %w", err)
+		}
+	}
+	cfg.present = collectPresence(&root)
+	expandEnvValues(&root)
+	expanded, err := yaml.Marshal(&root)
+	if err != nil {
+		return nil, fmt.Errorf("parse yaml: expand environment: %w", err)
+	}
+	dec := yaml.NewDecoder(strings.NewReader(string(expanded)))
 	dec.KnownFields(true)
 	if err := dec.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
-	cfg.present = collectPresence(&root)
+	var extra yaml.Node
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("parse yaml: multiple documents are not supported")
+		}
+		return nil, fmt.Errorf("parse yaml: %w", err)
+	}
 	cfg.applyDefaults()
 	for _, m := range cfg.Models {
 		if err := HydrateModel(m); err != nil {
@@ -55,6 +79,54 @@ func parse(raw []byte) (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// expandEnvValues expands only YAML scalar values after parsing. Performing
+// textual substitution before parsing lets a quoted environment value inject
+// new mappings or documents into the configuration.
+func expandEnvValues(n *yaml.Node) {
+	if n == nil {
+		return
+	}
+	switch n.Kind {
+	case yaml.DocumentNode, yaml.SequenceNode:
+		for _, child := range n.Content {
+			expandEnvValues(child)
+		}
+	case yaml.MappingNode:
+		// Mapping keys describe the schema and must never be environment-driven.
+		for i := 1; i < len(n.Content); i += 2 {
+			expandEnvValues(n.Content[i])
+		}
+	case yaml.ScalarNode:
+		if n.Tag != "!!str" {
+			return
+		}
+		n.Value = expandEnv(n.Value)
+		if n.Style == 0 {
+			n.Tag = expandedPlainScalarTag(n.Value)
+		}
+	}
+}
+
+// expandedPlainScalarTag preserves the useful behavior of an unquoted
+// placeholder in a numeric or boolean field without allowing its value to
+// become a YAML collection or additional document.
+func expandedPlainScalarTag(value string) string {
+	dec := yaml.NewDecoder(strings.NewReader(value))
+	var doc yaml.Node
+	if err := dec.Decode(&doc); err != nil || len(doc.Content) != 1 {
+		return "!!str"
+	}
+	scalar := doc.Content[0]
+	if scalar.Kind != yaml.ScalarNode {
+		return "!!str"
+	}
+	var extra yaml.Node
+	if err := dec.Decode(&extra); err != io.EOF {
+		return "!!str"
+	}
+	return scalar.Tag
 }
 
 func collectPresence(root *yaml.Node) map[string]bool {
@@ -207,20 +279,26 @@ func (c *Config) Validate() error {
 		errs = append(errs, "at least one model must be configured")
 	}
 	seen := make(map[string]struct{}, len(c.Models))
-	for _, m := range c.Models {
+	for i, m := range c.Models {
+		if m == nil {
+			errs = append(errs, fmt.Sprintf("models[%d] must not be null", i))
+			continue
+		}
 		aliasKey := strings.ToLower(strings.TrimSpace(m.Alias))
 		if _, dup := seen[aliasKey]; dup && aliasKey != "" {
 			errs = append(errs, fmt.Sprintf("duplicate model alias %q", m.Alias))
 			continue
 		}
 		seen[aliasKey] = struct{}{}
+		modelValid := true
 		if err := m.Validate(); err != nil {
 			errs = append(errs, err.Error())
+			modelValid = false
 		}
 		if requiresAPIKey(m) && strings.TrimSpace(m.APIKeyEnv) == "" {
 			errs = append(errs, fmt.Sprintf("model %q: remote upstream requires api_key_env or known_auth API key source", m.Alias))
 		}
-		if requiresAPIKey(m) && strings.TrimSpace(m.APIKeyEnv) != "" {
+		if modelValid && requiresAPIKey(m) && strings.TrimSpace(m.APIKeyEnv) != "" {
 			if strings.TrimSpace(os.Getenv(strings.TrimSpace(m.APIKeyEnv))) == "" {
 				errs = append(errs, fmt.Sprintf("model %q: env var %s is empty", m.Alias, strings.TrimSpace(m.APIKeyEnv)))
 			}

@@ -213,7 +213,8 @@ func TestAPIKeyHash_DifferentKeysDifferentHashes(t *testing.T) {
 	if APIKeyHash("a") == APIKeyHash("b") {
 		t.Fatalf("expected different hashes")
 	}
-	if APIKeyHash("a") != APIKeyHash("a") {
+	first := APIKeyHash("a")
+	if first != APIKeyHash("a") {
 		t.Fatalf("expected stable hash")
 	}
 }

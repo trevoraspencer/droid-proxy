@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/trevoraspencer/droid-proxy/internal/userhome"
 )
 
 // migrationDirName is the subdirectory under the droid-proxy state root
@@ -21,8 +23,7 @@ func StateRoot() string {
 	if stateRootOverride != "" {
 		return stateRootOverride
 	}
-	home := os.Getenv("HOME")
-	return filepath.Join(home, ".droid-proxy", migrationDirName)
+	return filepath.Join(userhome.Dir(), ".droid-proxy", migrationDirName)
 }
 
 // SetStateRootForTest sets a temporary state root for testing and returns a
@@ -86,11 +87,11 @@ func mkdirPrivate(path string) error {
 }
 
 // writePrivateFile writes data to path with at most 0600 permissions. If the
-// file already exists, its current mode is preserved.
+// file already exists, any stricter owner-only mode is preserved.
 func writePrivateFile(path string, data []byte) (err error) {
 	mode := os.FileMode(0o600)
 	if info, statErr := os.Stat(path); statErr == nil {
-		mode = info.Mode().Perm()
+		mode = info.Mode().Perm() & 0o600
 	}
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".migration-*.tmp")
@@ -100,20 +101,32 @@ func writePrivateFile(path string, data []byte) (err error) {
 	tmpName := tmp.Name()
 	defer func() {
 		if err != nil {
-			os.Remove(tmpName)
+			_ = os.Remove(tmpName)
 		}
 	}()
+	if err = tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if _, wErr := tmp.Write(data); wErr != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return wErr
+	}
+	if err = tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
 	}
 	if cErr := tmp.Close(); cErr != nil {
 		return cErr
 	}
-	if err = os.Chmod(tmpName, mode); err != nil {
+	if err = os.Rename(tmpName, path); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if dirFile, openErr := os.Open(dir); openErr == nil {
+		_ = dirFile.Sync()
+		_ = dirFile.Close()
+	}
+	return nil
 }
 
 // checkControlPathTrust verifies that the state root path does not contain

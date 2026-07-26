@@ -18,7 +18,14 @@ var (
 	codexAuthURL      = CodexAuthURL
 	codexTokenURL     = CodexTokenURL
 	xaiDiscoveryURL   = XAIDiscoveryURL
-	defaultHTTPClient = &http.Client{Timeout: 30 * time.Second}
+	defaultHTTPClient = &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			// Token, device-code, and discovery endpoints are fixed or
+			// validated. Never forward OAuth credentials across a redirect.
+			return http.ErrUseLastResponse
+		},
+	}
 )
 
 // SetTestCodexTokenURL overrides the Codex token endpoint URL for testing.
@@ -226,7 +233,7 @@ func discoverXAI(ctx context.Context) (*xaiDiscovery, error) {
 		AuthorizationEndpoint string `json:"authorization_endpoint"`
 		TokenEndpoint         string `json:"token_endpoint"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
 		return nil, fmt.Errorf("xai discovery: parse response: %w", err)
 	}
 	authEndpoint, err := validateXAIEndpoint(payload.AuthorizationEndpoint, "authorization_endpoint")

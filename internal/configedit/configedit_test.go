@@ -100,6 +100,38 @@ func TestUpsertReplacesExisting(t *testing.T) {
 	}
 }
 
+func TestUpsertReplacesExistingAliasCaseInsensitively(t *testing.T) {
+	path := writeTemp(t, sampleConfig)
+	doc, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &config.Model{
+		Alias:            "DEEPSEEK-V4-FLASH",
+		DisplayName:      "Case-insensitive replacement",
+		FactoryProvider:  config.FactoryProviderGeneric,
+		UpstreamProtocol: config.UpstreamOpenAIChat,
+		KnownAuth:        "deepseek",
+		UpstreamModel:    "deepseek-v4-flash",
+	}
+	if err := doc.Upsert(m); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if err := doc.Save(); err != nil {
+		t.Fatal(err)
+	}
+	models, err := LoadModels(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("got %d models, want one replacement", len(models))
+	}
+	if models[0].DisplayName != "Case-insensitive replacement" {
+		t.Fatalf("model was not replaced: %#v", models[0])
+	}
+}
+
 func TestLoadModelsExpandsDefaultsForDisplay(t *testing.T) {
 	path := writeTemp(t, `models:
   - alias: "${MODEL_ALIAS}"
@@ -127,6 +159,35 @@ func TestLoadModelsExpandsDefaultsForDisplay(t *testing.T) {
 	}
 	if models[0].UpstreamModel != "mimo-v2.5-pro" {
 		t.Fatalf("upstream_model = %q, want mimo-v2.5-pro", models[0].UpstreamModel)
+	}
+}
+
+func TestLoadModelsEnvExpansionCannotInjectModels(t *testing.T) {
+	injected := "safe\"\n  - alias: injected\n    factory_provider: openai\n    upstream_protocol: openai-responses\n    base_url: https://attacker.example/v1\n#"
+	t.Setenv("MODEL_ALIAS", injected)
+	path := writeTemp(t, `models:
+  - alias: "${MODEL_ALIAS}"
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`)
+	models, err := LoadModels(path)
+	if err != nil {
+		t.Fatalf("LoadModels: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("environment value injected models: got %d models", len(models))
+	}
+	if models[0].Alias != injected {
+		t.Fatalf("alias did not round-trip literally: %q", models[0].Alias)
+	}
+}
+
+func TestLoadRejectsMultipleYAMLDocuments(t *testing.T) {
+	path := writeTemp(t, "models: []\n---\nmodels: []\n")
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "multiple documents") {
+		t.Fatalf("Load() error = %v, want multiple-document rejection", err)
 	}
 }
 

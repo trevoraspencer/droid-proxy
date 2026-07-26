@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/trevoraspencer/droid-proxy/internal/userhome"
 )
 
 const systemdUnitName = "droid-proxy.service"
@@ -33,7 +35,7 @@ type SystemdUnitCheck struct {
 func SystemdUnitPath() string {
 	configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
 	if configHome == "" {
-		configHome = filepath.Join(os.Getenv("HOME"), ".config")
+		configHome = filepath.Join(userhome.Dir(), ".config")
 	}
 	return filepath.Join(configHome, "systemd", "user", systemdUnitName)
 }
@@ -148,6 +150,10 @@ func writeSystemdUnit(path string, data systemdUnitData) error {
 		_ = tmp.Close()
 		return fmt.Errorf("writing systemd unit: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("syncing systemd unit: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("closing systemd unit: %w", err)
 	}
@@ -157,6 +163,7 @@ func writeSystemdUnit(path string, data systemdUnitData) error {
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("installing systemd unit: %w", err)
 	}
+	syncDirectory(dir)
 	return nil
 }
 
@@ -172,11 +179,11 @@ func systemdUnitContents(data systemdUnitData) string {
 	b.WriteString("[Service]\n")
 	b.WriteString("Type=simple\n")
 	b.WriteString("ExecStart=" + systemdJoinArgs(args) + "\n")
-	b.WriteString("WorkingDirectory=" + systemdUnitValue(data.WorkDir) + "\n")
+	b.WriteString("WorkingDirectory=" + systemdDirectivePath(data.WorkDir) + "\n")
 	b.WriteString("Restart=always\n")
 	b.WriteString("RestartSec=2\n")
-	b.WriteString("StandardOutput=append:" + systemdUnitValue(filepath.Join(data.LogDir, "stdout.log")) + "\n")
-	b.WriteString("StandardError=append:" + systemdUnitValue(filepath.Join(data.LogDir, "stderr.log")) + "\n\n")
+	b.WriteString("StandardOutput=append:" + systemdDirectivePath(filepath.Join(data.LogDir, "stdout.log")) + "\n")
+	b.WriteString("StandardError=append:" + systemdDirectivePath(filepath.Join(data.LogDir, "stderr.log")) + "\n\n")
 	b.WriteString("[Install]\n")
 	b.WriteString("WantedBy=default.target\n")
 	return b.String()
@@ -191,20 +198,37 @@ func systemdJoinArgs(args []string) string {
 }
 
 func systemdQuoteArg(arg string) string {
-	escaped := systemdUnitValue(arg)
-	if escaped == "" {
-		return `""`
-	}
-	if strings.ContainsAny(escaped, " \t\n\"\\") {
-		escaped = strings.ReplaceAll(escaped, `\`, `\\`)
-		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	escaped := strings.NewReplacer(
+		`\`, `\\`,
+		`"`, `\"`,
+		"\n", `\n`,
+		"\r", `\r`,
+		"\t", `\t`,
+		"%", "%%",
+		"$", "$$",
+	).Replace(arg)
+	if arg == "" || strings.ContainsAny(arg, " \t\r\n\"'\\$") {
 		return `"` + escaped + `"`
 	}
 	return escaped
 }
 
-func systemdUnitValue(value string) string {
-	return strings.ReplaceAll(value, "%", "%%")
+// systemdDirectivePath escapes a path used by a non-command service directive.
+// Unlike ExecStart arguments, paths such as WorkingDirectory must not be
+// surrounded by quotes: systemd treats those quote bytes as part of the path.
+func systemdDirectivePath(path string) string {
+	var b strings.Builder
+	for _, c := range []byte(path) {
+		switch {
+		case c == '%':
+			b.WriteString("%%")
+		case c >= 0x21 && c <= 0x7e && c != '\\' && c != '"' && c != '\'':
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, `\x%02x`, c)
+		}
+	}
+	return b.String()
 }
 
 func systemdExecStartArguments(raw []byte) ([]string, error) {
@@ -228,14 +252,24 @@ func parseSystemdCommandLine(line string) ([]string, error) {
 	escaped := false
 	flush := func() {
 		if b.Len() > 0 {
-			args = append(args, strings.ReplaceAll(b.String(), "%%", "%"))
+			value := strings.ReplaceAll(b.String(), "%%", "%")
+			args = append(args, strings.ReplaceAll(value, "$$", "$"))
 			b.Reset()
 		}
 	}
 	for _, r := range line {
 		switch {
 		case escaped:
-			b.WriteRune(r)
+			switch r {
+			case 'n':
+				b.WriteByte('\n')
+			case 'r':
+				b.WriteByte('\r')
+			case 't':
+				b.WriteByte('\t')
+			default:
+				b.WriteRune(r)
+			}
 			escaped = false
 		case r == '\\':
 			escaped = true

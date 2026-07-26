@@ -11,7 +11,6 @@ warnings=0
 info() { printf '[legal-audit] %s\n' "$*"; }
 pass() { info "PASS: $*"; }
 fail() { info "FAIL: $*"; failures=$((failures + 1)); }
-warn() { info "WARN: $*"; warnings=$((warnings + 1)); }
 
 info "Starting legal audit in ${ROOT}"
 

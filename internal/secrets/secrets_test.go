@@ -36,6 +36,19 @@ func TestSetReadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSetRejectsInvalidEnvKeyWithoutWriting(t *testing.T) {
+	withTempStateDir(t)
+
+	for _, key := range []string{"1KEY", "BAD-KEY", "BAD\nKEY", "KEY=value"} {
+		if err := Set(key, "secret"); err == nil || !strings.Contains(err.Error(), "invalid env key") {
+			t.Fatalf("Set(%q) error = %v, want invalid env key", key, err)
+		}
+	}
+	if _, err := os.Stat(Path()); !os.IsNotExist(err) {
+		t.Fatalf("invalid keys should not create the secrets file: %v", err)
+	}
+}
+
 func TestSetReplacesExisting(t *testing.T) {
 	withTempStateDir(t)
 

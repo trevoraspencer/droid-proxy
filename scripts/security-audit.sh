@@ -82,7 +82,9 @@ if [[ -z "$tracked_sensitive" ]]; then
   pass "no tracked files match sensitive filename patterns"
 else
   fail "tracked files match sensitive filename patterns:"
-  printf '  %s\n' $tracked_sensitive
+  while IFS= read -r path; do
+    printf '  %s\n' "$path"
+  done <<<"$tracked_sensitive"
 fi
 
 must_ignore=(
