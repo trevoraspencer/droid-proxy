@@ -95,6 +95,7 @@ func (a *API) messagesViaChat(c *gin.Context, m *config.Model, body []byte) {
 			Context:     c.Request.Context(),
 			KeepAlive:   a.Cfg.Upstream.StreamKeepAlive,
 			IdleTimeout: a.Cfg.Upstream.HTTPTimeout,
+			MaxBytes:    a.Cfg.Upstream.ResponseBodyMaxBytes,
 		}); err != nil && !errors.Is(err, c.Request.Context().Err()) {
 			_ = a.writeAnthropicStreamErrorFrame(c.Writer, []byte(err.Error()))
 			a.Logger.WithError(err).Warn("translated anthropic stream terminated abnormally")

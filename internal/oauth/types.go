@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/userhome"
 )
 
 const (
@@ -195,10 +195,7 @@ func (m *Manager) CallbackAddr(provider config.OAuthProvider) string {
 func expandUserPath(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" || path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
+		home := userhome.Dir()
 		if path == "" || path == "~" {
 			return home, nil
 		}

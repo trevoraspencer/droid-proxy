@@ -41,6 +41,70 @@ func TestGeneratePKCE(t *testing.T) {
 	}
 }
 
+func TestOAuthHTTPClientDoesNotForwardCredentialsAcrossRedirects(t *testing.T) {
+	var targetRequests atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetRequests.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+
+	req, err := http.NewRequest(http.MethodPost, source.URL, strings.NewReader("refresh_token=secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := defaultHTTPClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("redirect status = %d", resp.StatusCode)
+	}
+	if got := targetRequests.Load(); got != 0 {
+		t.Fatalf("redirect target received %d credential-bearing requests", got)
+	}
+}
+
+func TestRefreshLockMalformedStateUsesFileAge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "refresh.lock")
+	now := time.Now()
+	if err := os.WriteFile(path, []byte("incomplete"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if refreshLockIsStale(path, now) {
+		t.Fatal("fresh malformed refresh lock should not be stale")
+	}
+	old := now.Add(-refreshLockStaleAfter - time.Second)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if !refreshLockIsStale(path, now) {
+		t.Fatal("old malformed refresh lock should be stale")
+	}
+}
+
+func TestRefreshLockFuturePayloadFallsBackToFileAge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "refresh.lock")
+	now := time.Now()
+	future := now.Add(24 * time.Hour)
+	body := fmt.Sprintf("1234\n%d\n", future.UnixNano())
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := now.Add(-refreshLockStaleAfter - time.Second)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if !refreshLockIsStale(path, now) {
+		t.Fatal("future lock payload should not block recovery forever")
+	}
+}
+
 func TestBuildAuthURL_Codex(t *testing.T) {
 	pkce := &PKCE{CodeVerifier: "verifier", CodeChallenge: "challenge"}
 	rawURL, err := BuildAuthURL(ProviderCodex, "http://localhost:1455/auth/callback", "state-1", "", pkce)
@@ -246,6 +310,65 @@ func TestAcquireRefreshFileLockReturnsChmodError(t *testing.T) {
 	}
 	if !errors.Is(err, denied) || !strings.Contains(err.Error(), "chmod auth lock dir") {
 		t.Fatalf("expected auth lock dir chmod error, got %v", err)
+	}
+}
+
+func TestRefreshFileLockReleasePreservesSuccessorLock(t *testing.T) {
+	authDir := t.TempDir()
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})
+	key := "token-key"
+	release, err := manager.acquireRefreshFileLock(t.Context(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(authDir, ".locks", "refresh-"+refreshLockName(key)+".lock")
+	replacement := []byte("successor\n")
+	if err := os.WriteFile(lockPath, replacement, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	raw, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("release removed successor lock: %v", err)
+	}
+	if string(raw) != string(replacement) {
+		t.Fatalf("successor lock contents changed: %q", raw)
+	}
+}
+
+func TestLoadTokenRejectsOversizedFile(t *testing.T) {
+	authDir := t.TempDir()
+	path := filepath.Join(authDir, "codex-oversized.json")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte(`{"type":"codex","access_token":"`)); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if _, err := f.Write(make([]byte, tokenFileMaxBytes)); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(&config.Config{OAuth: config.OAuth{AuthDir: authDir}})
+	_, err = manager.LoadTokenAtPath(path)
+	if err == nil || !strings.Contains(err.Error(), "file exceeds") {
+		t.Fatalf("oversized token error = %v", err)
+	}
+}
+
+func TestAuthDirDefaultRemainsAbsoluteWhenHOMEIsUnset(t *testing.T) {
+	t.Setenv("HOME", "")
+	dir, err := NewManager(&config.Config{}).AuthDir()
+	if err != nil {
+		t.Fatalf("AuthDir: %v", err)
+	}
+	if !filepath.IsAbs(dir) {
+		t.Fatalf("AuthDir = %q, want an absolute path", dir)
 	}
 }
 

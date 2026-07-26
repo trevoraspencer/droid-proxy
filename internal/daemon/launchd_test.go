@@ -44,6 +44,42 @@ func TestWriteLaunchdPlistUsesDeterministicMode(t *testing.T) {
 	}
 }
 
+func TestWriteLaunchdPlistEscapesPathsAndRoundTripsArguments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.plist")
+	executable := "/tmp/A&B<proxy>/droid-proxy"
+	configPath := "/tmp/A&B<proxy>/config.yaml"
+	envPath := "/tmp/A&B<proxy>/.env"
+	err := writeLaunchdPlist(path, plistData{
+		Label:      launchdLabel,
+		Executable: executable,
+		ConfigPath: configPath,
+		EnvFile:    envPath,
+		WorkDir:    "/tmp/A&B<proxy>",
+		LogDir:     "/tmp/A&B<proxy>/logs",
+	})
+	if err != nil {
+		t.Fatalf("writeLaunchdPlist: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := plistProgramArguments(raw)
+	if err != nil {
+		t.Fatalf("generated plist is not valid XML: %v\n%s", err, raw)
+	}
+	want := []string{executable, "start", "--foreground", "--config", configPath, "--env-file", envPath}
+	if len(args) != len(want) {
+		t.Fatalf("ProgramArguments = %#v, want %#v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("ProgramArguments[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+}
+
 func TestValidateLaunchdConfigRejectsMissingWithActionableError(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing-config.yaml")
 

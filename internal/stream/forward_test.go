@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"runtime"
 	"strings"
@@ -50,9 +51,73 @@ func TestForward_BasicSSE(t *testing.T) {
 	}
 }
 
+func TestForward_RejectsOversizedMultilineEvent(t *testing.T) {
+	src := strings.NewReader("data: 1234567890\ndata: 1234567890\n\n")
+	w := &captureWriter{}
+	err := Forward(context.Background(), w, w, src, Options{MaxLineBytes: 18})
+	if !errors.Is(err, ErrTruncated) || !strings.Contains(err.Error(), "event exceeded") {
+		t.Fatalf("oversized multiline event error = %v", err)
+	}
+}
+
+func TestForward_EnforcesTotalStreamCapBeforeObserver(t *testing.T) {
+	src := strings.NewReader("data: one\n\ndata: two\n\n")
+	w := &captureWriter{}
+	observed := 0
+	err := Forward(context.Background(), w, w, src, Options{
+		MaxBytes: 13,
+		OnLine:   func([]byte) { observed++ },
+	})
+	if !errors.Is(err, ErrTruncated) || !strings.Contains(err.Error(), "configured cap") {
+		t.Fatalf("total stream cap error = %v", err)
+	}
+	if observed != 2 {
+		t.Fatalf("observer saw %d lines, want only first event's data and separator", observed)
+	}
+	if strings.Contains(w.String(), "data: two") {
+		t.Fatalf("line beyond total cap was forwarded: %q", w.String())
+	}
+}
+
+func TestForward_TotalStreamCapUsesExactWireBytes(t *testing.T) {
+	for _, body := range []string{
+		"data: [DONE]\n\n",
+		"data: [DONE]\r\n\r\n",
+	} {
+		t.Run(fmt.Sprintf("%d_bytes", len(body)), func(t *testing.T) {
+			w := &captureWriter{}
+			err := Forward(context.Background(), w, w, strings.NewReader(body), Options{
+				MaxBytes:   int64(len(body)),
+				IsTerminal: ChatTerminal,
+			})
+			if err != nil {
+				t.Fatalf("stream exactly at cap failed: %v", err)
+			}
+			if got := w.String(); got != "data: [DONE]\n\n" {
+				t.Fatalf("normalized stream = %q", got)
+			}
+		})
+	}
+}
+
+func TestForward_EmptyDataLineDoesNotDisappearFromEvent(t *testing.T) {
+	src := strings.NewReader("data:\ndata: [DONE]\n\n")
+	w := &captureWriter{}
+	var got Event
+	err := Forward(context.Background(), w, w, src, Options{IsTerminal: func(ev Event) bool {
+		got = ev
+		return false
+	}})
+	if !errors.Is(err, ErrTruncated) {
+		t.Fatalf("non-terminal stream error = %v", err)
+	}
+	if got.Data != "\n[DONE]" {
+		t.Fatalf("multiline event data = %q, want leading newline preserved", got.Data)
+	}
+}
+
 type slowReader struct {
 	pieces chan string
-	done   bool
 }
 
 func (r *slowReader) Read(p []byte) (int, error) {

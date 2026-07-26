@@ -438,6 +438,9 @@ func (m *Model) Validate() error {
 	if strings.TrimSpace(m.BaseURL) == "" && strings.TrimSpace(m.KnownAuth) == "" && !isOAuthUpstream(m.UpstreamProtocol) {
 		return fmt.Errorf("model %q: base_url or known_auth is required", m.Alias)
 	}
+	if key := strings.TrimSpace(m.APIKeyEnv); key != "" && !validEnvKey(key) {
+		return fmt.Errorf("model %q: invalid api_key_env %q", m.Alias, key)
+	}
 	if m.Capabilities.Reasoning != "" && !m.Capabilities.Reasoning.IsValid() {
 		return fmt.Errorf("model %q: invalid capabilities.reasoning %q (must be one of: none, deepseek, anthropic-thinking)", m.Alias, m.Capabilities.Reasoning)
 	}
@@ -456,6 +459,23 @@ func (m *Model) Validate() error {
 		return err
 	}
 	return nil
+}
+
+func validEnvKey(key string) bool {
+	if key == "" || !asciiLetterOrUnderscore(key[0]) {
+		return false
+	}
+	for i := 1; i < len(key); i++ {
+		c := key[i]
+		if !asciiLetterOrUnderscore(c) && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func asciiLetterOrUnderscore(c byte) bool {
+	return c == '_' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z'
 }
 
 func allowedUpstreamFor(fp FactoryProvider) []UpstreamProtocol {

@@ -5,6 +5,7 @@ package stream
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -27,6 +28,9 @@ type Options struct {
 	WriteKeepAlive func() error
 	// MaxLineBytes caps the bufio scanner buffer. Defaults to 50 MiB.
 	MaxLineBytes int
+	// MaxBytes caps the total upstream stream size. Zero disables the total
+	// cap. The caller can use the same limit as non-stream responses.
+	MaxBytes int64
 	// IdleTimeout bounds a stalled upstream stream. It is reset only by real
 	// upstream lines, not by downstream keep-alive comments. Zero disables it.
 	IdleTimeout time.Duration
@@ -43,6 +47,32 @@ var ErrTruncated = errors.New("stream ended before terminal marker")
 type Event struct {
 	Name string
 	Data string
+}
+
+type wireLine struct {
+	data  []byte
+	bytes int64
+}
+
+func splitWireLine(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, data[:i+1], nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+func decodeWireLine(raw []byte) []byte {
+	line := raw
+	if len(line) > 0 && line[len(line)-1] == '\n' {
+		line = line[:len(line)-1]
+	}
+	if len(line) > 0 && line[len(line)-1] == '\r' {
+		line = line[:len(line)-1]
+	}
+	return line
 }
 
 func ChatTerminal(ev Event) bool {
@@ -78,7 +108,7 @@ func Forward(ctx context.Context, dst io.Writer, flusher http.Flusher, src io.Re
 		maxLine = 50 * 1024 * 1024
 	}
 
-	lines := make(chan []byte, 32)
+	lines := make(chan wireLine, 1)
 	scanErr := make(chan error, 1)
 	scanCtx, scanCancel := context.WithCancel(ctx)
 	defer scanCancel()
@@ -89,11 +119,13 @@ func Forward(ctx context.Context, dst io.Writer, flusher http.Flusher, src io.Re
 	go func() {
 		defer close(lines)
 		scanner := bufio.NewScanner(src)
-		scanner.Buffer(make([]byte, 64*1024), maxLine)
+		scanner.Split(splitWireLine)
+		scanner.Buffer(make([]byte, 64*1024), maxLine+2)
 		for scanner.Scan() {
-			b := append([]byte(nil), scanner.Bytes()...)
+			raw := append([]byte(nil), scanner.Bytes()...)
+			line := wireLine{data: decodeWireLine(raw), bytes: int64(len(raw))}
 			select {
-			case lines <- b:
+			case lines <- line:
 			case <-scanCtx.Done():
 				return
 			}
@@ -158,6 +190,9 @@ func Forward(ctx context.Context, dst io.Writer, flusher http.Flusher, src io.Re
 	}
 	writeTruncation := func(reason string) error {
 		if opts.WriteTruncationError == nil {
+			if reason != "" {
+				return fmt.Errorf("%w: %s", ErrTruncated, reason)
+			}
 			return ErrTruncated
 		}
 		if err := opts.WriteTruncationError(dst); err != nil {
@@ -170,22 +205,27 @@ func Forward(ctx context.Context, dst io.Writer, flusher http.Flusher, src io.Re
 		return ErrTruncated
 	}
 
-	var event Event
+	var eventName string
+	var eventData strings.Builder
+	var eventDataLines int
 	var sawTerminal bool
+	var totalBytes int64
 	flushEvent := func() {
-		if opts.IsTerminal != nil && opts.IsTerminal(event) {
+		if opts.IsTerminal != nil && opts.IsTerminal(Event{Name: eventName, Data: eventData.String()}) {
 			sawTerminal = true
 		}
-		event = Event{}
+		eventName = ""
+		eventData.Reset()
+		eventDataLines = 0
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case line, ok := <-lines:
+		case scanned, ok := <-lines:
 			if !ok {
-				if event.Name != "" || event.Data != "" {
+				if eventName != "" || eventDataLines > 0 {
 					if err := write([]byte("\n")); err != nil {
 						return err
 					}
@@ -205,6 +245,11 @@ func Forward(ctx context.Context, dst io.Writer, flusher http.Flusher, src io.Re
 					return nil
 				}
 			}
+			totalBytes += scanned.bytes
+			if opts.MaxBytes > 0 && totalBytes > opts.MaxBytes {
+				return writeTruncation("upstream stream exceeded configured cap")
+			}
+			line := scanned.data
 			if opts.OnLine != nil {
 				opts.OnLine(line)
 			}
@@ -212,13 +257,22 @@ func Forward(ctx context.Context, dst io.Writer, flusher http.Flusher, src io.Re
 			if strings.TrimSpace(s) == "" {
 				flushEvent()
 			} else if strings.HasPrefix(s, "event:") {
-				event.Name = strings.TrimSpace(strings.TrimPrefix(s, "event:"))
+				eventName = strings.TrimSpace(strings.TrimPrefix(s, "event:"))
 				resetIdle()
 			} else if strings.HasPrefix(s, "data:") {
-				if event.Data != "" {
-					event.Data += "\n"
+				part := strings.TrimSpace(strings.TrimPrefix(s, "data:"))
+				added := len(part)
+				if eventDataLines > 0 {
+					added++
 				}
-				event.Data += strings.TrimSpace(strings.TrimPrefix(s, "data:"))
+				if eventData.Len()+added > maxLine {
+					return writeTruncation("SSE event exceeded maximum size")
+				}
+				if eventDataLines > 0 {
+					eventData.WriteByte('\n')
+				}
+				eventData.WriteString(part)
+				eventDataLines++
 				resetIdle()
 			} else if !strings.HasPrefix(strings.TrimSpace(s), ":") {
 				resetIdle()

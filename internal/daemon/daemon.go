@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,11 +10,17 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/trevoraspencer/droid-proxy/internal/userhome"
 )
 
-const dirName = ".droid-proxy"
+const (
+	dirName             = ".droid-proxy"
+	pidWriteGracePeriod = 2 * time.Second
+)
 
 var (
+	errInvalidPID           = errors.New("invalid PID file")
 	processAlive            = processAliveDefault
 	findProcess             = findProcessDefault
 	verifyProcessExecutable = verifyProcessExecutableDefault
@@ -21,9 +28,16 @@ var (
 
 // stateDir resolves ~/.droid-proxy at call time so HOME changes (tests,
 // service managers with scrubbed environments) are honored.
-func stateDir() string { return filepath.Join(os.Getenv("HOME"), dirName) }
+func stateDir() string { return filepath.Join(userhome.Dir(), dirName) }
 
 func pidFile() string { return filepath.Join(stateDir(), "droid-proxy.pid") }
+
+func syncDirectory(path string) {
+	if dir, err := os.Open(path); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
+}
 
 // StateDir returns ~/.droid-proxy (created on demand by callers).
 func StateDir() string { return stateDir() }
@@ -31,19 +45,27 @@ func StateDir() string { return stateDir() }
 // PIDFile returns the path to the daemon PID file.
 func PIDFile() string { return pidFile() }
 
-// WritePID atomically writes the current process PID.
-func WritePID() error {
+// WritePID exclusively creates and writes the current process PID.
+func WritePID() (err error) {
 	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(pidFile(), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	path := pidFile()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
 			return fmt.Errorf("PID file already exists — another instance may be running (use 'droid-proxy stop' first)")
 		}
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+		if err != nil {
+			_ = os.Remove(path)
+		}
+	}()
 	_, err = fmt.Fprintf(f, "%d", os.Getpid())
 	return err
 }
@@ -53,7 +75,14 @@ func readPID() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return strconv.Atoi(strings.TrimSpace(string(data)))
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, fmt.Errorf("%w: %v", errInvalidPID, err)
+	}
+	if pid <= 0 {
+		return 0, fmt.Errorf("%w: PID must be positive", errInvalidPID)
+	}
+	return pid, nil
 }
 
 // RemovePID deletes the PID file if present.
@@ -65,6 +94,20 @@ func RemovePID() {
 func CleanStalePID() bool {
 	pid, err := readPID()
 	if err != nil {
+		if errors.Is(err, errInvalidPID) {
+			// A readable but malformed PID file can never identify a running
+			// daemon and would otherwise permanently block WritePID's O_EXCL
+			// create on every subsequent startup. Keep a fresh malformed file,
+			// though: another startup may have exclusively created it and not
+			// yet written its PID.
+			info, statErr := os.Stat(pidFile())
+			if statErr != nil || time.Since(info.ModTime()) < pidWriteGracePeriod {
+				return false
+			}
+			RemovePID()
+			RemoveRuntimeMetadata()
+			return true
+		}
 		return false
 	}
 	if stale, _ := daemonPIDState(pid); stale {
@@ -126,6 +169,13 @@ func daemonPIDState(pid int) (stale bool, verified bool) {
 		return false, false
 	}
 	if meta.PID != pid || strings.TrimSpace(meta.Executable) == "" {
+		// WritePID intentionally publishes the exclusive PID file before
+		// runtime metadata. A leftover metadata file from an interrupted prior
+		// run must not cause IsRunning in a concurrent parent to remove the new
+		// PID during that handoff.
+		if info, statErr := os.Stat(pidFile()); statErr == nil && time.Since(info.ModTime()) < pidWriteGracePeriod {
+			return false, false
+		}
 		return true, false
 	}
 	switch verifyProcessExecutable(pid, meta.Executable) {
@@ -216,10 +266,13 @@ func compareExecutableIdentity(actual, expected string) processIdentity {
 	if actual == "" || expected == "" {
 		return processIdentityUnknown
 	}
-	if sameExecutablePath(actual, expected) {
-		return processIdentityMatch
+	// A basename from `ps comm` is not strong enough evidence to signal a
+	// process. Treat it as unknown; another executable with the same basename
+	// may have reused a stale daemon PID.
+	if !filepath.IsAbs(actual) || !filepath.IsAbs(expected) {
+		return processIdentityUnknown
 	}
-	if filepath.Base(actual) == filepath.Base(expected) {
+	if sameExecutablePath(actual, expected) {
 		return processIdentityMatch
 	}
 	return processIdentityMismatch

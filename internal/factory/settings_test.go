@@ -51,6 +51,27 @@ func TestUpsertCreatesAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestUpsertMatchesModelAliasCaseInsensitively(t *testing.T) {
+	path := tempSettings(t, `{"customModels":[{"model":"Model-A","displayName":"old"}]}`)
+	s, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Upsert(Entry{Model: "model-a", DisplayName: "updated"}); err != nil {
+		t.Fatal(err)
+	}
+	names, err := s.Models()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "model-a" {
+		t.Fatalf("models = %#v, want one updated alias", names)
+	}
+	if ok, err := s.Has("MODEL-A"); err != nil || !ok {
+		t.Fatalf("case-insensitive Has = %v, %v", ok, err)
+	}
+}
+
 func TestUpsertPreservesUnknownTopLevelAndEntryFields(t *testing.T) {
 	path := tempSettings(t, `{
   "theme": "dark",
@@ -186,6 +207,38 @@ func TestSaveBackupIsSingleRollingFile(t *testing.T) {
 	matches, _ := filepath.Glob(path + ".bak-*")
 	if len(matches) != 0 {
 		t.Fatalf("expected no timestamped backups, got %v", matches)
+	}
+}
+
+func TestSaveBackupAtomicallyReplacesSymlink(t *testing.T) {
+	path := tempSettings(t, `{"customModels":[{"model":"old"}]}`)
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(victim, []byte("do not overwrite"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, path+".bak"); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	s, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(true); err != nil {
+		t.Fatal(err)
+	}
+	victimData, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(victimData) != "do not overwrite" {
+		t.Fatalf("backup followed symlink and overwrote target: %q", victimData)
+	}
+	info, err := os.Lstat(path + ".bak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("backup path remained a symlink")
 	}
 }
 

@@ -149,14 +149,9 @@ func runRestart(args []string) {
 	if *envFile == "" {
 		*envFile = defaultEnvFileForConfig(*configPath)
 	}
-	if *noMigratePort {
-		// Invocation-scoped opt-out: automatic migration is skipped for this
-		// restart. The read-only omitted-port startup preflight remains
-		// enforced. Explicit migrate-port is unaffected.
-	}
 	// Verified controlled restart: check for deferred upgrade provenance
-	// and perform automatic migration if eligible. This is the only path
-	// through which automatic migration runs.
+	// and perform automatic migration if eligible unless this invocation opts
+	// out. This is the only path through which automatic migration runs.
 	attemptManagedMigration(*configPath, *noMigratePort)
 	if err := restartProxy(*configPath, *envFile); err != nil {
 		fmt.Fprintf(os.Stderr, "droid-proxy restart error: %v\n", err)

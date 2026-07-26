@@ -171,9 +171,9 @@ func (w *Watcher) loop() {
 func (w *Watcher) handleEvent(event fsnotify.Event) {
 	name := filepath.Base(event.Name)
 
-	// Check if this event is relevant
-	switch {
-	case event.Has(fsnotify.Create):
+	// Ops are a bitmask and may be combined, so handle each relevant bit
+	// independently rather than letting an earlier case hide a Remove/Rename.
+	if event.Has(fsnotify.Create) {
 		// A new file or directory was created
 		if w.isAuthDir(event.Name) {
 			// The auth dir itself was created; start watching it
@@ -189,19 +189,20 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 		}
 		// Non-token files are silently ignored
 
-	case event.Has(fsnotify.Write):
+	}
+	if event.Has(fsnotify.Write) {
 		if IsTokenFileName(name) {
 			w.scheduleReload()
 		}
-
-	case event.Has(fsnotify.Rename):
+	}
+	if event.Has(fsnotify.Rename) {
 		if IsTokenFileName(name) {
 			w.scheduleReload()
 		}
 		// Also handle the case where a file is renamed TO a token name
 		// (fsnotify may send a separate Create event for the destination)
-
-	case event.Has(fsnotify.Remove):
+	}
+	if event.Has(fsnotify.Remove) {
 		if w.isAuthDirPath(event.Name) || w.isAuthDir(event.Name) {
 			// Auth dir was removed; re-watch parent so recreation is detected.
 			w.watchParentDir(event.Name)
@@ -211,9 +212,6 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 		if IsTokenFileName(name) {
 			w.scheduleReload()
 		}
-
-	case event.Has(fsnotify.Chmod):
-		// Permission changes are not relevant for reload
 	}
 }
 

@@ -1,3 +1,4 @@
+//lint:file-ignore ST1005 Translator errors are serialized as compatibility-sensitive wire messages.
 package translate
 
 import (

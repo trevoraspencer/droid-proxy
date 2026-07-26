@@ -82,6 +82,25 @@ make_symlink_asset() {
   write_checksums
 }
 
+make_duplicate_asset() {
+  rm -rf "$asset_dir/src"
+  mkdir -p "$asset_dir/src"
+  printf '#!/usr/bin/env sh\nexit 0\n' > "$asset_dir/src/droid-proxy"
+  chmod 0755 "$asset_dir/src/droid-proxy"
+  tar -C "$asset_dir/src" -czf "$asset_dir/droid-proxy_linux_amd64.tar.gz" droid-proxy droid-proxy
+  write_checksums
+}
+
+make_fifo_asset() {
+  rm -rf "$asset_dir/src"
+  mkdir -p "$asset_dir/src"
+  printf '#!/usr/bin/env sh\nexit 0\n' > "$asset_dir/src/droid-proxy"
+  chmod 0755 "$asset_dir/src/droid-proxy"
+  mkfifo "$asset_dir/src/LICENSE"
+  tar -C "$asset_dir/src" -czf "$asset_dir/droid-proxy_linux_amd64.tar.gz" droid-proxy LICENSE
+  write_checksums
+}
+
 assert_file() {
   [[ -e "$1" ]] || {
     echo "missing expected file: $1" >&2
@@ -176,7 +195,15 @@ fi
 assert_installed_version "9.9.11"
 
 make_symlink_asset
-expect_install_failure "archive-symlink" "archive contains link entries"
+expect_install_failure "archive-symlink" "archive contains non-regular entries"
+assert_installed_version "9.9.11"
+
+make_duplicate_asset
+expect_install_failure "archive-duplicate" "duplicate archive entry"
+assert_installed_version "9.9.11"
+
+make_fifo_asset
+expect_install_failure "archive-fifo" "archive contains non-regular entries"
 assert_installed_version "9.9.11"
 
 echo "install_test: ok"

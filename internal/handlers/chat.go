@@ -165,11 +165,11 @@ func (a *API) clientAuthHash(headers http.Header) string {
 	scheme := strings.TrimSpace(a.Cfg.ClientAuth.Scheme)
 	credential := raw
 	if scheme != "" {
-		prefix := scheme + " "
-		if !strings.HasPrefix(raw, prefix) {
+		separator := strings.IndexAny(raw, " \t")
+		if separator <= 0 || !strings.EqualFold(raw[:separator], scheme) {
 			return ""
 		}
-		credential = strings.TrimSpace(strings.TrimPrefix(raw, prefix))
+		credential = strings.TrimSpace(raw[separator:])
 	}
 	if credential == "" {
 		return ""

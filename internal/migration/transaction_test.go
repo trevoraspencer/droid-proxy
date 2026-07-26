@@ -76,17 +76,6 @@ func assertFileContains(t *testing.T, path, substr string) {
 	}
 }
 
-func assertFileNotContains(t *testing.T, path, substr string) {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), substr) {
-		t.Fatalf("file %s should not contain %q:\n%s", path, substr, data)
-	}
-}
-
 func fileMode(t *testing.T, path string) os.FileMode {
 	t.Helper()
 	info, err := os.Stat(path)

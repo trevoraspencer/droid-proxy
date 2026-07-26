@@ -12,14 +12,14 @@ import (
 	"strings"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/userhome"
 )
 
 const DefaultMaxOutputTokens = 128000
 
 // DefaultSettingsPath returns ~/.factory/settings.json.
 func DefaultSettingsPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".factory", "settings.json")
+	return filepath.Join(userhome.Dir(), ".factory", "settings.json")
 }
 
 // Entry is the subset of a Factory customModels entry droid-proxy manages.
@@ -133,7 +133,7 @@ func (s *Settings) Has(model string) (bool, error) {
 		return false, err
 	}
 	for _, n := range names {
-		if n == model {
+		if strings.EqualFold(strings.TrimSpace(n), strings.TrimSpace(model)) {
 			return true, nil
 		}
 	}
@@ -149,7 +149,7 @@ func (s *Settings) Upsert(e Entry) error {
 	}
 	idx := -1
 	for i, ent := range entries {
-		if jsonString(ent["model"]) == e.Model {
+		if strings.EqualFold(strings.TrimSpace(jsonString(ent["model"])), strings.TrimSpace(e.Model)) {
 			idx = i
 			break
 		}
@@ -203,7 +203,7 @@ func (s *Settings) Remove(model string) (bool, error) {
 		return false, err
 	}
 	for i, ent := range entries {
-		if jsonString(ent["model"]) == model {
+		if strings.EqualFold(strings.TrimSpace(jsonString(ent["model"])), strings.TrimSpace(model)) {
 			entries = append(entries[:i], entries[i+1:]...)
 			return true, s.setCustomModels(entries)
 		}
@@ -222,7 +222,7 @@ func (s *Settings) Save(backup bool) error {
 	if backup {
 		if existing, err := os.ReadFile(s.path); err == nil {
 			bak := s.path + ".bak"
-			if err := os.WriteFile(bak, existing, 0o600); err != nil {
+			if err := writeSettingsAtomic(bak, existing); err != nil {
 				return fmt.Errorf("backup settings: %w", err)
 			}
 		}
@@ -232,23 +232,40 @@ func (s *Settings) Save(backup bool) error {
 		return err
 	}
 	out = append(out, '\n')
+	return writeSettingsAtomic(s.path, out)
+}
+
+func writeSettingsAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".settings-*.tmp")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(out); err != nil {
-		tmp.Close()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Chmod(tmpName, 0o600); err != nil {
+	if err := os.Rename(tmpName, path); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, s.path)
+	if dirFile, err := os.Open(dir); err == nil {
+		_ = dirFile.Sync()
+		_ = dirFile.Close()
+	}
+	return nil
 }
 
 func jsonString(raw json.RawMessage) string {

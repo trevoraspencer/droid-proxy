@@ -11,7 +11,7 @@ curl -fsSL https://github.com/trevoraspencer/droid-proxy/releases/latest/downloa
 droid-proxy doctor
 ```
 
-The installer verifies `checksums.txt`, rejects archives with unsafe paths or link entries before extraction, replaces the binary at `~/.local/bin/droid-proxy`, and preserves existing config, OAuth tokens, logs, and managed secrets. It only creates a config when the target config file is missing.
+The installer verifies `checksums.txt`, rejects archives with unsafe paths, duplicate names, or non-regular entries before extraction, replaces the binary at `~/.local/bin/droid-proxy`, and preserves existing config, OAuth tokens, logs, and managed secrets. It only creates a config when the target config file is missing.
 
 If the proxy is already running during an upgrade, restart it after the new
 binary is installed:

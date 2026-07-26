@@ -19,7 +19,7 @@ func checkStatOwnership(info os.FileInfo, path string) error {
 	if uid == 0 {
 		return nil // root bypasses ownership check
 	}
-	if stat.Uid != uint32(uid) {
+	if uid < 0 || uint64(stat.Uid) != uint64(uid) {
 		return fmt.Errorf("file is not owned by current user (uid %d): %s", uid, path)
 	}
 	return nil

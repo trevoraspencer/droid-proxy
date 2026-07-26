@@ -67,6 +67,9 @@ func Set(key, value string) error {
 	if key == "" {
 		return fmt.Errorf("secrets: empty key")
 	}
+	if !daemon.ValidEnvKey(key) {
+		return fmt.Errorf("secrets: invalid env key %q", key)
+	}
 	lines, existed, err := readLines()
 	if err != nil {
 		return err
@@ -157,8 +160,19 @@ func writeRaw(lines []string) error {
 		tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, Path())
+	if err := os.Rename(tmpName, Path()); err != nil {
+		return err
+	}
+	if dirFile, err := os.Open(dir); err == nil {
+		_ = dirFile.Sync()
+		_ = dirFile.Close()
+	}
+	return nil
 }

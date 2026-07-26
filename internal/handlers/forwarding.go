@@ -134,6 +134,7 @@ func writeRawUpstreamResponse(c *gin.Context, resp *http.Response, status int, b
 
 func (a *API) forwardRawUpstreamSSE(c *gin.Context, resp *http.Response, opts stream.Options, logMessage string) error {
 	upstream.CopyHeaders(c.Writer.Header(), resp.Header)
+	opts.MaxBytes = a.Cfg.Upstream.ResponseBodyMaxBytes
 	flusher, ok := a.beginSSE(c)
 	if !ok {
 		return nil

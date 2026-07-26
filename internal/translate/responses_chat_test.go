@@ -227,6 +227,32 @@ func TestChatStreamToResponsesSSERejectsMultiChoiceAndMalformed(t *testing.T) {
 	}
 }
 
+func TestForwardChatStreamToResponsesEnforcesTotalCap(t *testing.T) {
+	body := "data: {\"id\":\"chat_1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\ndata: [DONE]\n\n"
+	var out strings.Builder
+	err := ForwardChatStreamToResponsesWithOptions(strings.NewReader(body), &out, nil, "gpt-test", ChatStreamForwardOptions{MaxBytes: 20})
+	if err == nil || !strings.Contains(err.Error(), "configured response body cap") {
+		t.Fatalf("stream cap error = %v", err)
+	}
+	if strings.Contains(out.String(), "response.completed") {
+		t.Fatalf("oversized translated stream completed successfully:\n%s", out.String())
+	}
+}
+
+func TestForwardChatStreamToResponsesAllowsExactTotalCap(t *testing.T) {
+	body := "data: {\"id\":\"chat_1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\r\n\r\n" +
+		"data: {\"id\":\"chat_1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\r\n\r\n" +
+		"data: [DONE]\r\n\r\n"
+	var out strings.Builder
+	err := ForwardChatStreamToResponsesWithOptions(strings.NewReader(body), &out, nil, "gpt-test", ChatStreamForwardOptions{MaxBytes: int64(len(body))})
+	if err != nil {
+		t.Fatalf("stream exactly at cap failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "response.completed") {
+		t.Fatalf("stream at exact cap did not complete:\n%s", out.String())
+	}
+}
+
 func TestChatStreamToResponsesSSERejectsMalformedToolArguments(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"id":"chat_1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"q\""}}]},"finish_reason":null}]}`,

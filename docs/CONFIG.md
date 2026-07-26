@@ -98,7 +98,7 @@ middleware features that consume this schema.
 | `enabled` | bool | `false` | When true, every non-health request must present a valid api key. |
 | `api_keys` | []string | `[]` | Accepted keys. At least one required when `enabled: true`. |
 | `header` | string | `Authorization` | Header to read. |
-| `scheme` | string | `Bearer` | Prefix scheme expected before the key. Empty string means raw value. |
+| `scheme` | string | `Bearer` | Case-insensitive authentication scheme expected before the key. Empty string means raw value. |
 
 ## `logging`
 
@@ -421,6 +421,8 @@ client_auth:
 
 Empty env vars expand to empty strings. The config validator will then surface
 a clear error at startup for fields that need a value.
+Expansion occurs within already-parsed scalar values, so an environment value
+cannot inject additional YAML keys or documents.
 
 ## Validation
 

@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -543,23 +542,6 @@ func assertNoSentinel(t *testing.T, label string, data []byte, sentinels ...stri
 			t.Errorf("%s contains credential sentinel %q", label, sentinel)
 		}
 	}
-}
-
-// mustJSON parses b as JSON or fails.
-func mustJSON(t *testing.T, b []byte) map[string]any {
-	t.Helper()
-	var v map[string]any
-	if err := json.Unmarshal(b, &v); err != nil {
-		t.Fatalf("unmarshal %q: %v", string(b), err)
-	}
-	return v
-}
-
-// deepEqualJSON compares two values decoded from JSON for equality.
-func deepEqualJSON(a, b any) bool {
-	ab, _ := json.Marshal(a)
-	bb, _ := json.Marshal(b)
-	return bytes.Equal(ab, bb)
 }
 
 // loadFactorySettings loads Factory settings from a path.

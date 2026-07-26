@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -75,7 +76,15 @@ func (m *Manager) acquireRefreshFileLock(ctx context.Context, key string) (func(
 				_ = os.Remove(lockPath)
 				return nil, fmt.Errorf("close refresh lock: %w", closeErr)
 			}
-			return func() { _ = os.Remove(lockPath) }, nil
+			return func() {
+				// Never remove a successor's lock if this lock was judged
+				// stale and replaced while the original refresh was winding
+				// down.
+				current, readErr := readFileLimited(lockPath, 4096)
+				if readErr == nil && bytes.Equal(current, payload) {
+					_ = os.Remove(lockPath)
+				}
+			}, nil
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return nil, fmt.Errorf("create refresh lock: %w", err)
@@ -100,17 +109,25 @@ func refreshLockName(key string) string {
 }
 
 func refreshLockIsStale(path string, now time.Time) bool {
-	raw, err := os.ReadFile(path)
-	if err != nil {
+	info, statErr := os.Stat(path)
+	if statErr != nil {
 		return false
 	}
-	lines := strings.SplitN(string(raw), "\n", 3)
-	if len(lines) < 2 {
-		return false
+	lockTime := info.ModTime()
+	raw, err := readFileLimited(path, 4096)
+	if err == nil {
+		lines := strings.SplitN(string(raw), "\n", 3)
+		if len(lines) >= 2 {
+			if nanos, parseErr := strconv.ParseInt(strings.TrimSpace(lines[1]), 10, 64); parseErr == nil {
+				payloadTime := time.Unix(0, nanos)
+				// A future payload can result from clock rollback or corrupt
+				// state. Fall back to file age so it cannot block refresh
+				// forever.
+				if !payloadTime.After(now) {
+					lockTime = payloadTime
+				}
+			}
+		}
 	}
-	nanos, err := strconv.ParseInt(strings.TrimSpace(lines[1]), 10, 64)
-	if err != nil {
-		return false
-	}
-	return now.Sub(time.Unix(0, nanos)) > refreshLockStaleAfter
+	return now.Sub(lockTime) > refreshLockStaleAfter
 }

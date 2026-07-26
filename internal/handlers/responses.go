@@ -10,6 +10,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/logging"
 	"github.com/trevoraspencer/droid-proxy/internal/stream"
 	"github.com/trevoraspencer/droid-proxy/internal/translate"
 	"github.com/trevoraspencer/droid-proxy/internal/upstream"
@@ -103,6 +104,7 @@ func (a *API) responsesViaChat(c *gin.Context, m *config.Model, body []byte) {
 			Context:     c.Request.Context(),
 			KeepAlive:   a.Cfg.Upstream.StreamKeepAlive,
 			IdleTimeout: a.Cfg.Upstream.HTTPTimeout,
+			MaxBytes:    a.Cfg.Upstream.ResponseBodyMaxBytes,
 		}); err != nil && !errors.Is(err, c.Request.Context().Err()) {
 			_ = a.writeResponsesStreamErrorFrame(c, http.StatusBadGateway, []byte(err.Error()))
 			a.Logger.WithError(err).Warn("translated responses stream terminated abnormally")
@@ -228,7 +230,7 @@ func (a *API) responsesNative(c *gin.Context, m *config.Model, body []byte) {
 func (a *API) writeResponsesStreamError(c *gin.Context, status int, body []byte) {
 	a.Logger.WithFields(map[string]any{
 		"upstream_status": status,
-		"request_id":      c.GetString("request_id"),
+		"request_id":      logging.Redact(c.GetString("request_id")),
 		"upstream_error":  upstreamErrorLogSnippet(body),
 	}).Warn("relaying upstream error to streaming client")
 	writeSSEHeaders(c)

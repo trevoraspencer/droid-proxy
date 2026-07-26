@@ -80,6 +80,28 @@ func TestLoad_MinimalValidDefaults(t *testing.T) {
 	}
 }
 
+func TestLoad_NullModelReturnsValidationError(t *testing.T) {
+	_, err := parse([]byte("models:\n  - null\n"))
+	if err == nil || !strings.Contains(err.Error(), "models[0] must not be null") {
+		t.Fatalf("parse null model error = %v", err)
+	}
+}
+
+func TestLoad_InvalidAPIKeyEnvReturnsValidationError(t *testing.T) {
+	in := `
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+    api_key_env: BAD-KEY
+`
+	_, err := parse([]byte(in))
+	if err == nil || !strings.Contains(err.Error(), `invalid api_key_env "BAD-KEY"`) {
+		t.Fatalf("parse invalid api_key_env error = %v", err)
+	}
+}
+
 func TestLoad_PresenceAwareDefaultsPreserveOptOuts(t *testing.T) {
 	in := `
 client_auth:
@@ -1114,6 +1136,59 @@ models:
 	}
 	if cfg.Models[0].BaseURL != "http://127.0.0.1:3/v1" {
 		t.Fatalf("env expansion failed: %q", cfg.Models[0].BaseURL)
+	}
+}
+
+func TestLoad_EnvExpansionCannotInjectYAMLStructure(t *testing.T) {
+	injected := "client-secret\"\nlisten:\n  host: 0.0.0.0\n#"
+	t.Setenv("TEST_CONFIG_SECRET", injected)
+	in := `
+client_auth:
+  enabled: true
+  api_keys:
+    - "${TEST_CONFIG_SECRET}"
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`
+	cfg, err := parse([]byte(in))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Listen.Host != "127.0.0.1" {
+		t.Fatalf("environment value altered config structure: listen.host = %q", cfg.Listen.Host)
+	}
+	if len(cfg.ClientAuth.APIKeys) != 1 || cfg.ClientAuth.APIKeys[0] != injected {
+		t.Fatalf("environment value did not round-trip literally: %#v", cfg.ClientAuth.APIKeys)
+	}
+}
+
+func TestLoad_RejectsMultipleYAMLDocumentsBeforeExpansion(t *testing.T) {
+	_, err := parse([]byte(minimalValid + "\n---\n" + minimalValid))
+	if err == nil || !strings.Contains(err.Error(), "multiple documents") {
+		t.Fatalf("parse() error = %v, want multiple-document rejection", err)
+	}
+}
+
+func TestLoad_UnquotedNumericEnvExpansionRetainsNumericSemantics(t *testing.T) {
+	t.Setenv("TEST_LISTEN_PORT", "4321")
+	in := `
+listen:
+  port: ${TEST_LISTEN_PORT}
+models:
+  - alias: m
+    factory_provider: generic-chat-completion-api
+    upstream_protocol: openai-chat
+    base_url: http://127.0.0.1:1/v1
+`
+	cfg, err := parse([]byte(in))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Listen.Port != 4321 {
+		t.Fatalf("listen.port = %d, want 4321", cfg.Listen.Port)
 	}
 }
 

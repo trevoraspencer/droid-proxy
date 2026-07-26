@@ -8,6 +8,7 @@ package configedit
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -37,8 +38,19 @@ func Load(path string) (*Doc, error) {
 		mode = info.Mode().Perm()
 	}
 	var root yaml.Node
-	if err := yaml.Unmarshal(raw, &root); err != nil {
-		return nil, fmt.Errorf("parse yaml: %w", err)
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	firstErr := dec.Decode(&root)
+	if firstErr != nil && firstErr != io.EOF {
+		return nil, fmt.Errorf("parse yaml: %w", firstErr)
+	}
+	if firstErr == nil {
+		var trailing yaml.Node
+		if err := dec.Decode(&trailing); err != io.EOF {
+			if err == nil {
+				return nil, fmt.Errorf("parse yaml: multiple documents are not supported")
+			}
+			return nil, fmt.Errorf("parse yaml: %w", err)
+		}
 	}
 	if root.Kind == 0 {
 		// Empty file: synthesize an empty mapping document.
@@ -172,17 +184,33 @@ func (d *Doc) Save() error {
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
+	if err := tmp.Chmod(d.mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if _, err := tmp.Write(out); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Chmod(tmpName, d.mode); err != nil {
+	if err := os.Rename(tmpName, d.path); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, d.path)
+	syncDir(dir)
+	return nil
+}
+
+func syncDir(path string) {
+	if dir, err := os.Open(path); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
 }
 
 func indexOfAlias(seq *yaml.Node, alias string) int {
@@ -192,7 +220,7 @@ func indexOfAlias(seq *yaml.Node, alias string) int {
 			continue
 		}
 		for j := 0; j+1 < len(item.Content); j += 2 {
-			if item.Content[j].Value == "alias" && strings.TrimSpace(item.Content[j+1].Value) == alias {
+			if item.Content[j].Value == "alias" && strings.EqualFold(strings.TrimSpace(item.Content[j+1].Value), alias) {
 				return i
 			}
 		}
@@ -315,11 +343,15 @@ func LoadModels(path string) ([]*config.Model, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
-	expanded := expandEnvForDisplay(string(raw))
+	var root yaml.Node
+	if err := yaml.Unmarshal(raw, &root); err != nil {
+		return nil, fmt.Errorf("parse yaml: %w", err)
+	}
+	expandEnvForDisplay(&root)
 	var mf struct {
 		Models []*config.Model `yaml:"models"`
 	}
-	if err := yaml.Unmarshal([]byte(expanded), &mf); err != nil {
+	if err := root.Decode(&mf); err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 	for _, m := range mf.Models {
@@ -328,7 +360,7 @@ func LoadModels(path string) ([]*config.Model, error) {
 	return mf.Models, nil
 }
 
-func expandEnvForDisplay(s string) string {
+func expandEnvForDisplayValue(s string) string {
 	return displayEnvRef.ReplaceAllStringFunc(s, func(match string) string {
 		parts := displayEnvRef.FindStringSubmatch(match)
 		name := parts[1]
@@ -340,4 +372,45 @@ func expandEnvForDisplay(s string) string {
 		}
 		return match
 	})
+}
+
+func expandEnvForDisplay(n *yaml.Node) {
+	if n == nil {
+		return
+	}
+	switch n.Kind {
+	case yaml.DocumentNode, yaml.SequenceNode:
+		for _, child := range n.Content {
+			expandEnvForDisplay(child)
+		}
+	case yaml.MappingNode:
+		for i := 1; i < len(n.Content); i += 2 {
+			expandEnvForDisplay(n.Content[i])
+		}
+	case yaml.ScalarNode:
+		if n.Tag != "!!str" {
+			return
+		}
+		n.Value = expandEnvForDisplayValue(n.Value)
+		if n.Style == 0 {
+			n.Tag = displayScalarTag(n.Value)
+		}
+	}
+}
+
+func displayScalarTag(value string) string {
+	dec := yaml.NewDecoder(strings.NewReader(value))
+	var doc yaml.Node
+	if err := dec.Decode(&doc); err != nil || len(doc.Content) != 1 {
+		return "!!str"
+	}
+	scalar := doc.Content[0]
+	if scalar.Kind != yaml.ScalarNode {
+		return "!!str"
+	}
+	var extra yaml.Node
+	if err := dec.Decode(&extra); err != io.EOF {
+		return "!!str"
+	}
+	return scalar.Tag
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
+	"github.com/trevoraspencer/droid-proxy/internal/logging"
 	"github.com/trevoraspencer/droid-proxy/internal/oauth"
 	"github.com/trevoraspencer/droid-proxy/internal/stream"
 )
@@ -224,7 +225,7 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 		entry, selErr := a.Pool.Select(m.OAuthAccount, tried, codexConversation)
 		if entry != nil && attempt > 0 {
 			a.Logger.WithFields(map[string]any{
-				"conversation_id": codexConversation,
+				"conversation_id": logging.Redact(codexConversation),
 				"account":         entry.Selector,
 				"attempt":         attempt + 1,
 				"failover":        true,
@@ -610,6 +611,7 @@ func (a *API) forwardOAuthResponsesStream(c *gin.Context, m *config.Model, resp 
 	if err := stream.Forward(c.Request.Context(), dst, flusher, resp.Body, stream.Options{
 		KeepAlive:   a.Cfg.Upstream.StreamKeepAlive,
 		IdleTimeout: a.Cfg.Upstream.HTTPTimeout,
+		MaxBytes:    a.Cfg.Upstream.ResponseBodyMaxBytes,
 		IsTerminal:  oauthResponsesTerminal,
 		OnLine: func(line []byte) {
 			if quota := codexQuotaFromSSELine(line); quota != nil {

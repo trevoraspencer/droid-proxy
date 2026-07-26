@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
@@ -23,14 +24,11 @@ import (
 
 func mustConfig(t *testing.T, raw string) *config.Config {
 	t.Helper()
-	cfg, err := config.Load("/dev/null")
-	_ = cfg // placeholder if needed
-	// use parse via temp file
 	tmp := t.TempDir() + "/cfg.yaml"
 	if err := writeFile(tmp, raw); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err = config.Load(tmp)
+	cfg, err := config.Load(tmp)
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
@@ -84,6 +82,44 @@ models:
 	}
 	if body["status"] != "ok" {
 		t.Errorf("expected status=ok, got %v", body["status"])
+	}
+}
+
+func TestRequestIDPreservesBoundedPrintableValue(t *testing.T) {
+	engine := gin.New()
+	engine.Use(RequestID())
+	engine.GET("/", func(c *gin.Context) {
+		c.String(http.StatusOK, c.GetString(requestIDKey))
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(requestIDHeader, "client-request_123")
+	engine.ServeHTTP(w, req)
+	if got := w.Header().Get(requestIDHeader); got != "client-request_123" {
+		t.Fatalf("response request ID = %q", got)
+	}
+	if got := w.Body.String(); got != "client-request_123" {
+		t.Fatalf("context request ID = %q", got)
+	}
+}
+
+func TestRequestIDReplacesOversizedOrNonPrintableValue(t *testing.T) {
+	engine := gin.New()
+	engine.Use(RequestID())
+	engine.GET("/", func(c *gin.Context) {
+		c.String(http.StatusOK, c.GetString(requestIDKey))
+	})
+
+	for _, inbound := range []string{strings.Repeat("a", requestIDMaxBytes+1), "contains space", "contains\ttab"} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set(requestIDHeader, inbound)
+		engine.ServeHTTP(w, req)
+		got := w.Header().Get(requestIDHeader)
+		if got == inbound || !validRequestID(got) {
+			t.Fatalf("inbound %q produced request ID %q", inbound, got)
+		}
 	}
 }
 
@@ -148,6 +184,14 @@ models:
 	s.Engine().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("valid key: expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	// HTTP authentication scheme names are case-insensitive.
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("Authorization", "bearer\ttest-key")
+	s.Engine().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("case-insensitive scheme: expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 	// health stays open without auth
 	w = httptest.NewRecorder()
@@ -474,6 +518,30 @@ models:
 	}
 }
 
+func TestAccessLogRedactsSecretsEmbeddedInPath(t *testing.T) {
+	var logs bytes.Buffer
+	logger := logrus.New()
+	logger.SetOutput(&logs)
+
+	engine := gin.New()
+	engine.Use(RequestID(), AccessLog(logger))
+	engine.NoRoute(func(c *gin.Context) {
+		c.Status(http.StatusNotFound)
+	})
+
+	secret := "sk-1234567890abcdef"
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/debug/"+secret, nil)
+	engine.ServeHTTP(w, req)
+
+	if strings.Contains(logs.String(), secret) {
+		t.Fatalf("access log leaked secret embedded in path:\n%s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "/debug/***") {
+		t.Fatalf("access log did not preserve a useful redacted path:\n%s", logs.String())
+	}
+}
+
 func TestRequestBodyLimitAppliesBeforeTranslatedRoutes(t *testing.T) {
 	upstreamHits := 0
 	upstreamSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -754,36 +822,6 @@ models:
 }
 
 // --- Pool Health Endpoint Tests (VAL-API-001 through VAL-API-010) ---
-
-// helperAuthDirServer creates a server with a temp auth dir containing the given
-// token JSON files. Each entry is filename -> JSON content.
-func helperAuthDirServer(t *testing.T, authDirFiles map[string]string, extraConfig string) (*Server, func()) {
-	t.Helper()
-	authDir := t.TempDir()
-	for name, content := range authDirFiles {
-		if err := os.WriteFile(filepath.Join(authDir, name), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cfg := mustConfig(t, `
-listen:
-  host: 127.0.0.1
-  port: 0
-oauth:
-  auth_dir: `+authDir+`
-`+extraConfig+`
-models:
-  - alias: m
-    factory_provider: generic-chat-completion-api
-    upstream_protocol: openai-chat
-    base_url: http://127.0.0.1:1/v1
-`)
-	s, err := New(cfg, discardLogger())
-	if err != nil {
-		t.Fatalf("server new: %v", err)
-	}
-	return s, func() {}
-}
 
 // VAL-API-001: Versioned and prefixless routes expose pool health
 func TestPoolHealthRoutes_Return200WhenAuthorized(t *testing.T) {

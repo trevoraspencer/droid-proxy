@@ -123,11 +123,22 @@ sha256_verify() {
 validate_archive_manifest() {
   file="$1"
   entries="$WORKDIR/archive-entries.txt"
+  listing_errors="$WORKDIR/archive-entries.errors.txt"
   verbose="$WORKDIR/archive-entries.verbose.txt"
+  normalized_entries="$WORKDIR/archive-entries.normalized.txt"
   found_binary=0
+  : > "$normalized_entries"
 
-  if ! tar -tzf "$file" > "$entries"; then
+  if ! tar -tzf "$file" > "$entries" 2> "$listing_errors"; then
     echo "install.sh: could not list archive entries for $(basename "$file")" >&2
+    exit 1
+  fi
+  # GNU tar may normalize traversal entries (for example ../evil) in its
+  # stdout listing while only warning on stderr and still exiting zero.
+  # Treat any diagnostic during manifest inspection as unsafe rather than
+  # validating the rewritten name.
+  if [ -s "$listing_errors" ]; then
+    echo "install.sh: unsafe archive entry metadata in $(basename "$file")" >&2
     exit 1
   fi
 
@@ -147,6 +158,18 @@ validate_archive_manifest() {
         exit 1
         ;;
     esac
+    case "$normalized" in
+      droid-proxy|LICENSE|README.md|install_config.yaml) ;;
+      *)
+        echo "install.sh: unsafe archive entry: $entry" >&2
+        exit 1
+        ;;
+    esac
+    if grep -Fqx -- "$normalized" "$normalized_entries"; then
+      echo "install.sh: duplicate archive entry: $entry" >&2
+      exit 1
+    fi
+    printf '%s\n' "$normalized" >> "$normalized_entries"
     if [ "$normalized" = "droid-proxy" ]; then
       found_binary=1
     fi
@@ -157,12 +180,16 @@ validate_archive_manifest() {
     exit 1
   fi
 
-  if ! tar -tvzf "$file" > "$verbose"; then
+  if ! tar -tvzf "$file" > "$verbose" 2> "$listing_errors"; then
     echo "install.sh: could not inspect archive entry types for $(basename "$file")" >&2
     exit 1
   fi
-  if ! awk 'substr($1, 1, 1) == "l" || substr($1, 1, 1) == "h" { exit 1 }' "$verbose"; then
-    echo "install.sh: archive contains link entries" >&2
+  if [ -s "$listing_errors" ]; then
+    echo "install.sh: unsafe archive entry metadata in $(basename "$file")" >&2
+    exit 1
+  fi
+  if ! awk 'substr($1, 1, 1) != "-" { exit 1 }' "$verbose"; then
+    echo "install.sh: archive contains non-regular entries" >&2
     exit 1
   fi
 }
@@ -188,7 +215,7 @@ confirm() {
     return 1
   fi
   printf '%s [y/N] ' "$prompt"
-  read ans || return 1
+  read -r ans || return 1
   case "$ans" in
     y|Y|yes|YES) return 0 ;;
     *) return 1 ;;
@@ -224,6 +251,9 @@ else
   CLEAN_TMP=0
 fi
 cleanup() {
+  if [ -n "${TMPBIN:-}" ]; then
+    rm -f "$TMPBIN"
+  fi
   if [ "${CLEAN_TMP:-0}" = "1" ]; then
     rm -rf "$WORKDIR"
   fi
@@ -247,10 +277,12 @@ fi
 
 BINDIR="${BINDIR:-$PREFIX/bin}"
 mkdir -p "$BINDIR"
-tmpbin="$BINDIR/.droid-proxy.install.$$"
+tmpbin="$(mktemp "$BINDIR/.droid-proxy.install.XXXXXX")"
+TMPBIN="$tmpbin"
 cp "$extract/droid-proxy" "$tmpbin"
 chmod 0755 "$tmpbin"
 mv "$tmpbin" "$BINDIR/droid-proxy"
+TMPBIN=
 
 echo "installed: $BINDIR/droid-proxy"
 "$BINDIR/droid-proxy" --version || true
