@@ -5,7 +5,7 @@ for normal use or for running unit tests.
 
 ## Prerequisites
 
-- Go 1.26.4+, `zsh`, `jq`, `curl`, `rg`
+- Go 1.26.5+, `zsh`, `jq`, `curl`, `rg`
 - API keys and OAuth accounts you are willing to use for testing
 - Factory Droid installed (`~/.factory/settings.json`)
 

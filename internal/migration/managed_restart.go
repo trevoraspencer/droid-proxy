@@ -2,7 +2,6 @@ package migration
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 )
 
@@ -239,10 +238,4 @@ func ReadBinaryHashForProvenance(binaryPath string) string {
 		return ""
 	}
 	return h
-}
-
-// fileExistsAt checks whether a file exists at the given path.
-func fileExistsAt(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

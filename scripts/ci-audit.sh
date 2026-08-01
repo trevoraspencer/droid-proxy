@@ -58,6 +58,12 @@ else
   fail "go vet failed"
 fi
 
+if go tool staticcheck ./...; then
+  pass "staticcheck"
+else
+  fail "staticcheck failed"
+fi
+
 if go build -o /tmp/droid-proxy-ci-check ./cmd/droid-proxy; then
   pass "go build ./cmd/droid-proxy"
   rm -f /tmp/droid-proxy-ci-check

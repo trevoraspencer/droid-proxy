@@ -59,11 +59,6 @@ func (ct *compatTestEnv) writeConfig(yamlContent string) {
 	}
 }
 
-func (ct *compatTestEnv) loadAndBuild() {
-	ct.t.Helper()
-	// Unused placeholder removed.
-}
-
 func TestCompat_ExplicitCustomPortSurvives(t *testing.T) {
 	ct := newCompatTestEnv(t)
 	// Use an explicit port that is NOT 8787 or 9787.

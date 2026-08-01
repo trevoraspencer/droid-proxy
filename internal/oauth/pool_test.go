@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,14 +17,6 @@ import (
 // fakeTime returns a fixed time for deterministic tests.
 func fakeTime() time.Time {
 	return time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
-}
-
-// fakeTimeAfter returns a nowFunc that advances by d each call.
-func fakeTimeAfter(d time.Duration) func() time.Time {
-	var offset atomic.Int64
-	return func() time.Time {
-		return fakeTime().Add(time.Duration(offset.Add(int64(d))))
-	}
 }
 
 // saveTokenFile creates a token JSON file in the given directory.

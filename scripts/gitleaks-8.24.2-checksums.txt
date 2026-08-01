@@ -1,0 +1,4 @@
+90d13686937ac7429b97a3acbf1e1d0ce90d92ae2d0cf46a690bd8ae5230bea0  gitleaks_8.24.2_darwin_arm64.tar.gz
+bc3c46f8039ba716ba8461fa6745c9d1cfb90ca2f5f881d8d0cf66b7ba7b742c  gitleaks_8.24.2_darwin_x64.tar.gz
+574a6d52573c61173add7ddb5e3cc68c0e82cb0735818a1eeb9a0a2de1643fbc  gitleaks_8.24.2_linux_arm64.tar.gz
+fa0500f6b7e41d28791ebc680f5dd9899cd42b58629218a5f041efa899151a8e  gitleaks_8.24.2_linux_x64.tar.gz

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -281,12 +282,12 @@ func responseFromResponsesSSE(body []byte, opts responsesSSERepairOptions) ([]by
 	if trimmed[0] == '{' {
 		if response := gjson.GetBytes(trimmed, "response"); response.Exists() && response.Type == gjson.JSON {
 			if opts.RequireVisibleOutput && !oauthResponseVisible(response) {
-				return nil, fmt.Errorf(noVisibleOAuthOutputMessage)
+				return nil, errors.New(noVisibleOAuthOutputMessage)
 			}
 			return []byte(response.Raw), nil
 		}
 		if opts.RequireVisibleOutput && !oauthResponseVisible(gjson.ParseBytes(trimmed)) {
-			return nil, fmt.Errorf(noVisibleOAuthOutputMessage)
+			return nil, errors.New(noVisibleOAuthOutputMessage)
 		}
 		return trimmed, nil
 	}
@@ -323,7 +324,7 @@ func responseFromResponsesSSE(body []byte, opts responsesSSERepairOptions) ([]by
 				sawVisibleOutput = true
 			}
 			if opts.RequireVisibleOutput && !sawVisibleOutput {
-				return nil, fmt.Errorf(noVisibleOAuthOutputMessage)
+				return nil, errors.New(noVisibleOAuthOutputMessage)
 			}
 			return []byte(response.Raw), nil
 		case "response.failed", "error":

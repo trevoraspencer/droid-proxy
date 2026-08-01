@@ -23,14 +23,11 @@ import (
 
 func mustConfig(t *testing.T, raw string) *config.Config {
 	t.Helper()
-	cfg, err := config.Load("/dev/null")
-	_ = cfg // placeholder if needed
-	// use parse via temp file
 	tmp := t.TempDir() + "/cfg.yaml"
 	if err := writeFile(tmp, raw); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err = config.Load(tmp)
+	cfg, err := config.Load(tmp)
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
@@ -754,36 +751,6 @@ models:
 }
 
 // --- Pool Health Endpoint Tests (VAL-API-001 through VAL-API-010) ---
-
-// helperAuthDirServer creates a server with a temp auth dir containing the given
-// token JSON files. Each entry is filename -> JSON content.
-func helperAuthDirServer(t *testing.T, authDirFiles map[string]string, extraConfig string) (*Server, func()) {
-	t.Helper()
-	authDir := t.TempDir()
-	for name, content := range authDirFiles {
-		if err := os.WriteFile(filepath.Join(authDir, name), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cfg := mustConfig(t, `
-listen:
-  host: 127.0.0.1
-  port: 0
-oauth:
-  auth_dir: `+authDir+`
-`+extraConfig+`
-models:
-  - alias: m
-    factory_provider: generic-chat-completion-api
-    upstream_protocol: openai-chat
-    base_url: http://127.0.0.1:1/v1
-`)
-	s, err := New(cfg, discardLogger())
-	if err != nil {
-		t.Fatalf("server new: %v", err)
-	}
-	return s, func() {}
-}
 
 // VAL-API-001: Versioned and prefixless routes expose pool health
 func TestPoolHealthRoutes_Return200WhenAuthorized(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -132,15 +131,6 @@ func jsonRespond(w http.ResponseWriter, status int, body string, headers map[str
 	}
 	w.WriteHeader(status)
 	_, _ = w.Write([]byte(body))
-}
-
-func mustJSON(t *testing.T, b []byte) map[string]any {
-	t.Helper()
-	var v map[string]any
-	if err := json.Unmarshal(b, &v); err != nil {
-		t.Fatalf("unmarshal body %q: %v", string(b), err)
-	}
-	return v
 }
 
 // ---------------------------------------------------------------------------

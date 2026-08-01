@@ -212,8 +212,6 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 			w.scheduleReload()
 		}
 
-	case event.Has(fsnotify.Chmod):
-		// Permission changes are not relevant for reload
 	}
 }
 

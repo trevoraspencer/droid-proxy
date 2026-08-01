@@ -113,7 +113,7 @@ cd droid-proxy
 make install-user
 ```
 
-Source builds require Go 1.26.4 or newer. See [docs/UPGRADE.md](docs/UPGRADE.md) for release upgrades, source installs, and service repair.
+Source builds require Go 1.26.5 or newer. See [docs/UPGRADE.md](docs/UPGRADE.md) for release upgrades, source installs, and service repair.
 
 ## Quickstart
 

@@ -117,8 +117,8 @@ func TestBootstrapDeterministicExecution(t *testing.T) {
 	}
 
 	// Assert exact expected versions.
-	if !strings.Contains(proj1, "go1.26.4") {
-		t.Fatalf("bootstrap must report go1.26.4, got: %s", proj1)
+	if !strings.Contains(proj1, "go1.26.5") {
+		t.Fatalf("bootstrap must report go1.26.5, got: %s", proj1)
 	}
 	if !strings.Contains(proj1, "8.24.2") {
 		t.Fatalf("bootstrap must report gitleaks 8.24.2, got: %s", proj1)

@@ -52,7 +52,6 @@ func TestForward_BasicSSE(t *testing.T) {
 
 type slowReader struct {
 	pieces chan string
-	done   bool
 }
 
 func (r *slowReader) Read(p []byte) (int, error) {

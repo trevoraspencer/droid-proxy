@@ -34,15 +34,6 @@ type TransactionResult struct {
 	Action string // "migrated", "recovered", "rolled-back", "no-op"
 }
 
-// resolveStateRoot returns the effective state root from options or the
-// default.
-func resolveStateRoot(opts TransactionOptions) string {
-	if opts.StateRoot != "" {
-		return opts.StateRoot
-	}
-	return StateRoot()
-}
-
 // CommitTransaction creates and commits a migration transaction for the given
 // plan. It creates immutable backups, writes a durable journal, stages and
 // validates outputs, checks the destination (if configured), commits targets
