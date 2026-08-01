@@ -70,6 +70,23 @@ require_workflow_text() {
   fi
 }
 
+has_network_pipeline() {
+  local file="$1"
+  local line logical="" trimmed
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    logical+=" $line"
+    trimmed="${line%"${line##*[![:space:]]}"}"
+    if [[ "$trimmed" == *\\ || "$trimmed" == *"|" ]]; then
+      continue
+    fi
+    if printf '%s\n' "$logical" | grep -Eq '(curl|wget)[^|]*\|[[:space:]]*[^|]'; then
+      return 0
+    fi
+    logical=""
+  done < "$file"
+  return 1
+}
+
 tar_contains() {
   local archive="$1"
   local entry="$2"
@@ -125,12 +142,39 @@ done
 
 if [[ -f "$ci_workflow" ]]; then
   require_workflow_text "$ci_workflow" "make release-audit" "CI runs the release hardening audit"
-  require_workflow_text "$ci_workflow" "fa0500f6b7e41d28791ebc680f5dd9899cd42b58629218a5f041efa899151a8e" "CI checksum-pins the gitleaks artifact"
-  if grep -Eq '(curl|wget)[^|]*\|' "$ci_workflow"; then
+  require_workflow_text "$ci_workflow" "make security-audit" "CI runs the shared checksum-verified security audit"
+  if has_network_pipeline "$ci_workflow"; then
     fail "CI must not pipe network responses into another process"
   else
     pass "CI does not pipe network responses into another process"
   fi
+fi
+
+gitleaks_checksums="scripts/gitleaks-8.24.2-checksums.txt"
+if [[ -f "$gitleaks_checksums" ]]; then
+  pass "pinned Gitleaks checksum manifest present"
+  for spec in \
+    "gitleaks_8.24.2_darwin_arm64.tar.gz:90d13686937ac7429b97a3acbf1e1d0ce90d92ae2d0cf46a690bd8ae5230bea0" \
+    "gitleaks_8.24.2_darwin_x64.tar.gz:bc3c46f8039ba716ba8461fa6745c9d1cfb90ca2f5f881d8d0cf66b7ba7b742c" \
+    "gitleaks_8.24.2_linux_arm64.tar.gz:574a6d52573c61173add7ddb5e3cc68c0e82cb0735818a1eeb9a0a2de1643fbc" \
+    "gitleaks_8.24.2_linux_x64.tar.gz:fa0500f6b7e41d28791ebc680f5dd9899cd42b58629218a5f041efa899151a8e"; do
+    asset="${spec%%:*}"
+    expected="${spec#*:}"
+    if [[ "$(checksum_entry_count "$gitleaks_checksums" "$asset")" == "1" ]] &&
+      [[ "$(checksum_entry "$gitleaks_checksums" "$asset")" == "$expected" ]]; then
+      pass "Gitleaks checksum pinned: $asset"
+    else
+      fail "Gitleaks checksum missing, duplicated, or incorrect: $asset"
+    fi
+  done
+else
+  fail "pinned Gitleaks checksum manifest missing"
+fi
+
+if has_network_pipeline scripts/security-audit.sh; then
+  fail "security audit must not pipe network responses into another process"
+else
+  pass "security audit does not pipe network responses into another process"
 fi
 
 if [[ -f "$release_workflow" ]]; then

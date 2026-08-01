@@ -1,4 +1,4 @@
-.PHONY: build install-user test test-race test-installer vet fmt clean run lint audit-secrets security-audit legal-audit docs-audit ci-audit release-audit release-dry-run bench bench-compare
+.PHONY: build install-user test test-race test-installer vet staticcheck vulncheck fmt clean run lint audit-secrets security-audit legal-audit docs-audit ci-audit release-audit release-dry-run bench bench-compare
 
 BIN := droid-proxy
 VERSION ?= 0.0.0-dev
@@ -47,10 +47,16 @@ test-installer:
 vet:
 	go vet ./...
 
+staticcheck:
+	go tool staticcheck ./...
+
+vulncheck:
+	go tool govulncheck ./...
+
 fmt:
 	gofmt -w .
 
-lint: vet
+lint: vet staticcheck
 	@gofmt -l . | (! grep .) || (echo "gofmt found unformatted files"; exit 1)
 
 clean:
