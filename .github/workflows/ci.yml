@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   lint:
-    name: Lint (gofmt + vet)
+    name: Lint (gofmt + vet + Staticcheck)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -71,6 +71,9 @@ jobs:
       - name: Documentation audit
         run: make docs-audit
         timeout-minutes: 5
+      - name: Vulnerability scan
+        run: make vulncheck
+        timeout-minutes: 5
       - name: Release hardening audit
         run: make release-audit
         timeout-minutes: 5
@@ -84,19 +87,13 @@ jobs:
         with:
           # Full history so gitleaks can scan every commit.
           fetch-depth: 0
-      - name: Install gitleaks
-        run: |
-          ver=8.24.2
-          sha=fa0500f6b7e41d28791ebc680f5dd9899cd42b58629218a5f041efa899151a8e
-          mkdir -p "$RUNNER_TEMP/bin"
-          archive="$RUNNER_TEMP/gitleaks.tar.gz"
-          curl --fail --location --silent --show-error \
-            --output "$archive" \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_x64.tar.gz"
-          echo "$sha  $archive" | sha256sum --check --strict
-          tar -xzf "$archive" -C "$RUNNER_TEMP/bin" gitleaks
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
         timeout-minutes: 5
-      - name: Audit secrets
-        run: make audit-secrets
+      - name: Security audit
+        run: make security-audit
         timeout-minutes: 5
