@@ -7,6 +7,7 @@ cd "$ROOT"
 
 failures=0
 warnings=0
+gitleaks_tmp=""
 
 info() { printf '[security-audit] %s\n' "$*"; }
 pass() { info "PASS: $*"; }
@@ -14,14 +15,26 @@ fail() { info "FAIL: $*"; failures=$((failures + 1)); }
 warn() { info "WARN: $*"; warnings=$((warnings + 1)); }
 
 require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
+  if ! command -v "$1" >/dev/null 2>&1; then
+    fail "required command not found: $1"
+    return 1
+  fi
 }
 
+# Invoked indirectly by the EXIT trap.
+# shellcheck disable=SC2329
+cleanup() {
+  if [[ -n "$gitleaks_tmp" && -d "$gitleaks_tmp" ]]; then
+    rm -rf "$gitleaks_tmp"
+  fi
+}
+trap cleanup EXIT
+
 ensure_gitleaks() {
-  if command -v gitleaks >/dev/null 2>&1; then
+  local ver="8.24.2"
+  if command -v gitleaks >/dev/null 2>&1 && [[ "$(gitleaks version 2>/dev/null)" == "$ver" ]]; then
     return 0
   fi
-  local ver="8.24.2"
   local os arch
   case "$(uname -s)" in
     Darwin) os="darwin" ;;
@@ -34,14 +47,39 @@ ensure_gitleaks() {
     *) fail "gitleaks auto-install: unsupported arch $(uname -m)"; return 1 ;;
   esac
   local asset="gitleaks_${ver}_${os}_${arch}.tar.gz"
-  local bindir="/tmp/gitleaks-${ver}-${os}-${arch}"
+  local checksums="scripts/gitleaks-${ver}-checksums.txt"
+  local archive bindir
+  require_cmd curl || return 1
+  require_cmd tar || return 1
+  if [[ ! -f "$checksums" ]]; then
+    fail "gitleaks checksum manifest not found: ${checksums}"
+    return 1
+  fi
+  if ! gitleaks_tmp="$(mktemp -d "${TMPDIR:-/tmp}/droid-proxy-gitleaks.XXXXXX")"; then
+    fail "gitleaks install could not create a temporary directory"
+    return 1
+  fi
+  archive="${gitleaks_tmp}/${asset}"
+  bindir="${gitleaks_tmp}/bin"
   local dest="${bindir}/gitleaks"
-  info "Installing gitleaks ${ver} (${os}/${arch}) to ${dest}"
+  info "Installing checksum-verified gitleaks ${ver} (${os}/${arch})"
   mkdir -p "$bindir"
-  curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/${asset}" \
-    | tar -xz -C "$bindir" gitleaks
+  if ! curl --fail --location --silent --show-error \
+    --output "$archive" \
+    "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/${asset}"; then
+    fail "gitleaks download failed: ${asset}"
+    return 1
+  fi
+  if ! bash scripts/verify-gitleaks-archive.sh "$checksums" "$asset" "$archive"; then
+    fail "gitleaks checksum verification failed: ${asset}"
+    return 1
+  fi
+  if ! tar -xzf "$archive" -C "$bindir" gitleaks; then
+    fail "gitleaks extraction failed: ${asset}"
+    return 1
+  fi
   if [[ ! -x "$dest" ]]; then
-    fail "gitleaks install failed"
+    fail "gitleaks extraction did not produce an executable"
     return 1
   fi
   export PATH="${bindir}:${PATH}"
@@ -49,11 +87,19 @@ ensure_gitleaks() {
 
 info "Starting security audit in ${ROOT}"
 
-require_cmd git
-require_cmd rg
-require_cmd go
+prerequisite_failure=0
+for cmd in git rg go; do
+  require_cmd "$cmd" || prerequisite_failure=1
+done
+if (( prerequisite_failure > 0 )); then
+  info "Audit stopped because required commands are unavailable"
+  exit 1
+fi
 
-ensure_gitleaks
+if ! ensure_gitleaks; then
+  info "Audit stopped because gitleaks is unavailable"
+  exit 1
+fi
 if gitleaks detect --source . --config .gitleaks.toml --verbose --no-banner; then
   pass "gitleaks scan clean"
 else

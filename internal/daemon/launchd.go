@@ -58,6 +58,14 @@ func xmlEscape(value string) string {
 
 var launchAgentLoader = loadLaunchAgent
 
+var launchctlCombinedOutput = func(args ...string) ([]byte, error) {
+	return exec.Command("launchctl", args...).CombinedOutput()
+}
+
+var launchctlRun = func(args ...string) error {
+	return exec.Command("launchctl", args...).Run()
+}
+
 type plistData struct {
 	Label      string
 	Executable string
@@ -262,20 +270,24 @@ func writeLaunchdPlist(path string, data plistData) error {
 func loadLaunchAgent(path string) error {
 	uid := os.Getuid()
 	domain := "gui/" + strconv.Itoa(uid)
-	out, err := exec.Command("launchctl", "bootstrap", domain, path).CombinedOutput()
-	if err == nil {
+	bootstrapOut, bootstrapErr := launchctlCombinedOutput("bootstrap", domain, path)
+	if bootstrapErr == nil {
 		return nil
 	}
-	if strings.Contains(string(out), "already") || strings.Contains(string(out), "Existing") {
-		_ = exec.Command("launchctl", "bootout", domain, path).Run()
-		_, err = exec.Command("launchctl", "bootstrap", domain, path).CombinedOutput()
-		if err == nil {
+	if strings.Contains(string(bootstrapOut), "already") || strings.Contains(string(bootstrapOut), "Existing") {
+		_ = launchctlRun("bootout", domain, path)
+		bootstrapOut, bootstrapErr = launchctlCombinedOutput("bootstrap", domain, path)
+		if bootstrapErr == nil {
 			return nil
 		}
 	}
-	out, err = exec.Command("launchctl", "load", path).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("launchctl bootstrap/load: %s: %w", strings.TrimSpace(string(out)), err)
+	loadOut, loadErr := launchctlCombinedOutput("load", path)
+	if loadErr != nil {
+		return fmt.Errorf(
+			"launchctl bootstrap failed (%s: %v); load failed (%s): %w",
+			strings.TrimSpace(string(bootstrapOut)), bootstrapErr,
+			strings.TrimSpace(string(loadOut)), loadErr,
+		)
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,6 +9,52 @@ import (
 	"syscall"
 	"testing"
 )
+
+func TestLoadLaunchAgentPreservesBootstrapAndLoadFailures(t *testing.T) {
+	origCombinedOutput, origRun := launchctlCombinedOutput, launchctlRun
+	t.Cleanup(func() {
+		launchctlCombinedOutput = origCombinedOutput
+		launchctlRun = origRun
+	})
+
+	bootstrapAttempts := 0
+	launchctlCombinedOutput = func(args ...string) ([]byte, error) {
+		switch args[0] {
+		case "bootstrap":
+			bootstrapAttempts++
+			if bootstrapAttempts == 1 {
+				return []byte("Existing service"), errors.New("initial bootstrap failed")
+			}
+			return []byte("retry bootstrap denied"), errors.New("retry bootstrap failed")
+		case "load":
+			return []byte("legacy load denied"), errors.New("load failed")
+		default:
+			t.Fatalf("unexpected launchctl operation %q", args[0])
+			return nil, nil
+		}
+	}
+	bootoutCalled := false
+	launchctlRun = func(args ...string) error {
+		if args[0] != "bootout" {
+			t.Fatalf("unexpected launchctl run operation %q", args[0])
+		}
+		bootoutCalled = true
+		return nil
+	}
+
+	err := loadLaunchAgent("/tmp/com.droid-proxy.agent.plist")
+	if err == nil {
+		t.Fatal("loadLaunchAgent error = nil, want combined bootstrap/load failure")
+	}
+	if !bootoutCalled {
+		t.Fatal("loadLaunchAgent did not boot out an existing service before retry")
+	}
+	for _, want := range []string{"retry bootstrap denied", "retry bootstrap failed", "legacy load denied", "load failed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not preserve %q", err, want)
+		}
+	}
+}
 
 func TestWriteLaunchdPlistUsesDeterministicMode(t *testing.T) {
 	oldUmask := syscall.Umask(0)
