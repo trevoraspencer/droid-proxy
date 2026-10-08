@@ -153,11 +153,11 @@ func (t *Token) MatchesAccount(account string) bool {
 type Manager struct {
 	cfg          *config.Config
 	mu           sync.Mutex
-	refreshLocks map[string]*sync.Mutex
+	refreshLocks map[string]chan struct{}
 }
 
 func NewManager(cfg *config.Config) *Manager {
-	return &Manager{cfg: cfg, refreshLocks: make(map[string]*sync.Mutex)}
+	return &Manager{cfg: cfg, refreshLocks: make(map[string]chan struct{})}
 }
 
 func (m *Manager) AuthDir() (string, error) {

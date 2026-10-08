@@ -38,8 +38,10 @@ assert_model_mapping() {
   fail "$alias must map to $expected_upstream before live checks (got ${configured_upstream:-missing})"
 }
 
-assert_model_mapping "gpt-5.6" "gpt-5.6-sol" "ChatGPT/Codex OAuth (GPT-5.6 Sol)"
-assert_model_mapping "gpt-5.6-fast" "gpt-5.6-sol" "ChatGPT/Codex OAuth (GPT-5.6 Sol Fast)"
+assert_model_mapping "gpt-6.1-sol" "gpt-6.1-sol" "ChatGPT/Codex OAuth (GPT-6.1 Sol)"
+assert_model_mapping "gpt-6.1-sol-fast" "gpt-6.1-sol" "ChatGPT/Codex OAuth (GPT-6.1 Sol Fast)"
+assert_model_mapping "grok-4.7" "grok-4.7"
+assert_model_mapping "grok-4.7-build-fast" "grok-4.7-build-fast"
 assert_model_mapping "grok-4.5" "grok-4.5" "xAI OAuth (Grok 4.5)"
 assert_model_mapping "grok-build-0.1" "grok-build-0.1" "xAI OAuth (Grok Build)"
 assert_model_mapping "grok-composer-2.5-fast" "grok-composer-2.5-fast" "xAI OAuth (Composer 2.5 Fast)"
@@ -218,8 +220,8 @@ run_responses_model() {
 }
 
 run_codex_gpt56_advanced() {
-  local model="gpt-5.6"
-  local provider="ChatGPT/Codex OAuth (GPT-5.6 Sol)"
+  local model="gpt-6.1-sol"
+  local provider="ChatGPT/Codex OAuth (GPT-6.1 Sol)"
   local check="max reasoning and cache sanitization"
   local artifact_id body out http_status
 
@@ -278,8 +280,8 @@ run_chat_model "glm-5.2" "Z.AI GLM coding"
 run_chat_model "mimo-v2.5-pro" "Xiaomi MiMo"
 run_chat_model "${FIREWORKS_MODEL}" "Fireworks"
 
-run_responses_model "gpt-5.6" "ChatGPT/Codex OAuth (GPT-5.6 Sol)"
-run_responses_model "gpt-5.6-fast" "ChatGPT/Codex OAuth (GPT-5.6 Sol Fast)"
+run_responses_model "gpt-6.1-sol" "ChatGPT/Codex OAuth (GPT-6.1 Sol)"
+run_responses_model "gpt-6.1-sol-fast" "ChatGPT/Codex OAuth (GPT-6.1 Sol Fast)"
 run_codex_gpt56_advanced
 run_responses_model "grok-4.5" "xAI OAuth (Grok 4.5)"
 run_xai_reasoning_levels

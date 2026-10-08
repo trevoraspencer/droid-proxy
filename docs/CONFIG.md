@@ -93,6 +93,11 @@ middleware features that consume this schema.
 
 ## `client_auth`
 
+Inference API requests containing an `Origin` header are rejected before
+routing, including when local client authentication is disabled. This protects
+local credentials from browser-origin requests; Droid and command-line clients
+normally omit that header. Health checks remain available.
+
 | key | type | default | description |
 |---|---|---|---|
 | `enabled` | bool | `false` | When true, every non-health request must present a valid api key. |
@@ -122,7 +127,7 @@ but separate settings.
 | key | type | default | description |
 |---|---|---|---|
 | `enabled` | bool | `true` | Disable to opt out entirely. |
-| `max_entries` | int | `1024` | LRU + TTL eviction; cache grows no larger. |
+| `max_entries` | int | `1024` | TTL and oldest-entry eviction; cached reasoning text also has a 64 MiB budget. |
 | `ttl` | duration | `30m` | How long a captured reasoning blob is kept. |
 
 The cache is in-memory only by design. Cold starts lose history.
@@ -201,7 +206,7 @@ specific upstream configuration.
 | `max_output_tokens` | int |  | Factory-facing output-token setting; surfaced in `/v1/models`. When omitted, Factory sync writes `128000`. Set an explicit lower value for upstreams with lower hard caps. |
 | `max_context_tokens` | int |  | Informational; surfaced in `/v1/models`. |
 | `extra_headers` | map[string]string |  | Headers appended to every upstream request for this model. |
-| `extra_args` | map[string]any |  | Top-level fields merged into every outgoing request body (e.g. `temperature`, `stream_options`, or `service_tier: priority` for a local GPT-5.6 fast alias). |
+| `extra_args` | map[string]any |  | Top-level fields merged into every outgoing request body (e.g. `temperature`, `stream_options`, or `service_tier: priority` for a local current Codex fast alias). |
 | `capabilities` | object |  | Capability overrides. See below. |
 
 `extra_headers` ignores proxy-managed or security-sensitive names, including
@@ -236,16 +241,15 @@ Factory `customModels[].model`) unless a documented local alias deliberately
 maps to a different `upstream_model`. Put provider context in the display name
 only:
 
-- **Slug**: provider-native ID — `glm-5.2`, `deepseek-v4-flash`, `gpt-5.6`,
+- **Slug**: provider-native ID — `glm-5.2`, `deepseek-v4-flash`, `gpt-6.1-sol`,
   Fireworks paths like `accounts/fireworks/models/deepseek-v4-pro`
 - **Display name**: `{Readable model name} ({Provider label})` — e.g.
   `GLM 5.2 (Z.AI GLM Coding Plan)`, `DeepSeek V4 Flash (DeepSeek)`
 
 Do not use `droid-` prefixes or `(via droid-proxy)` suffixes in documented
 defaults. Set `upstream_model` to the same value as `alias` (or omit it).
-The deliberate Codex OAuth exceptions are local mode/family aliases. In
-particular, `gpt-5.6` and `gpt-5.6-fast` both map to `gpt-5.6-sol` because the
-credential-validated private backend requires the explicit Sol ID; the fast
+The deliberate Codex OAuth exceptions are local fast-mode aliases. In
+particular, `gpt-6.1-sol` and `gpt-6.1-sol-fast` both map to `gpt-6.1-sol`; the fast
 entry differs only by requesting `extra_args.service_tier: priority`. The
 effective tier remains account/backend dependent and is reported in the
 response.
@@ -290,14 +294,14 @@ oauth:
   auth_dir: "~/.droid-proxy/auth"
 
 models:
-  - alias: gpt-5.6
-    display_name: "GPT-5.6 Sol (Codex OAuth)"
+  - alias: gpt-6.1-sol
+    display_name: "GPT-6.1 Sol (Codex OAuth)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: gpt-5.6-sol
+    upstream_model: gpt-6.1-sol
     max_output_tokens: 128000
-    max_context_tokens: 1050000
+    max_context_tokens: 272000
     capabilities:
       streaming: true
       tools: true
@@ -309,14 +313,14 @@ models:
       factory_reasoning_effort: max
       prompt_caching: true
 
-  - alias: gpt-5.6-fast # local Factory alias, not an upstream model ID
-    display_name: "GPT-5.6 Sol Fast (Codex OAuth)"
+  - alias: gpt-6.1-sol-fast # local Factory alias, not an upstream model ID
+    display_name: "GPT-6.1 Sol Fast (Codex OAuth)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: gpt-5.6-sol
+    upstream_model: gpt-6.1-sol
     max_output_tokens: 128000
-    max_context_tokens: 1050000
+    max_context_tokens: 272000
     extra_args:
       service_tier: priority
     capabilities:
@@ -376,29 +380,17 @@ models:
       factory_reasoning: passthrough
 ```
 
-The Codex preset picker also offers standard/fast pairs for
-`gpt-5.6-terra` and `gpt-5.6-luna`, all with 1,050,000 context and 128,000
-output metadata. The public API documents `gpt-5.6` as the recommended alias
-for `gpt-5.6-sol`, but the credential-validated private OAuth path requires the
-explicit Sol ID. The preset therefore exposes local alias `gpt-5.6` while
-setting `upstream_model: gpt-5.6-sol`; a duplicate explicit-Sol preset would be
-misleading. On the public API, Pro is a reasoning mode
-(`reasoning.mode: pro`), not a separate model ID. Credentialed private-OAuth
-tests returned upstream 400 for that mode on the tested accounts; the proxy
-preserves it and surfaces the error without downgrade. Credentialed
-`effort: max` succeeds, while mode availability remains account/plan dependent.
+The Codex picker offers standard/fast pairs for `gpt-6.1-sol`, `gpt-6-astra`,
+and `gpt-6-luna`, with 272,000 context and 128,000 output metadata from the
+reviewed Codex catalog. These are private-backend profiles; public API limits
+can differ. Fast aliases request `service_tier: priority` for the same model.
+Availability and effective tier depend on the logged-in account and workspace.
 
-For these Codex presets, `prompt_caching: true` reflects preserved
-`prompt_cache_key` support. Public `prompt_cache_options` is stripped because
-the private OAuth endpoint rejects it.
-
-These IDs and capabilities are public
-[OpenAI API model metadata](https://developers.openai.com/api/docs/models).
-The explicit Sol mapping is credential-validated private-OAuth behavior;
-availability on that backend still depends on the logged-in account, plan, and
-workspace policy and should be validated with the credentialed live-E2E gate.
-The proxy surfaces unavailable-model 4xx responses and never downgrades the
-configured model.
+`prompt_caching: true` reflects preserved `prompt_cache_key` support. Public
+`prompt_cache_options` is stripped for compatibility with the private endpoint.
+The proxy preserves reasoning and surfaces upstream errors without downgrading
+the configured model. See [MAINTENANCE.md](MAINTENANCE.md) for current sources
+and validation scope.
 
 ## Environment variables
 

@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -62,6 +64,20 @@ func (m *Manager) SetTokenDisabled(provider config.OAuthProvider, account string
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	defer cancel()
+	release, err := m.lockToken(ctx, refreshLockKey(token))
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	token, err = m.loadTokenPath(token.Path())
+	if err != nil {
+		return nil, err
+	}
+	if token.Provider() != provider {
+		return nil, fmt.Errorf("auth token provider changed")
+	}
 	token.Disabled = disabled
 	if _, err := m.SaveToken(token); err != nil {
 		return nil, err
@@ -77,6 +93,20 @@ func (m *Manager) DeleteToken(provider config.OAuthProvider, account string) (st
 	path := token.Path()
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("%s OAuth account %q has no token path", provider, account)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	defer cancel()
+	release, err := m.lockToken(ctx, refreshLockKey(token))
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	latest, err := m.loadTokenPath(path)
+	if err != nil {
+		return "", err
+	}
+	if latest.Provider() != provider {
+		return "", fmt.Errorf("auth token provider changed")
 	}
 	if err := os.Remove(path); err != nil {
 		return "", fmt.Errorf("delete auth token: %w", err)

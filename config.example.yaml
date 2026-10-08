@@ -120,16 +120,15 @@ models:
 
   # Example: Codex/ChatGPT OAuth via Factory's OpenAI mode.
   # Run first: droid-proxy auth codex --config config.yaml
-  # The public API aliases gpt-5.6 to Sol. The credential-validated private
-  # Codex OAuth path requires the explicit gpt-5.6-sol upstream model ID.
-  # - alias: gpt-5.6
-  #   display_name: "GPT-5.6 Sol (Codex OAuth)"
+  # Current presets use explicit Codex model IDs; access depends on your account.
+  # - alias: gpt-6.1-sol
+  #   display_name: "GPT-6.1 Sol (Codex OAuth)"
   #   factory_provider: openai
   #   upstream_protocol: codex-responses
   #   oauth_provider: codex
-  #   upstream_model: gpt-5.6-sol
+  #   upstream_model: gpt-6.1-sol
   #   max_output_tokens: 128000
-  #   max_context_tokens: 1050000
+  #   max_context_tokens: 272000
   #   capabilities:
   #     streaming: true
   #     tools: true
@@ -140,14 +139,14 @@ models:
   #     factory_reasoning: passthrough
   #     factory_reasoning_effort: max
   #     prompt_caching: true
-  # - alias: gpt-5.6-fast # local Factory alias, not an upstream model ID
-  #   display_name: "GPT-5.6 Sol Fast (Codex OAuth)"
+  # - alias: gpt-6.1-sol-fast # local Factory alias, not an upstream model ID
+  #   display_name: "GPT-6.1 Sol Fast (Codex OAuth)"
   #   factory_provider: openai
   #   upstream_protocol: codex-responses
   #   oauth_provider: codex
-  #   upstream_model: gpt-5.6-sol # same explicit upstream model as standard
+  #   upstream_model: gpt-6.1-sol # same explicit upstream model as standard
   #   max_output_tokens: 128000
-  #   max_context_tokens: 1050000
+  #   max_context_tokens: 272000
   #   extra_args:
   #     service_tier: priority # "fast" is normalized to priority on the outgoing request
   #   capabilities:
@@ -160,19 +159,18 @@ models:
   #     factory_reasoning: passthrough
   #     factory_reasoning_effort: max
   #     prompt_caching: true
-  # The dashboard also offers standard/fast presets for gpt-5.6-terra and
-  # gpt-5.6-luna. The local gpt-5.6 aliases intentionally map to gpt-5.6-sol,
-  # so a duplicate explicit-Sol preset is omitted.
+  # The dashboard also offers standard/fast presets for gpt-6-astra and
+  # gpt-6-luna. Fast aliases request priority service for the same model.
 
   # Example: xAI OAuth via Factory's OpenAI mode.
   # Run first: droid-proxy auth xai --config config.yaml
-  # - alias: grok-4.5
-  #   display_name: "Grok 4.5 (xAI OAuth)"
+  # - alias: grok-4.7
+  #   display_name: "Grok 4.7 (xAI OAuth)"
   #   factory_provider: openai
   #   upstream_protocol: xai-responses
   #   oauth_provider: xai
   #   base_url: https://cli-chat-proxy.grok.com/v1
-  #   upstream_model: grok-4.5
+  #   upstream_model: grok-4.7
   #   max_context_tokens: 500000
   #   capabilities:
   #     factory_reasoning: passthrough

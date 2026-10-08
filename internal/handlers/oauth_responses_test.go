@@ -150,11 +150,11 @@ func TestResponses_OAuthCodexNonStreamReconstructsResponsesAndPreservesTools(t *
 	if capturedAccount != "acct_123" || capturedOriginator == "" {
 		t.Fatalf("missing codex oauth headers account=%q originator=%q", capturedAccount, capturedOriginator)
 	}
-	if codexClientVersion != "0.144.0" {
-		t.Fatalf("Codex client version constant = %q, want documented minimum 0.144.0", codexClientVersion)
+	if codexClientVersion != "0.162.0" {
+		t.Fatalf("Codex client version constant = %q, want reviewed profile 0.162.0", codexClientVersion)
 	}
 	if capturedVersion != codexClientVersion {
-		t.Fatalf("Codex Version fallback = %q, want documented minimum %q", capturedVersion, codexClientVersion)
+		t.Fatalf("Codex Version fallback = %q, want reviewed profile %q", capturedVersion, codexClientVersion)
 	}
 	if capturedUserAgent != codexUserAgent || !strings.Contains(capturedUserAgent, "codex_cli_rs/"+codexClientVersion) {
 		t.Fatalf("Codex User-Agent fallback = %q, want client version %q", capturedUserAgent, codexClientVersion)

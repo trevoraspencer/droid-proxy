@@ -29,7 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   with paired per-rep deltas (mean±sd) so comparisons carry error bars and
   shared-host drift cancels out.
 - `capabilities.factory_reasoning_effort` metadata and Factory settings sync
-  support so GPT-5.6 and Grok 4.5 custom models expose reasoning controls in
+  support so Codex and Grok custom models expose reasoning controls in
   Droid while Grok Build and Composer remove stale reasoning metadata.
 - `doctor` probes `/health` on the configured listen address and on
   `[::1]:<port>`: a foreign responder on the configured address is a hard
@@ -47,6 +47,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Refresh Codex and Grok OAuth presets and client metadata for October 2026;
+  existing model configuration remains compatible. Update to Go 1.27.2 and
+  current compatible dependencies, including YAML organization v3.0.5.
+- Bound upstream connection/header/error-body stalls, complete streams at
+  terminal frames, preserve incomplete Responses and stable translated IDs,
+  and avoid repeated copying while accumulating streamed output.
+- Coordinate OAuth refresh, disable, logout, and quota writes across processes;
+  honor scalar Codex quota resets and protect provider credential headers.
+- Preserve Anthropic retry metadata and streaming deadline control under trace
+  logging; validate native JSON requests and support documented native Chat routes.
+- Reject ambiguous duplicate JSON fields and browser-origin inference requests
+  before routing. Cap cached reasoning text at 64 MiB and redact working-tree
+  secret findings.
+- Add a dated upstream comparison and validation report in docs/MAINTENANCE.md.
 - `extra_args` are applied to upstream payloads in sorted key order, so
   identical client requests always produce byte-identical upstream bodies
   (previously map iteration order could reorder appended keys per request).

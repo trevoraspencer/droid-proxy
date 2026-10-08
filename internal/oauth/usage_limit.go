@@ -3,9 +3,33 @@ package oauth
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/tidwall/gjson"
 )
+
+// ParseCodexUsageLimitReset handles the scalar reset fields returned by the
+// private backend when it omits the usual quota-window telemetry.
+func ParseCodexUsageLimitReset(body []byte, now time.Time) *time.Time {
+	if !gjson.ValidBytes(body) || gjson.GetBytes(body, "error.type").String() != "usage_limit_reached" {
+		return nil
+	}
+	if value := gjson.GetBytes(body, "error.resets_at"); value.Type == gjson.Number {
+		reset := time.Unix(value.Int(), 0)
+		if reset.After(now) {
+			return &reset
+		}
+	}
+	if value := gjson.GetBytes(body, "error.resets_in_seconds"); value.Type == gjson.Number {
+		seconds := value.Int()
+		// Bound multiplication to avoid overflowing a duration on corrupt input.
+		if seconds > 0 && seconds <= int64((365*24*time.Hour)/time.Second) {
+			reset := now.Add(time.Duration(seconds) * time.Second)
+			return &reset
+		}
+	}
+	return nil
+}
 
 // ParseCodexUsageLimitFromBody extracts quota windows from Codex error payloads
 // (JSON or SSE-assembled JSON) when response headers are missing or incomplete.

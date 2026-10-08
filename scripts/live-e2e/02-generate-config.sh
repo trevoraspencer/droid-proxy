@@ -26,7 +26,7 @@ else
 fi
 
 if rg -q '^[[:space:]]*(export[[:space:]]+)?CODEX_UPSTREAM_MODEL=' "$LIVE_E2E_ENV_FILE"; then
-  warn "CODEX_UPSTREAM_MODEL is a retired GPT-5.2 override and is ignored; GPT-5.6 Sol mappings are fixed in the generated config"
+  warn "CODEX_UPSTREAM_MODEL is a retired GPT-5.2 override and is ignored; GPT-6.1 Sol mappings are fixed in the generated config"
 fi
 
 if rg -q '^[[:space:]]*(export[[:space:]]+)?XAI_(GROK_BUILD|COMPOSER|GROK)_MODEL=' "$LIVE_E2E_ENV_FILE"; then

@@ -7,19 +7,18 @@
 | **Tier** | T1 OAuth — native Codex Responses passthrough |
 | **Factory mode** | `openai` |
 | **Upstream protocol** | `codex-responses` |
-| **When to use** | GPT-5.6 models available to your ChatGPT/Codex account (no API key) |
+| **When to use** | current Codex models available to your ChatGPT/Codex account (no API key) |
 
 Uses browser PKCE login instead of an API key. See [OAUTH.md](../OAUTH.md) for
 the full OAuth walkthrough.
 
 ## Prerequisites
 
-- ChatGPT account with Codex access to the selected model. Published availability
-  currently includes Terra for Free/Go and Sol, Terra, and Luna for eligible
-  Plus, Pro, Business, and Enterprise accounts; workspace policy and usage
-  limits can narrow that list.
-- OpenAI lists Codex CLI `0.144.0` as the minimum version for GPT-5.6. The proxy
-  supplies equivalent `Version` and User-Agent fallbacks when callers omit them.
+- ChatGPT account with Codex access to the selected model. Availability depends
+  on your plan, workspace policy, rollout, and usage limits. Check the current
+  [Codex model guide](https://learn.chatgpt.com/docs/models).
+- The proxy supplies Codex client version `0.162.0` metadata when omitted by
+  callers; `extra_headers` can override it as the private backend evolves.
 - OAuth login completed: `./droid-proxy auth codex --config config.yaml`
   - On headless machines, use `./droid-proxy auth codex --config config.yaml --device`.
 
@@ -31,14 +30,14 @@ the full OAuth walkthrough.
 
 ```yaml
 models:
-  - alias: gpt-5.6
-    display_name: "GPT-5.6 Sol (Codex OAuth)"
+  - alias: gpt-6.1-sol
+    display_name: "GPT-6.1 Sol (Codex OAuth)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: gpt-5.6-sol
+    upstream_model: gpt-6.1-sol
     max_output_tokens: 128000
-    max_context_tokens: 1050000
+    max_context_tokens: 272000
     capabilities:
       streaming: true
       tools: true
@@ -50,14 +49,14 @@ models:
       factory_reasoning_effort: max
       prompt_caching: true
 
-  - alias: gpt-5.6-fast # local Factory alias, not an OpenAI model ID
-    display_name: "GPT-5.6 Sol Fast (Codex OAuth)"
+  - alias: gpt-6.1-sol-fast # local Factory alias, not an OpenAI model ID
+    display_name: "GPT-6.1 Sol Fast (Codex OAuth)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: gpt-5.6-sol # fast keeps the same explicit upstream model
+    upstream_model: gpt-6.1-sol # fast keeps the same explicit upstream model
     max_output_tokens: 128000
-    max_context_tokens: 1050000
+    max_context_tokens: 272000
     extra_args:
       service_tier: priority
     capabilities:
@@ -71,14 +70,14 @@ models:
       factory_reasoning_effort: max
       prompt_caching: true
 
-  - alias: gpt-5.6-terra
-    display_name: "GPT-5.6 Terra (Codex OAuth)"
+  - alias: gpt-6-astra
+    display_name: "GPT-6 Astra (Codex OAuth)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: gpt-5.6-terra
+    upstream_model: gpt-6-astra
     max_output_tokens: 128000
-    max_context_tokens: 1050000
+    max_context_tokens: 272000
     capabilities:
       streaming: true
       tools: true
@@ -90,14 +89,14 @@ models:
       factory_reasoning_effort: max
       prompt_caching: true
 
-  - alias: gpt-5.6-terra-fast
-    display_name: "GPT-5.6 Terra Fast (Codex OAuth)"
+  - alias: gpt-6-astra-fast
+    display_name: "GPT-6 Astra Fast (Codex OAuth)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: gpt-5.6-terra
+    upstream_model: gpt-6-astra
     max_output_tokens: 128000
-    max_context_tokens: 1050000
+    max_context_tokens: 272000
     extra_args:
       service_tier: priority
     capabilities:
@@ -111,14 +110,14 @@ models:
       factory_reasoning_effort: max
       prompt_caching: true
 
-  - alias: gpt-5.6-luna
-    display_name: "GPT-5.6 Luna (Codex OAuth)"
+  - alias: gpt-6-luna
+    display_name: "GPT-6 Luna (Codex OAuth)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: gpt-5.6-luna
+    upstream_model: gpt-6-luna
     max_output_tokens: 128000
-    max_context_tokens: 1050000
+    max_context_tokens: 272000
     capabilities:
       streaming: true
       tools: true
@@ -130,14 +129,14 @@ models:
       factory_reasoning_effort: max
       prompt_caching: true
 
-  - alias: gpt-5.6-luna-fast
-    display_name: "GPT-5.6 Luna Fast (Codex OAuth)"
+  - alias: gpt-6-luna-fast
+    display_name: "GPT-6 Luna Fast (Codex OAuth)"
     factory_provider: openai
     upstream_protocol: codex-responses
     oauth_provider: codex
-    upstream_model: gpt-5.6-luna
+    upstream_model: gpt-6-luna
     max_output_tokens: 128000
-    max_context_tokens: 1050000
+    max_context_tokens: 272000
     extra_args:
       service_tier: priority
     capabilities:
@@ -157,28 +156,21 @@ Factory aliases; they never change the upstream model ID.
 
 | Local alias | Upstream model | Mode |
 |---|---|---|
-| `gpt-5.6` | `gpt-5.6-sol` | standard, recommended local Sol alias |
-| `gpt-5.6-fast` | `gpt-5.6-sol` | requests `service_tier: priority` |
-| `gpt-5.6-terra` | `gpt-5.6-terra` | standard |
-| `gpt-5.6-terra-fast` | `gpt-5.6-terra` | requests `service_tier: priority` |
-| `gpt-5.6-luna` | `gpt-5.6-luna` | standard |
-| `gpt-5.6-luna-fast` | `gpt-5.6-luna` | requests `service_tier: priority` |
+| `gpt-6.1-sol` | `gpt-6.1-sol` | standard, recommended local Sol alias |
+| `gpt-6.1-sol-fast` | `gpt-6.1-sol` | requests `service_tier: priority` |
+| `gpt-6-astra` | `gpt-6-astra` | standard |
+| `gpt-6-astra-fast` | `gpt-6-astra` | requests `service_tier: priority` |
+| `gpt-6-luna` | `gpt-6-luna` | standard |
+| `gpt-6-luna-fast` | `gpt-6-luna` | requests `service_tier: priority` |
 
-The public OpenAI API documents `gpt-5.6` as an alias of `gpt-5.6-sol`.
-Credentialed validation against the private Codex OAuth backend found that the
-unsuffixed ID is rejected there, while `gpt-5.6-sol` succeeds. The local
-`gpt-5.6` and `gpt-5.6-fast` aliases therefore both forward the explicit Sol
-ID, and a duplicate explicit-Sol preset is intentionally omitted. On the
-public API, Pro is `reasoning.mode: pro`, not a separate model ID. The proxy
-preserves that value, but the credentialed test accounts returned upstream 400
-for Pro on Sol, Terra, and Luna; there is no silent downgrade. Credentialed
-`effort: max` without Pro succeeds, while mode availability remains
-account/plan dependent.
-See OpenAI's [model catalog](https://developers.openai.com/api/docs/models),
-[GPT-5.6 guide](https://developers.openai.com/api/docs/guides/latest-model),
-[reasoning guide](https://developers.openai.com/api/docs/guides/reasoning), and
-[ChatGPT/Codex availability article](https://help.openai.com/en/articles/20001354)
-for the public contract summarized here.
+The picker uses explicit upstream IDs from the current
+[Codex model guide](https://learn.chatgpt.com/docs/models). Standard and fast
+aliases share a model; fast requests `service_tier: priority`. The effective
+service tier and reasoning modes depend on the account and backend. The
+272,000-token context metadata follows the reviewed Codex client catalog;
+public API limits can differ. These profiles were checked against source and
+local protocol fixtures, not a credentialed session. See
+[MAINTENANCE.md](../MAINTENANCE.md) for the dated sources and validation scope.
 
 Optional: pin a specific logged-in account:
 
@@ -211,8 +203,8 @@ This only applies to Codex OAuth — xAI OAuth is always single-account.
 {
   "customModels": [
     {
-      "model": "gpt-5.6",
-      "displayName": "GPT-5.6 Sol (Codex OAuth)",
+      "model": "gpt-6.1-sol",
+      "displayName": "GPT-6.1 Sol (Codex OAuth)",
       "provider": "openai",
       "baseUrl": "http://127.0.0.1:9787",
       "apiKey": "x",
@@ -237,7 +229,7 @@ This only applies to Codex OAuth — xAI OAuth is always single-account.
 curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "gpt-5.6",
+    "model": "gpt-6.1-sol",
     "input": "hello"
   }' | jq '.output'
 ```
@@ -259,20 +251,12 @@ the `STATUS` column explains skips such as `disabled`, `rate_limited`, or
 
 ## Notes
 
-- The GPT-5.6 IDs, limits, and capabilities above come from the public OpenAI
-  API documentation. The explicit `gpt-5.6-sol` requirement for the private
-  Codex OAuth path and Luna's need for current Codex client-version metadata
-  come from credentialed validation. The proxy defaults missing `Version` and
-  User-Agent signals to the officially documented Codex CLI `0.144.0` minimum
-  while preserving explicit caller values. The broader private backend
-  contract is not public, so actual model and mode availability must still be
-  validated with your account. Upstream 4xx errors are surfaced; the proxy
-  never silently downgrades GPT-5.6 to another model.
+- Presets follow the October 2026 model catalog. Existing user aliases remain
+  configurable, including older models still available to your account.
 - Codex failover changes only the selected OAuth account. Every retry keeps the
   exact configured `upstream_model`.
-- The proxy preserves `reasoning` exactly. Credentialed `effort: max` succeeds;
-  `mode: pro` remains forwarded, but the tested accounts received an upstream
-  400 on the private OAuth path, which the proxy surfaces without downgrade.
+- The proxy preserves `reasoning` and surfaces unavailable-model or mode errors
+  without silently downgrading the configured model.
 - Public `prompt_cache_options` is stripped because the private OAuth endpoint
   rejects it. Private prompt caching remains keyed by the preserved
   `prompt_cache_key`.
@@ -283,7 +267,7 @@ the `STATUS` column explains skips such as `disabled`, `rate_limited`, or
   legacy `prompt_cache_retention`, and `stream_options`. That means public API
   features depending on those fields are not available through this path until
   credentialed evidence establishes private-endpoint support.
-- Use `scripts/live-e2e/` for credentialed validation. The advanced GPT-5.6
+- Use `scripts/live-e2e/` for credentialed validation. The advanced current Codex
   max-reasoning/cache-sanitization check is opt-in because it can consume more
   plan quota; it deliberately omits unsupported private-OAuth Pro mode.
 - Tokens refresh automatically five minutes before expiry, with per-account locking to avoid concurrent refresh-token reuse.

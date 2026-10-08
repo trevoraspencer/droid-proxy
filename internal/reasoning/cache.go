@@ -22,6 +22,7 @@ import (
 const (
 	DefaultMaxEntries = 1024
 	DefaultTTL        = 30 * time.Minute
+	DefaultMaxBytes   = 64 << 20
 )
 
 // Scope identifies a "logical session" — the set of fields under which two
@@ -52,12 +53,14 @@ type entry struct {
 	createdAt time.Time
 }
 
-// Cache holds reasoning blobs with TTL + max-entries eviction.
+// Cache holds reasoning blobs with TTL, entry-count, and retained-text limits.
 type Cache struct {
 	mu         sync.RWMutex
 	now        func() time.Time
 	ttl        time.Duration
 	maxEntries int
+	maxBytes   int
+	bytes      int
 	entries    map[Key]entry
 }
 
@@ -73,6 +76,7 @@ func NewCache(maxEntries int, ttl time.Duration) *Cache {
 		now:        time.Now,
 		ttl:        ttl,
 		maxEntries: maxEntries,
+		maxBytes:   DefaultMaxBytes,
 		entries:    make(map[Key]entry),
 	}
 }
@@ -85,7 +89,12 @@ func (c *Cache) Store(key Key, reasoning string) {
 	now := c.now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if len(reasoning) > c.maxBytes {
+		return
+	}
+	c.bytes -= len(c.entries[key].reasoning)
 	c.entries[key] = entry{reasoning: reasoning, createdAt: now}
+	c.bytes += len(reasoning)
 	c.evictLocked(now)
 }
 
@@ -104,6 +113,7 @@ func (c *Cache) Lookup(key Key) (string, bool) {
 	if now.Sub(e.createdAt) > c.ttl {
 		c.mu.Lock()
 		if current, present := c.entries[key]; present && now.Sub(current.createdAt) > c.ttl {
+			c.bytes -= len(current.reasoning)
 			delete(c.entries, key)
 		}
 		c.mu.Unlock()
@@ -125,10 +135,11 @@ func (c *Cache) Len() int {
 func (c *Cache) evictLocked(now time.Time) {
 	for k, e := range c.entries {
 		if now.Sub(e.createdAt) > c.ttl {
+			c.bytes -= len(e.reasoning)
 			delete(c.entries, k)
 		}
 	}
-	for len(c.entries) > c.maxEntries {
+	for len(c.entries) > c.maxEntries || c.bytes > c.maxBytes {
 		var oldestKey Key
 		var oldest time.Time
 		first := true
@@ -139,6 +150,7 @@ func (c *Cache) evictLocked(now time.Time) {
 				first = false
 			}
 		}
+		c.bytes -= len(c.entries[oldestKey].reasoning)
 		delete(c.entries, oldestKey)
 	}
 }

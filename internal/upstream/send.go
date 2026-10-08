@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
 )
@@ -128,9 +129,41 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	if strings.Contains(req.Header.Get("Accept"), "text/event-stream") {
 		streamClient := *c.HTTP
 		streamClient.Timeout = 0
-		return streamClient.Do(req)
+		ctx, cancel := context.WithCancel(req.Context())
+		resp, err := streamClient.Do(req.Clone(ctx))
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		body := &cancelBody{ReadCloser: resp.Body, cancel: cancel}
+		// A rejected streaming request has a finite error body, not an SSE
+		// pump with idle protection. Bound its read without imposing an
+		// absolute duration on healthy streams.
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			timeout := c.HTTP.Timeout
+			if timeout <= 0 {
+				timeout = 600 * time.Second
+			}
+			body.timer = time.AfterFunc(timeout, cancel)
+		}
+		resp.Body = body
+		return resp, nil
 	}
 	return c.HTTP.Do(req)
+}
+
+type cancelBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+	timer  *time.Timer
+}
+
+func (b *cancelBody) Close() error {
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	b.cancel()
+	return b.ReadCloser.Close()
 }
 
 // ReadAllAndClose reads the body fully then closes it.

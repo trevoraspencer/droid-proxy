@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,13 +16,15 @@ import (
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
 	"github.com/trevoraspencer/droid-proxy/internal/oauth"
+	"github.com/trevoraspencer/droid-proxy/internal/upstream"
 )
 
-// codexClientVersion is OpenAI's documented minimum Codex CLI version for GPT-5.6.
+// Client profiles track the upstream snapshots documented in MAINTENANCE.md.
+// extra_headers can override version metadata when a provider changes its floor.
 const (
-	codexClientVersion   = "0.144.0"
-	codexUserAgent       = "codex_cli_rs/" + codexClientVersion + " (Mac OS 26.3.1; arm64) droid-proxy"
-	xaiGrokClientVersion = "0.2.93"
+	codexClientVersion   = "0.162.0"
+	codexUserAgent       = "codex_cli_rs/" + codexClientVersion + " droid-proxy"
+	xaiGrokClientVersion = "1.0.50"
 )
 
 func oauthResponsesURL(m *config.Model, token *oauth.Token) (string, error) {
@@ -81,6 +84,7 @@ func applyOAuthResponsesHeaders(req *http.Request, downstream http.Header, m *co
 		}
 	case config.OAuthProviderXAI:
 		if xaiUsesCLIChatProxy(m, token) {
+			req.Header.Set("User-Agent", "xai-grok-workspace/"+xaiGrokClientVersion)
 			if modelOverride := xaiModelOverride(m, payload); modelOverride != "" {
 				req.Header.Set("x-grok-model-override", modelOverride)
 			}
@@ -92,6 +96,16 @@ func applyOAuthResponsesHeaders(req *http.Request, downstream http.Header, m *co
 		if sessionID := oauthSessionID(downstream, payload); sessionID != "" {
 			req.Header.Set("x-grok-conv-id", sessionID)
 		}
+	}
+	for name, value := range m.ExtraHeaders {
+		if upstream.IsReservedOutboundHeader(name) {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "chatgpt-account-id", "x-xai-token-auth":
+			continue
+		}
+		req.Header.Set(name, value)
 	}
 }
 
@@ -116,7 +130,13 @@ func injectCodexClientMetadata(payload []byte, metadata map[string]string) []byt
 		return payload
 	}
 	out := payload
-	for key, value := range metadata {
+	keys := make([]string, 0, len(metadata))
+	for key := range metadata {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := metadata[key]
 		if strings.TrimSpace(value) == "" {
 			continue
 		}

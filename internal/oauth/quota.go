@@ -1,7 +1,9 @@
 package oauth
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
@@ -54,17 +56,20 @@ func (m *Manager) RecordCodexUsage(token *Token, quota *CodexQuota, resetAt *tim
 	if token == nil || token.Provider() != ProviderCodex || strings.TrimSpace(token.path) == "" {
 		return nil
 	}
-	// Serialize the load→merge→save against concurrent usage records and token
-	// refreshes for the same file. This shares the per-path refresh mutex so a
-	// quota write can never read a stale file and clobber a refresh's new tokens
-	// (last-writer-wins), and concurrent requests on the same account don't lose
-	// each other's quota updates.
-	mu := m.refreshMutex(token.path)
-	mu.Lock()
-	defer mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	defer cancel()
+	release, err := m.lockToken(ctx, refreshLockKey(token))
+	if err != nil {
+		return err
+	}
+	defer release()
 	latest, err := m.loadTokenPath(token.path)
 	if err != nil {
-		latest = token
+		// A request finishing after logout must not recreate the token file.
+		return err
+	}
+	if latest.Provider() != ProviderCodex {
+		return fmt.Errorf("auth token provider changed during quota update")
 	}
 	latest.path = token.path
 	if quota != nil {

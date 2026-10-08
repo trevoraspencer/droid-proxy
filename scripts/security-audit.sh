@@ -100,10 +100,18 @@ if ! ensure_gitleaks; then
   info "Audit stopped because gitleaks is unavailable"
   exit 1
 fi
-if gitleaks detect --source . --config .gitleaks.toml --verbose --no-banner; then
+if gitleaks detect --source . --config .gitleaks.toml --verbose --no-banner --redact; then
   pass "gitleaks scan clean"
 else
   fail "gitleaks reported potential secrets"
+fi
+
+# History scanning does not inspect edits or newly created files. Scan the
+# current directory too, without exposing any matched credential values.
+if gitleaks dir . --config .gitleaks.toml --no-banner --redact; then
+  pass "working tree gitleaks scan clean"
+else
+  fail "working tree gitleaks reported potential secrets"
 fi
 
 history_hits="$(
@@ -115,7 +123,7 @@ if [[ -z "$history_hits" ]]; then
   pass "git history grep found no high-confidence credential patterns"
 else
   fail "git history grep found high-confidence credential patterns"
-  printf '%s\n' "$history_hits" | head -20
+  info "matched credential values withheld"
 fi
 
 tracked_sensitive="$(

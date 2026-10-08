@@ -776,14 +776,12 @@ func TestBaseten_StreamingSSE_DetectsMutation(t *testing.T) {
 			},
 		},
 		{
-			name: "extra_trailing_byte",
+			name: "extra_frame_byte",
 			writeFunc: func(w http.ResponseWriter, flusher http.Flusher) {
 				for _, f := range canonicalFrames {
-					fmt.Fprintf(w, "%s\n\n", f)
+					fmt.Fprintf(w, "%s \n\n", f)
 					flusher.Flush()
 				}
-				fmt.Fprint(w, " ") // extra trailing byte after [DONE]
-				flusher.Flush()
 			},
 		},
 	}

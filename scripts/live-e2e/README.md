@@ -5,7 +5,7 @@ for normal use or for running unit tests.
 
 ## Prerequisites
 
-- Go 1.26.5+, `zsh`, `jq`, `curl`, `rg`
+- Go 1.27.2+, `zsh`, `jq`, `curl`, `rg`
 - API keys and OAuth accounts you are willing to use for testing
 - Factory Droid installed (`~/.factory/settings.json`)
 
@@ -55,13 +55,13 @@ scripts/live-e2e/run-all-after-secrets.sh
 
 Results land in `~/.droid-proxy/live-e2e/<run-id>/results.ndjson`.
 
-The default Codex checks exercise both `gpt-5.6` and the local
-`gpt-5.6-fast` alias. Both map to the credential-validated explicit
-`gpt-5.6-sol` upstream; only the fast alias requests the priority service tier.
+The default Codex checks exercise both `gpt-6.1-sol` and the local
+`gpt-6.1-sol-fast` alias. Both map to the explicit configured
+`gpt-6.1-sol` upstream; only the fast alias requests the priority service tier.
 The harness verifies those loaded mappings before sending provider requests.
-The GPT-5.6 mappings are fixed in the harness config and have no environment
+The Codex mappings are fixed in the harness config and have no environment
 override; the previous `CODEX_UPSTREAM_MODEL` name is retired and ignored so a
-preserved GPT-5.2 env file cannot produce a false GPT-5.6 pass.
+preserved GPT-5.2 env file cannot produce a false current Codex pass.
 The xAI OAuth mappings are fixed for the same reason: `grok-4.5`,
 `grok-build-0.1`, `grok-composer-2.5-fast`, and `grok-4.3` cannot be replaced
 by stale `XAI_*_MODEL` environment overrides. Before any provider request, the

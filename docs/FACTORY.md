@@ -66,17 +66,15 @@ Ready-to-paste snippets for common providers:
 The xAI snippet includes recommended `grok-4.5`, Composer 2.5 Fast, Grok Build
 0.1, and backward-compatible Grok 4.3 aliases. Its `maxOutputTokens` values are
 Factory client-side caps, not claims about private OAuth upstream output limits.
-Only Grok 4.5 advertises `reasoningEffort: high`; Grok Build and Composer omit
-the field because their upstream paths drop Factory reasoning.
+Current Grok 4.7 presets advertise `reasoningEffort: high`; older Grok Build
+and Composer profiles omit the field because those paths drop Factory reasoning.
 
-The Codex OAuth snippet uses GPT-5.6 as the primary example and includes the
-dashboard's Sol, Terra, and Luna standard/fast aliases. Fast names are local
-Factory model IDs. The local Sol aliases map to the credential-validated
-explicit `gpt-5.6-sol` upstream; each fast entry keeps its standard entry's
-upstream model and requests `extra_args.service_tier: priority`. The effective
-tier is account/backend dependent and appears in the response.
-All six GPT-5.6 entries advertise `reasoningEffort: max` because Droid 0.144.1
-does not infer reasoning controls for those aliases from its built-in registry.
+The Codex snippet includes GPT-6.1 Sol, GPT-6 Astra, and GPT-6 Luna standard/fast
+aliases. Fast names are local Factory model IDs and request
+`extra_args.service_tier: priority` for the same upstream model. All six entries
+explicitly advertise `reasoningEffort: max` so custom-model reasoning controls
+work independently of Droid's built-in registry. Actual access and effective
+tier depend on the account/backend. See [MAINTENANCE.md](MAINTENANCE.md).
 
 Per-provider walkthroughs with full config blocks are in
 [examples/](examples/).

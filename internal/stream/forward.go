@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -80,7 +81,7 @@ func ChatTerminal(ev Event) bool {
 }
 
 func AnthropicTerminal(ev Event) bool {
-	return ev.Name == "message_stop"
+	return ev.Name == "message_stop" || ev.Name == "error"
 }
 
 func ResponsesTerminal(ev Event) bool {
@@ -88,6 +89,16 @@ func ResponsesTerminal(ev Event) bool {
 	case "response.completed", "response.failed", "response.incomplete", "error":
 		return true
 	default:
+		var payload struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal([]byte(ev.Data), &payload) != nil {
+			return false
+		}
+		switch payload.Type {
+		case "response.completed", "response.failed", "response.incomplete", "error":
+			return true
+		}
 		return false
 	}
 }
@@ -284,6 +295,9 @@ func Forward(ctx context.Context, dst io.Writer, flusher http.Flusher, src io.Re
 				return err
 			}
 			flusher.Flush()
+			if sawTerminal {
+				return nil
+			}
 			if ticker != nil {
 				ticker.Reset(opts.KeepAlive)
 			}

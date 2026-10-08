@@ -90,7 +90,7 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Server, error) {
 	engine.HEAD("/healthz", handlers.Health)
 
 	// All other routes are auth-gated when client_auth is enabled.
-	authed := engine.Group("/", ClientAuth(cfg), RequestBodyLimit(cfg))
+	authed := engine.Group("/", BrowserOriginGuard(), ClientAuth(cfg), RequestBodyLimit(cfg))
 	registerAPIRoutes(authed, api)
 
 	return &Server{cfg: cfg, logger: logger, engine: engine, oauth: oauthMgr, pool: pool}, nil

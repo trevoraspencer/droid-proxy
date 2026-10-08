@@ -32,23 +32,23 @@ func buildProviderChoices() []providerChoice {
 
 func codexOAuthPresets() []oauthModelPreset {
 	return []oauthModelPreset{
-		codexGPT56Preset("GPT-5.6 Sol (Recommended)", "gpt-5.6", "GPT-5.6 Sol (Codex OAuth)", "gpt-5.6-sol", false),
-		codexGPT56Preset("GPT-5.6 Sol Fast", "gpt-5.6-fast", "GPT-5.6 Sol Fast (Codex OAuth)", "gpt-5.6-sol", true),
-		codexGPT56Preset("GPT-5.6 Terra", "gpt-5.6-terra", "GPT-5.6 Terra (Codex OAuth)", "gpt-5.6-terra", false),
-		codexGPT56Preset("GPT-5.6 Terra Fast", "gpt-5.6-terra-fast", "GPT-5.6 Terra Fast (Codex OAuth)", "gpt-5.6-terra", true),
-		codexGPT56Preset("GPT-5.6 Luna", "gpt-5.6-luna", "GPT-5.6 Luna (Codex OAuth)", "gpt-5.6-luna", false),
-		codexGPT56Preset("GPT-5.6 Luna Fast", "gpt-5.6-luna-fast", "GPT-5.6 Luna Fast (Codex OAuth)", "gpt-5.6-luna", true),
+		codexPreset("GPT-6.1 Sol (Recommended)", "gpt-6.1-sol", "GPT-6.1 Sol (Codex OAuth)", "gpt-6.1-sol", false),
+		codexPreset("GPT-6.1 Sol Fast", "gpt-6.1-sol-fast", "GPT-6.1 Sol Fast (Codex OAuth)", "gpt-6.1-sol", true),
+		codexPreset("GPT-6 Astra", "gpt-6-astra", "GPT-6 Astra (Codex OAuth)", "gpt-6-astra", false),
+		codexPreset("GPT-6 Astra Fast", "gpt-6-astra-fast", "GPT-6 Astra Fast (Codex OAuth)", "gpt-6-astra", true),
+		codexPreset("GPT-6 Luna", "gpt-6-luna", "GPT-6 Luna (Codex OAuth)", "gpt-6-luna", false),
+		codexPreset("GPT-6 Luna Fast", "gpt-6-luna-fast", "GPT-6 Luna Fast (Codex OAuth)", "gpt-6-luna", true),
 	}
 }
 
-func codexGPT56Preset(label, alias, displayName, upstreamModel string, fast bool) oauthModelPreset {
+func codexPreset(label, alias, displayName, upstreamModel string, fast bool) oauthModelPreset {
 	preset := oauthModelPreset{
 		Label:            label,
 		Alias:            alias,
 		DisplayName:      displayName,
 		UpstreamModel:    upstreamModel,
 		MaxOutputTokens:  128000,
-		MaxContextTokens: 1050000,
+		MaxContextTokens: 272000,
 		Capabilities: config.Capabilities{
 			Streaming:              boolValue(true),
 			Tools:                  boolValue(true),
@@ -67,10 +67,25 @@ func codexGPT56Preset(label, alias, displayName, upstreamModel string, fast bool
 	return preset
 }
 
+func xaiGrokPreset(label, modelID string) oauthModelPreset {
+	return oauthModelPreset{
+		Label: label, Alias: modelID, DisplayName: strings.TrimSuffix(label, " (Recommended)") + " (xAI OAuth)",
+		UpstreamModel: modelID, BaseURL: "https://cli-chat-proxy.grok.com/v1",
+		MaxOutputTokens: factory.DefaultMaxOutputTokens, MaxContextTokens: 500000,
+		Capabilities: config.Capabilities{
+			FactoryReasoning:       config.FactoryReasoningPassthrough,
+			FactoryReasoningEffort: config.FactoryReasoningEffortHigh,
+			PromptCaching:          boolValue(true),
+		},
+	}
+}
+
 func xaiOAuthPresets() []oauthModelPreset {
 	return []oauthModelPreset{
+		xaiGrokPreset("Grok 4.7 (Recommended)", "grok-4.7"),
+		xaiGrokPreset("Grok 4.7 Fast", "grok-4.7-build-fast"),
 		{
-			Label:            "Grok 4.5 (Recommended)",
+			Label:            "Grok 4.5 (Legacy)",
 			Alias:            "grok-4.5",
 			DisplayName:      "Grok 4.5 (xAI OAuth)",
 			UpstreamModel:    "grok-4.5",

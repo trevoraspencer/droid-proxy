@@ -122,19 +122,19 @@ func (f *responsesSSERepairFramer) repairFrame(frame []byte) []byte {
 		if strings.TrimSpace(gjson.GetBytes(data, "delta").String()) != "" {
 			f.sawVisibleOutput = true
 		}
-	case "response.completed":
+	case "response.completed", "response.incomplete":
 		f.sawTerminal = true
 		patched := patchOAuthCompletedOutput(data, f.outputItemsByIndex, f.outputItemsFallback)
 		if oauthResponseVisible(gjson.GetBytes(patched, "response")) {
 			f.sawVisibleOutput = true
 		}
-		if f.requireVisibleOutput && !f.sawVisibleOutput {
+		if f.requireVisibleOutput && !f.sawVisibleOutput && gjson.GetBytes(data, "type").String() != "response.incomplete" {
 			return responsesSSENoVisibleOutputFrame()
 		}
 		if !bytes.Equal(patched, data) {
 			return responsesSSEReplaceData(frame, patched)
 		}
-	case "response.failed", "response.incomplete":
+	case "response.failed":
 		f.sawTerminal = true
 	case "error":
 		f.sawTerminal = true
@@ -245,10 +245,15 @@ func writeAll(dst io.Writer, data []byte) error {
 
 func codexQuotaFromSSEBody(body []byte) *oauth.CodexQuota {
 	var out *oauth.CodexQuota
-	for _, line := range bytes.Split(body, []byte("\n")) {
-		if quota := codexQuotaFromSSELine(line); quota != nil {
-			out = quota
+	for len(body) > 0 {
+		frameEnd, ok := responsesSSEFrameEnd(body)
+		if !ok {
+			frameEnd = len(body)
 		}
+		if quota := oauth.ParseCodexRateLimitsEvent(responsesSSEData(body[:frameEnd])); quota != nil {
+			out = oauth.MergeCodexQuota(out, quota)
+		}
+		body = body[frameEnd:]
 	}
 	return out
 }
@@ -280,13 +285,16 @@ func responseFromResponsesSSE(body []byte, opts responsesSSERepairOptions) ([]by
 		return nil, fmt.Errorf("OAuth upstream returned an empty response")
 	}
 	if trimmed[0] == '{' {
+		if !gjson.ValidBytes(trimmed) {
+			return nil, errors.New("OAuth upstream returned invalid JSON")
+		}
 		if response := gjson.GetBytes(trimmed, "response"); response.Exists() && response.Type == gjson.JSON {
-			if opts.RequireVisibleOutput && !oauthResponseVisible(response) {
+			if opts.RequireVisibleOutput && response.Get("status").String() != "incomplete" && !oauthResponseVisible(response) {
 				return nil, errors.New(noVisibleOAuthOutputMessage)
 			}
 			return []byte(response.Raw), nil
 		}
-		if opts.RequireVisibleOutput && !oauthResponseVisible(gjson.ParseBytes(trimmed)) {
+		if opts.RequireVisibleOutput && gjson.GetBytes(trimmed, "status").String() != "incomplete" && !oauthResponseVisible(gjson.ParseBytes(trimmed)) {
 			return nil, errors.New(noVisibleOAuthOutputMessage)
 		}
 		return trimmed, nil
@@ -295,12 +303,13 @@ func responseFromResponsesSSE(body []byte, opts responsesSSERepairOptions) ([]by
 	outputItemsByIndex := map[int64][]byte{}
 	var outputItemsFallback [][]byte
 	sawVisibleOutput := false
-	for _, line := range bytes.Split(body, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
+	for len(body) > 0 {
+		frameEnd, ok := responsesSSEFrameEnd(body)
+		if !ok {
+			frameEnd = len(body)
 		}
-		eventData := bytes.TrimSpace(line[len("data:"):])
+		eventData := responsesSSEData(body[:frameEnd])
+		body = body[frameEnd:]
 		if bytes.Equal(eventData, []byte("[DONE]")) {
 			continue
 		}
@@ -314,21 +323,28 @@ func responseFromResponsesSSE(body []byte, opts responsesSSERepairOptions) ([]by
 			if strings.TrimSpace(gjson.GetBytes(eventData, "delta").String()) != "" {
 				sawVisibleOutput = true
 			}
-		case "response.completed":
+		case "response.completed", "response.incomplete":
 			completed := patchOAuthCompletedOutput(eventData, outputItemsByIndex, outputItemsFallback)
 			response := gjson.GetBytes(completed, "response")
 			if !response.Exists() || response.Type != gjson.JSON {
-				return nil, fmt.Errorf("OAuth upstream response.completed is missing response")
+				return nil, fmt.Errorf("OAuth upstream terminal event is missing response")
 			}
 			if oauthResponseVisible(response) {
 				sawVisibleOutput = true
 			}
-			if opts.RequireVisibleOutput && !sawVisibleOutput {
+			if opts.RequireVisibleOutput && !sawVisibleOutput && gjson.GetBytes(eventData, "type").String() != "response.incomplete" {
 				return nil, errors.New(noVisibleOAuthOutputMessage)
 			}
 			return []byte(response.Raw), nil
 		case "response.failed", "error":
-			return nil, fmt.Errorf("OAuth upstream returned error: %s", gjson.GetBytes(eventData, "error.message").String())
+			message := gjson.GetBytes(eventData, "response.error.message").String()
+			if message == "" {
+				message = gjson.GetBytes(eventData, "error.message").String()
+			}
+			if message == "" {
+				message = gjson.GetBytes(eventData, "message").String()
+			}
+			return nil, fmt.Errorf("OAuth upstream returned error: %s", safeErrorMessage(message))
 		}
 	}
 	return nil, fmt.Errorf("OAuth upstream stream ended before response.completed")

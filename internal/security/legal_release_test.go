@@ -11,7 +11,8 @@ import (
 
 var permissiveLicenses = map[string]bool{
 	"MIT": true, "Apache-2.0": true, "BSD-2-Clause": true, "BSD-3-Clause": true,
-	"ISC": true, "MPL-2.0": true, "Unlicense": true, "0BSD": true,
+	"MIT AND Apache-2.0": true,
+	"ISC":                true, "MPL-2.0": true, "Unlicense": true, "0BSD": true,
 }
 
 var copyleftLicenses = map[string]bool{
