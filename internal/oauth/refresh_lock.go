@@ -11,27 +11,38 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
 const refreshLockStaleAfter = 5 * time.Minute
 
-func (m *Manager) refreshMutex(key string) *sync.Mutex {
-	if m == nil {
-		return &sync.Mutex{}
+// lockToken serializes token changes within and across processes. Waiting is
+// cancellable so abandoned requests do not queue behind another refresh.
+func (m *Manager) lockToken(ctx context.Context, key string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.refreshLocks == nil {
-		m.refreshLocks = make(map[string]*sync.Mutex)
+		m.refreshLocks = make(map[string]chan struct{})
 	}
-	mu := m.refreshLocks[key]
-	if mu == nil {
-		mu = &sync.Mutex{}
-		m.refreshLocks[key] = mu
+	gate := m.refreshLocks[key]
+	if gate == nil {
+		gate = make(chan struct{}, 1)
+		m.refreshLocks[key] = gate
 	}
-	return mu
+	m.mu.Unlock()
+	select {
+	case gate <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	release, err := m.acquireRefreshFileLock(ctx, key)
+	if err != nil {
+		<-gate
+		return nil, err
+	}
+	return func() { release(); <-gate }, nil
 }
 
 func refreshLockKey(token *Token) string {
@@ -39,7 +50,17 @@ func refreshLockKey(token *Token) string {
 		return "nil"
 	}
 	if strings.TrimSpace(token.path) != "" {
-		return token.path
+		// Different config spellings (relative paths or directory symlinks)
+		// must identify the same lock for a shared token file.
+		absolute, err := filepath.Abs(token.path)
+		if err != nil {
+			return filepath.Clean(token.path)
+		}
+		dir := filepath.Dir(absolute)
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			dir = real
+		}
+		return filepath.Join(dir, filepath.Base(absolute))
 	}
 	parts := []string{string(token.Provider()), token.Email, token.Subject, token.AccountID}
 	for _, part := range parts {
@@ -65,6 +86,9 @@ func (m *Manager) acquireRefreshFileLock(ctx context.Context, key string) (func(
 	lockPath := filepath.Join(lockDir, "refresh-"+refreshLockName(key)+".lock")
 	payload := []byte(strconv.Itoa(os.Getpid()) + "\n" + strconv.FormatInt(time.Now().UnixNano(), 10) + "\n")
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
 			if _, writeErr := f.Write(payload); writeErr != nil {

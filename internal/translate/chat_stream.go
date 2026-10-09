@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -82,9 +83,6 @@ func decodeChatWireLine(raw []byte) string {
 
 func ForwardChatStreamToResponsesWithOptions(r io.Reader, w io.Writer, flush func(), model string, opts ChatStreamForwardOptions) error {
 	state := newResponsesStreamState(w, model)
-	if state.err != nil {
-		return state.err
-	}
 	return readChatStreamEventsIncremental(r, opts, w, flush, func(ev chatStreamChunk) error {
 		if err := state.observe(ev); err != nil {
 			return err
@@ -105,32 +103,40 @@ func ForwardChatStreamToResponsesWithOptions(r io.Reader, w io.Writer, flush fun
 }
 
 type responsesStreamState struct {
-	w           io.Writer
-	model       string
-	respID      string
-	textStarted bool
-	text        string
-	tools       map[int]*responsesStreamTool
-	toolOffset  int
-	finished    bool
-	usage       map[string]any
-	err         error
+	w            io.Writer
+	model        string
+	respID       string
+	textStarted  bool
+	text         strings.Builder
+	tools        map[int]*responsesStreamTool
+	toolOffset   int
+	finished     bool
+	finishReason string
+	created      bool
+	usage        map[string]any
 }
 
 type responsesStreamTool struct {
 	ID          string
 	Name        string
-	Arguments   string
+	Arguments   strings.Builder
 	OutputIndex int
 }
 
 func newResponsesStreamState(w io.Writer, model string) *responsesStreamState {
-	s := &responsesStreamState{w: w, model: model, respID: "resp_chat", tools: map[int]*responsesStreamTool{}}
-	s.err = writeSSETo(s.w, "response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": s.respID, "object": "response", "status": "in_progress", "model": model}})
-	return s
+	return &responsesStreamState{w: w, model: model, respID: "resp_" + rand.Text(), tools: map[int]*responsesStreamTool{}}
 }
 
 func (s *responsesStreamState) observe(ev chatStreamChunk) error {
+	if !s.created {
+		if ev.ID != "" {
+			s.respID = "resp_" + ev.ID
+		}
+		if err := writeSSETo(s.w, "response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": s.respID, "object": "response", "status": "in_progress", "model": s.model}}); err != nil {
+			return err
+		}
+		s.created = true
+	}
 	if len(ev.Choices) > 1 {
 		return errors.New("Chat stream contains multiple choices, which this translator does not merge")
 	}
@@ -148,9 +154,6 @@ func (s *responsesStreamState) observe(ev chatStreamChunk) error {
 	if ch.Index != 0 {
 		return errors.New("Chat stream contains non-zero choice index, which this translator does not merge")
 	}
-	if ev.ID != "" {
-		s.respID = "resp_" + ev.ID
-	}
 	if text := stringValue(ch.Delta["content"]); text != "" {
 		if !s.textStarted {
 			if len(s.tools) > 0 {
@@ -162,7 +165,7 @@ func (s *responsesStreamState) observe(ev chatStreamChunk) error {
 			}
 			s.textStarted = true
 		}
-		s.text += text
+		s.text.WriteString(text)
 		if err := writeSSETo(s.w, "response.output_text.delta", map[string]any{"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": text}); err != nil {
 			return err
 		}
@@ -186,7 +189,7 @@ func (s *responsesStreamState) observe(ev chatStreamChunk) error {
 				tool.Name = name
 			}
 			if args := stringValue(fn["arguments"]); args != "" {
-				tool.Arguments += args
+				tool.Arguments.WriteString(args)
 				if err := writeSSETo(s.w, "response.function_call_arguments.delta", map[string]any{"type": "response.function_call_arguments.delta", "output_index": outputIndex, "delta": args}); err != nil {
 					return err
 				}
@@ -195,6 +198,7 @@ func (s *responsesStreamState) observe(ev chatStreamChunk) error {
 	}
 	if ch.FinishReason != nil {
 		s.finished = true
+		s.finishReason = stringValue(ch.FinishReason)
 	}
 	return nil
 }
@@ -203,23 +207,29 @@ func (s *responsesStreamState) complete() error {
 	if !s.finished {
 		return errors.New("Chat stream ended before terminal finish_reason")
 	}
-	if err := validateResponsesStreamToolArguments(s.tools); err != nil {
-		return err
+	status := "completed"
+	if s.finishReason == "length" || s.finishReason == "content_filter" {
+		status = "incomplete"
+	}
+	if status == "completed" {
+		if err := validateResponsesStreamToolArguments(s.tools); err != nil {
+			return err
+		}
 	}
 	output := []any{}
 	if s.textStarted {
 		textItem := map[string]any{
 			"type":   "message",
 			"id":     "msg_0",
-			"status": "completed",
+			"status": status,
 			"role":   "assistant",
 			"content": []any{map[string]any{
 				"type":        "output_text",
-				"text":        s.text,
+				"text":        s.text.String(),
 				"annotations": []any{},
 			}},
 		}
-		if err := writeSSETo(s.w, "response.output_text.done", map[string]any{"type": "response.output_text.done", "output_index": 0, "content_index": 0, "text": s.text}); err != nil {
+		if err := writeSSETo(s.w, "response.output_text.done", map[string]any{"type": "response.output_text.done", "output_index": 0, "content_index": 0, "text": s.text.String()}); err != nil {
 			return err
 		}
 		if err := writeSSETo(s.w, "response.output_item.done", map[string]any{"type": "response.output_item.done", "output_index": 0, "item": textItem}); err != nil {
@@ -229,8 +239,8 @@ func (s *responsesStreamState) complete() error {
 	}
 	for _, idx := range sortedResponseStreamToolIndexes(s.tools) {
 		tool := s.tools[idx]
-		args := strings.TrimSpace(tool.Arguments)
-		if args == "" {
+		args := strings.TrimSpace(tool.Arguments.String())
+		if args == "" && status == "completed" {
 			args = "{}"
 		}
 		toolItem := map[string]any{
@@ -239,7 +249,7 @@ func (s *responsesStreamState) complete() error {
 			"call_id":   tool.ID,
 			"name":      tool.Name,
 			"arguments": args,
-			"status":    "completed",
+			"status":    status,
 		}
 		if err := writeSSETo(s.w, "response.function_call_arguments.done", map[string]any{"type": "response.function_call_arguments.done", "output_index": tool.OutputIndex, "arguments": args}); err != nil {
 			return err
@@ -250,10 +260,20 @@ func (s *responsesStreamState) complete() error {
 		output = append(output, toolItem)
 	}
 	response := map[string]any{"id": s.respID, "object": "response", "status": "completed", "model": s.model, "output": output}
+	event := "response.completed"
+	if s.finishReason == "length" || s.finishReason == "content_filter" {
+		reason := s.finishReason
+		if reason == "length" {
+			reason = "max_output_tokens"
+		}
+		response["status"] = "incomplete"
+		response["incomplete_details"] = map[string]any{"reason": reason}
+		event = "response.incomplete"
+	}
 	if u, ok := chatUsageToResponsesUsage(s.usage); ok && len(u) > 0 {
 		response["usage"] = u
 	}
-	return writeSSETo(s.w, "response.completed", map[string]any{"type": "response.completed", "response": response})
+	return writeSSETo(s.w, event, map[string]any{"type": event, "response": response})
 }
 
 func ChatStreamToAnthropicSSE(r io.Reader, model string) ([]byte, error) {
@@ -526,9 +546,15 @@ func readChatStreamEventsIncremental(r io.Reader, opts ChatStreamForwardOptions,
 					closeReader()
 					return err
 				}
+				if sawDone {
+					return nil
+				}
 				continue
 			}
 			if strings.HasPrefix(line, "data:") {
+				if data.Len()+len(line) > 50*1024*1024 {
+					return errors.New("Chat SSE event exceeded maximum size")
+				}
 				if data.Len() > 0 {
 					data.WriteByte('\n')
 				}
@@ -573,7 +599,7 @@ func validateAccumulatedToolArguments(started map[int]bool, args map[int]string)
 
 func validateResponsesStreamToolArguments(tools map[int]*responsesStreamTool) error {
 	for _, idx := range sortedResponseStreamToolIndexes(tools) {
-		raw := strings.TrimSpace(tools[idx].Arguments)
+		raw := strings.TrimSpace(tools[idx].Arguments.String())
 		if raw == "" {
 			raw = "{}"
 		}

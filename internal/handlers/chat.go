@@ -34,9 +34,9 @@ func (a *API) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	if m.UpstreamProtocol != config.UpstreamOpenAIChat {
-		// Anthropic-via-Chat-translation lives in a future phase; chat-on-Responses
-		// is also a future translator. Surface honestly for now.
+	if m.UpstreamProtocol != config.UpstreamOpenAIChat && m.UpstreamProtocol != config.UpstreamOpenAIResponses {
+		// Public Responses providers can also expose native Chat Completions
+		// at the same base URL. Private OAuth Responses endpoints cannot.
 		WriteJSONError(c, http.StatusNotImplemented, "not_implemented",
 			"chat/completions on upstream_protocol "+string(m.UpstreamProtocol)+" is not yet supported")
 		return

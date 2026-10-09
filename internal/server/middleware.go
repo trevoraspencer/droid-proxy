@@ -84,6 +84,9 @@ type traceWriter struct {
 	buf bytes.Buffer
 }
 
+// Preserve ResponseController access to the underlying connection deadlines.
+func (w *traceWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *traceWriter) Write(b []byte) (int, error) {
 	if w.buf.Len() < traceBodyMaxBytes {
 		remain := traceBodyMaxBytes - w.buf.Len()
@@ -170,6 +173,24 @@ func toString(v any) string {
 		return x.Error()
 	default:
 		return ""
+	}
+}
+
+// BrowserOriginGuard prevents browser-origin API requests from spending local
+// provider credentials. The supported client is Droid, with no browser UI.
+func BrowserOriginGuard() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if len(c.Request.Header.Values("Origin")) > 0 {
+			message := "browser-origin requests are not supported by this local proxy"
+			if strings.HasSuffix(c.Request.URL.Path, "/messages") || strings.HasSuffix(c.Request.URL.Path, "/messages/count_tokens") {
+				handlers.WriteAnthropicError(c, http.StatusForbidden, "permission_error", message)
+			} else {
+				handlers.WriteJSONError(c, http.StatusForbidden, "permission_error", message)
+			}
+			c.Abort()
+			return
+		}
+		c.Next()
 	}
 }
 

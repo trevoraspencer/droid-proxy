@@ -15,7 +15,7 @@ license identifiers, verified for public release.
 | `github.com/tidwall/gjson` | MIT |
 | `github.com/tidwall/sjson` | MIT |
 | `github.com/tiktoken-go/tokenizer` | MIT |
-| `gopkg.in/yaml.v3` | MIT |
+| `go.yaml.in/yaml/v3` | MIT AND Apache-2.0 |
 
 Indirect dependencies are resolved at build time via the Go module graph. Before
 each public release, run:

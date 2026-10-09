@@ -16,6 +16,7 @@ import (
 )
 
 type modelResolveErrors struct {
+	Invalid  func(string)
 	Missing  func()
 	NotFound func(error)
 	Internal func(error)
@@ -23,6 +24,7 @@ type modelResolveErrors struct {
 
 func openAIModelErrors(c *gin.Context) modelResolveErrors {
 	return modelResolveErrors{
+		Invalid: func(msg string) { BadRequest(c, msg) },
 		Missing: func() {
 			BadRequest(c, "request is missing required field: model")
 		},
@@ -37,6 +39,7 @@ func openAIModelErrors(c *gin.Context) modelResolveErrors {
 
 func anthropicModelErrors(c *gin.Context) modelResolveErrors {
 	return modelResolveErrors{
+		Invalid: func(msg string) { WriteAnthropicError(c, http.StatusBadRequest, "invalid_request_error", msg) },
 		Missing: func() {
 			WriteAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "request is missing required field: model")
 		},
@@ -50,7 +53,38 @@ func anthropicModelErrors(c *gin.Context) modelResolveErrors {
 }
 
 func (a *API) resolveRequestModel(body []byte, errs modelResolveErrors) (*config.Model, bool) {
-	alias := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	if !gjson.ValidBytes(body) || !gjson.ParseBytes(body).IsObject() {
+		errs.Invalid("request body must be a valid JSON object")
+		return nil, false
+	}
+	// JSON implementations disagree on which duplicate value wins. In
+	// particular, model/stream ambiguity can route a request differently
+	// from the backend that consumes the patched payload.
+	seen := make(map[string]struct{})
+	duplicate := false
+	gjson.ParseBytes(body).ForEach(func(key, _ gjson.Result) bool {
+		name := key.String()
+		if _, exists := seen[name]; exists {
+			duplicate = true
+			return false
+		}
+		seen[name] = struct{}{}
+		return true
+	})
+	if duplicate {
+		errs.Invalid("request body contains duplicate top-level fields")
+		return nil, false
+	}
+	model := gjson.GetBytes(body, "model")
+	if model.Exists() && model.Type != gjson.String {
+		errs.Invalid("model must be a string")
+		return nil, false
+	}
+	if stream := gjson.GetBytes(body, "stream"); stream.Exists() && stream.Type != gjson.True && stream.Type != gjson.False && stream.Type != gjson.Null {
+		errs.Invalid("stream must be a boolean")
+		return nil, false
+	}
+	alias := strings.TrimSpace(model.String())
 	if alias == "" {
 		errs.Missing()
 		return nil, false

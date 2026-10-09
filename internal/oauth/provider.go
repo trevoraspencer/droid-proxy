@@ -119,6 +119,9 @@ func (m *Manager) refreshToken(ctx context.Context, token *Token, force bool) (*
 	if token == nil {
 		return nil, fmt.Errorf("token is nil")
 	}
+	if token.Disabled {
+		return nil, fmt.Errorf("%s OAuth account is disabled", token.Provider())
+	}
 	if !force {
 		if strings.TrimSpace(token.AccessToken) != "" && !token.NeedsRefresh(time.Now()) {
 			return token, nil
@@ -128,10 +131,7 @@ func (m *Manager) refreshToken(ctx context.Context, token *Token, force bool) (*
 		return nil, fmt.Errorf("%s OAuth token is expired and has no refresh token", token.Provider())
 	}
 	lockKey := refreshLockKey(token)
-	mu := m.refreshMutex(lockKey)
-	mu.Lock()
-	defer mu.Unlock()
-	releaseFileLock, err := m.acquireRefreshFileLock(ctx, lockKey)
+	releaseFileLock, err := m.lockToken(ctx, lockKey)
 	if err != nil {
 		return nil, err
 	}
@@ -145,8 +145,15 @@ func (m *Manager) refreshToken(ctx context.Context, token *Token, force bool) (*
 		if latest.Provider() != token.Provider() {
 			return nil, fmt.Errorf("auth token provider changed during refresh: got %q want %q", latest.Provider(), token.Provider())
 		}
+		// Concurrent 401s can arrive for the same old access token. Once
+		// another caller refreshed it, replay with that result instead of
+		// rotating the refresh token again.
+		alreadyRefreshed := latest.AccessToken != token.AccessToken
 		token = latest
-		if !force {
+		if token.Disabled {
+			return nil, fmt.Errorf("%s OAuth account is disabled", token.Provider())
+		}
+		if !force || alreadyRefreshed {
 			if strings.TrimSpace(token.AccessToken) != "" && !token.NeedsRefresh(time.Now()) {
 				return token, nil
 			}
@@ -204,6 +211,7 @@ func (m *Manager) refreshToken(ctx context.Context, token *Token, force bool) (*
 	refreshed.CodexQuota = token.CodexQuota
 	refreshed.RateLimitResetAt = token.RateLimitResetAt
 	refreshed.LastSeenAt = token.LastSeenAt
+	refreshed.Disabled = token.Disabled
 	if _, err := m.SaveToken(refreshed); err != nil {
 		return nil, err
 	}

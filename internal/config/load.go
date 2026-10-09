@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Load reads a YAML config file from path, expands ${VAR} and ${VAR:-default}

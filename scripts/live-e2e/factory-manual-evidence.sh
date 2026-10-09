@@ -13,8 +13,8 @@ FACTORY_DIR="$LIVE_E2E_RUN_DIR/factory"
 
 typeset -a rows
 rows=(
-  "ChatGPT/Codex OAuth (GPT-5.6 Sol)|gpt-5.6"
-  "ChatGPT/Codex OAuth (GPT-5.6 Sol Fast)|gpt-5.6-fast"
+  "ChatGPT/Codex OAuth (GPT-6.1 Sol)|gpt-6.1-sol"
+  "ChatGPT/Codex OAuth (GPT-6.1 Sol Fast)|gpt-6.1-sol-fast"
   "xAI OAuth (Grok 4.5)|grok-4.5"
   "xAI OAuth (Grok Build)|grok-build-0.1"
   "xAI OAuth (Composer 2.5 Fast)|grok-composer-2.5-fast"

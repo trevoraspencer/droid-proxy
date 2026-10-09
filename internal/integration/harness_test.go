@@ -18,7 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
 	"github.com/trevoraspencer/droid-proxy/internal/factory"

@@ -67,7 +67,7 @@ run: build
 
 audit-secrets:
 	@command -v gitleaks >/dev/null 2>&1 || (echo "install gitleaks: https://github.com/gitleaks/gitleaks#installing"; exit 1)
-	gitleaks detect --source . --config .gitleaks.toml --verbose --no-banner
+	gitleaks detect --source . --config .gitleaks.toml --verbose --no-banner --redact
 
 security-audit:
 	@bash scripts/security-audit.sh

@@ -153,21 +153,16 @@ Codex example:
 curl -sS http://127.0.0.1:9787/v1/responses \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "gpt-5.6",
+    "model": "gpt-6.1-sol",
     "input": "hello"
   }' | jq '.output'
 ```
 
-`gpt-5.6` is the recommended local Sol alias. The public API documents that
-unsuffixed ID as a Sol alias, but the credential-validated private OAuth path
-requires the proxy config to map it to explicit `gpt-5.6-sol`. The dashboard
-also provides local standard/fast pairs for Sol, Terra, and Luna; each fast
-alias keeps the standard entry's upstream model and requests
-`service_tier: priority`. The effective tier is account/backend dependent and
-is visible in the response. Availability depends on the logged-in account,
-plan, and workspace policy. An
-unavailable-model 4xx is a real validation failure and is surfaced without
-model downgrade.
+`gpt-6.1-sol` is the recommended current Codex preset. The dashboard also
+provides GPT-6 Astra and GPT-6 Luna standard/fast pairs. Each fast alias keeps
+the same upstream model and requests `service_tier: priority`. Availability and
+the effective tier depend on the account/backend. Errors are surfaced without
+model downgrade. See [MAINTENANCE.md](MAINTENANCE.md) for validation scope.
 
 Credentialed maintainers can additionally set
 `LIVE_E2E_CODEX_GPT56_ADVANCED=1` for the max-reasoning and cache-options

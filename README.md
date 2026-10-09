@@ -36,9 +36,9 @@ Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 - Health, model listing, Chat Completions, Responses, Anthropic Messages, and token-count endpoints.
 - Curated provider profiles for Anthropic, OpenAI, DeepSeek, Xiaomi MiMo, xAI, Kimi, Z.AI, Groq, Fireworks, Baseten, DeepInfra, Ollama, and vLLM.
 - OAuth login for Codex/ChatGPT and xAI accounts.
-- Recommended Grok 4.5 and Composer 2.5 Fast presets through the private Grok
-  Build OAuth inference proxy, while preserving Grok 4.3 compatibility.
-- First-class GPT-5.6 Codex OAuth presets for Sol, Terra, and Luna, including
+- Recommended Grok 4.7 and Grok 4.7 Fast presets through the private Grok
+  Build OAuth inference proxy, with older profiles still configurable.
+- Codex OAuth presets for GPT-6.1 Sol, GPT-6 Astra, and GPT-6 Luna, including
   standard and priority-tier local aliases.
 - Codex OAuth multi-account load balancing with sticky, round-robin, fill-first, least-connections, and random strategies.
 - `agent_ready` model metadata so tool-using workflows are marked only when the proxy path is validated.
@@ -58,6 +58,9 @@ Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 | `GET` | `/v1/oauth/pool-health`, `/oauth/pool-health` | Codex account pool status |
 
 The `/v1` prefix is optional on non-health routes.
+
+The [October 2026 maintenance review](docs/MAINTENANCE.md) records the audit,
+upstream comparisons, and validation limits.
 
 ## Install
 
@@ -113,7 +116,7 @@ cd droid-proxy
 make install-user
 ```
 
-Source builds require Go 1.26.5 or newer. See [docs/UPGRADE.md](docs/UPGRADE.md) for release upgrades, source installs, and service repair.
+Source builds require Go 1.27.2 or newer. See [docs/UPGRADE.md](docs/UPGRADE.md) for release upgrades, source installs, and service repair.
 
 ## Quickstart
 

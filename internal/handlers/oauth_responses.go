@@ -437,6 +437,10 @@ func (a *API) responsesViaCodexFailover(c *gin.Context, m *config.Model, payload
 						cooldownUntil = *reset
 					}
 				}
+				if reset := oauth.ParseCodexUsageLimitReset(raw, time.Now()); reset != nil {
+					cooldownUntil = *reset
+					a.recordCodexUsage(token, nil, reset)
+				}
 				a.Pool.MarkRateLimited(entry.Path, cooldownUntil)
 			} else {
 				a.Pool.MarkCooldown(entry.Path, time.Now().Add(errorCooldown))

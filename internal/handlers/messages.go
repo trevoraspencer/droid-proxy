@@ -191,6 +191,7 @@ func (a *API) messagesNative(c *gin.Context, m *config.Model, body []byte, path 
 		if !ok {
 			return
 		}
+		upstream.CopyHeaders(c.Writer.Header(), resp.Header)
 		WriteUpstreamStatusError(c, resp.StatusCode, raw, resp.Header.Get("Content-Type"))
 		return
 	}

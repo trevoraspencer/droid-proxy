@@ -722,12 +722,12 @@ func TestWorkflowValidation_EndpointTruthTableReadinessAndRuntimeHardening(t *te
 		{"/v1/chat/completions", func(alias string) string {
 			return `{"model":"` + alias + `","messages":[{"role":"user","content":"hi"}]}`
 		}, func(m *config.Model) bool {
-			return m.UpstreamProtocol == config.UpstreamOpenAIChat && (m.FactoryProvider == config.FactoryProviderGeneric || m.FactoryProvider == config.FactoryProviderOpenAI)
+			return (m.UpstreamProtocol == config.UpstreamOpenAIChat && (m.FactoryProvider == config.FactoryProviderGeneric || m.FactoryProvider == config.FactoryProviderOpenAI)) || (m.UpstreamProtocol == config.UpstreamOpenAIResponses && m.FactoryProvider == config.FactoryProviderOpenAI)
 		}},
 		{"/chat/completions", func(alias string) string {
 			return `{"model":"` + alias + `","messages":[{"role":"user","content":"hi"}]}`
 		}, func(m *config.Model) bool {
-			return m.UpstreamProtocol == config.UpstreamOpenAIChat && (m.FactoryProvider == config.FactoryProviderGeneric || m.FactoryProvider == config.FactoryProviderOpenAI)
+			return (m.UpstreamProtocol == config.UpstreamOpenAIChat && (m.FactoryProvider == config.FactoryProviderGeneric || m.FactoryProvider == config.FactoryProviderOpenAI)) || (m.UpstreamProtocol == config.UpstreamOpenAIResponses && m.FactoryProvider == config.FactoryProviderOpenAI)
 		}},
 		{"/v1/responses", func(alias string) string { return `{"model":"` + alias + `","input":"hi"}` }, func(m *config.Model) bool {
 			return m.FactoryProvider == config.FactoryProviderOpenAI && (m.UpstreamProtocol == config.UpstreamOpenAIResponses || m.UpstreamProtocol == config.UpstreamOpenAIChat)

@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/trevoraspencer/droid-proxy/internal/config"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // mergeFilterPath resolves scripts/live-e2e/merge-custom-models.jq relative to
@@ -85,11 +85,11 @@ func TestCodexGPT56LiveE2EDefaultsUseExplicitSol(t *testing.T) {
 	for _, model := range template.Models {
 		models[model.Alias] = model
 	}
-	const wantUpstream = "gpt-5.6-sol"
-	if got := models["gpt-5.6"]; got.UpstreamModel != wantUpstream || got.ExtraArgs["service_tier"] != nil {
+	const wantUpstream = "gpt-6.1-sol"
+	if got := models["gpt-6.1-sol"]; got.UpstreamModel != wantUpstream || got.ExtraArgs["service_tier"] != nil {
 		t.Fatalf("standard Codex live-E2E default = %#v, want upstream %q with no service tier", got, wantUpstream)
 	}
-	if got := models["gpt-5.6-fast"]; got.UpstreamModel != wantUpstream || got.ExtraArgs["service_tier"] != "priority" {
+	if got := models["gpt-6.1-sol-fast"]; got.UpstreamModel != wantUpstream || got.ExtraArgs["service_tier"] != "priority" {
 		t.Fatalf("fast Codex live-E2E default = %#v, want upstream %q with priority tier", got, wantUpstream)
 	}
 
@@ -122,7 +122,7 @@ func TestCodexGPT56LiveE2EDefaultsUseExplicitSol(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load live-E2E config with legacy env: %v", err)
 	}
-	for _, alias := range []string{"gpt-5.6", "gpt-5.6-fast"} {
+	for _, alias := range []string{"gpt-6.1-sol", "gpt-6.1-sol-fast"} {
 		var got string
 		for _, model := range loaded.Models {
 			if model.Alias == alias {
@@ -144,8 +144,8 @@ func TestCodexGPT56LiveE2EDefaultsUseExplicitSol(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`assert_model_mapping "gpt-5.6" "gpt-5.6-sol"`,
-		`assert_model_mapping "gpt-5.6-fast" "gpt-5.6-sol"`,
+		`assert_model_mapping "gpt-6.1-sol" "gpt-6.1-sol"`,
+		`assert_model_mapping "gpt-6.1-sol-fast" "gpt-6.1-sol"`,
 	} {
 		if !strings.Contains(string(directTests), want) {
 			t.Fatalf("direct live checks must verify loaded mapping %q", want)
@@ -248,12 +248,12 @@ func TestCodexOAuthWalkthroughAndFactorySnippetAliasesMatch(t *testing.T) {
 	}
 
 	wantUpstreams := map[string]string{
-		"gpt-5.6":            "gpt-5.6-sol",
-		"gpt-5.6-fast":       "gpt-5.6-sol",
-		"gpt-5.6-terra":      "gpt-5.6-terra",
-		"gpt-5.6-terra-fast": "gpt-5.6-terra",
-		"gpt-5.6-luna":       "gpt-5.6-luna",
-		"gpt-5.6-luna-fast":  "gpt-5.6-luna",
+		"gpt-6.1-sol":      "gpt-6.1-sol",
+		"gpt-6.1-sol-fast": "gpt-6.1-sol",
+		"gpt-6-astra":      "gpt-6-astra",
+		"gpt-6-astra-fast": "gpt-6-astra",
+		"gpt-6-luna":       "gpt-6-luna",
+		"gpt-6-luna-fast":  "gpt-6-luna",
 	}
 	documentedAliases := make(map[string]bool, len(documented.Models))
 	for _, model := range documented.Models {
@@ -301,12 +301,12 @@ func TestMergeCustomModelsPreservesUnrelatedAndUpserts(t *testing.T) {
 	dir := t.TempDir()
 
 	// Existing settings: one unrelated model (keep-me) and a stale copy of an
-	// e2e model id (gpt-5.6) with an outdated displayName.
+	// e2e model id (gpt-6.1-sol) with an outdated displayName.
 	existing := `{
       "someOtherKey": "preserved",
       "customModels": [
         {"model":"keep-me","displayName":"Keep","provider":"x","baseUrl":"https://k","maxOutputTokens":1},
-        {"model":"gpt-5.6","displayName":"OLD codex","provider":"openai","baseUrl":"https://old","maxOutputTokens":42}
+        {"model":"gpt-6.1-sol","displayName":"OLD codex","provider":"openai","baseUrl":"https://old","maxOutputTokens":42}
       ]
     }`
 	settingsPath := filepath.Join(dir, "settings.json")
@@ -315,7 +315,7 @@ func TestMergeCustomModelsPreservesUnrelatedAndUpserts(t *testing.T) {
 	}
 
 	e2e := `[
-      {"model":"gpt-5.6","displayName":"GPT-5.6 Sol (Codex OAuth)","provider":"openai","baseUrl":"http://127.0.0.1:9787","apiKey":"not-required-when-client-auth-disabled","maxOutputTokens":128000},
+      {"model":"gpt-6.1-sol","displayName":"GPT-6.1 Sol (Codex OAuth)","provider":"openai","baseUrl":"http://127.0.0.1:9787","apiKey":"not-required-when-client-auth-disabled","maxOutputTokens":128000},
       {"model":"fireworks-live","displayName":"Fireworks Live","provider":"generic-chat-completion-api","baseUrl":"http://127.0.0.1:9787","apiKey":"not-required-when-client-auth-disabled","maxOutputTokens":8192}
     ]`
 
@@ -325,8 +325,8 @@ func TestMergeCustomModelsPreservesUnrelatedAndUpserts(t *testing.T) {
 	if counts["keep-me"] != 1 {
 		t.Fatalf("unrelated model keep-me not preserved exactly once: counts=%v", counts)
 	}
-	if counts["gpt-5.6"] != 1 {
-		t.Fatalf("e2e model gpt-5.6 not upserted exactly once (dup or missing): counts=%v", counts)
+	if counts["gpt-6.1-sol"] != 1 {
+		t.Fatalf("e2e model gpt-6.1-sol not upserted exactly once (dup or missing): counts=%v", counts)
 	}
 	if counts["fireworks-live"] != 1 {
 		t.Fatalf("new e2e model fireworks-live not added: counts=%v", counts)
@@ -336,12 +336,12 @@ func TestMergeCustomModelsPreservesUnrelatedAndUpserts(t *testing.T) {
 	}
 	// The upserted entry must carry the e2e definition, not the stale one.
 	for _, m := range models {
-		if m["model"] == "gpt-5.6" {
-			if m["displayName"] != "GPT-5.6 Sol (Codex OAuth)" {
-				t.Fatalf("gpt-5.6 not replaced with e2e definition: displayName=%v", m["displayName"])
+		if m["model"] == "gpt-6.1-sol" {
+			if m["displayName"] != "GPT-6.1 Sol (Codex OAuth)" {
+				t.Fatalf("gpt-6.1-sol not replaced with e2e definition: displayName=%v", m["displayName"])
 			}
 			if m["baseUrl"] != "http://127.0.0.1:9787" {
-				t.Fatalf("gpt-5.6 baseUrl not from e2e set: %v", m["baseUrl"])
+				t.Fatalf("gpt-6.1-sol baseUrl not from e2e set: %v", m["baseUrl"])
 			}
 		}
 	}
@@ -410,11 +410,11 @@ func TestMergeCustomModelsRetiresOnlyLegacyHarnessCodexAlias(t *testing.T) {
 	if err := os.WriteFile(settingsPath, []byte(existing), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	e2e := `[{"model":"gpt-5.6","displayName":"GPT-5.6 Sol (Codex OAuth)","provider":"openai","baseUrl":"http://127.0.0.1:9787","maxOutputTokens":128000}]`
+	e2e := `[{"model":"gpt-6.1-sol","displayName":"GPT-6.1 Sol (Codex OAuth)","provider":"openai","baseUrl":"http://127.0.0.1:9787","maxOutputTokens":128000}]`
 
 	models := runMerge(t, jqBin, filter, settingsPath, e2e)
 	counts := modelIDs(models)
-	if counts["gpt-5.2-codex"] != 1 || counts["gpt-5.6"] != 1 || counts["keep-me"] != 1 || len(models) != 3 {
+	if counts["gpt-5.2-codex"] != 1 || counts["gpt-6.1-sol"] != 1 || counts["keep-me"] != 1 || len(models) != 3 {
 		t.Fatalf("legacy cleanup counts = %v, models=%v", counts, models)
 	}
 	for _, model := range models {

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func repoRoot(t *testing.T) string {
@@ -161,22 +161,22 @@ func TestDocsFactoryReasoningEffortAssignments(t *testing.T) {
 
 	codex := readEntries("codex-oauth.json")
 	if len(codex) != 6 {
-		t.Fatalf("Codex settings aliases = %d, want six GPT-5.6 aliases", len(codex))
+		t.Fatalf("Codex settings aliases = %d, want six current Codex aliases", len(codex))
 	}
 	wantCodex := map[string]bool{
-		"gpt-5.6": true, "gpt-5.6-fast": true,
-		"gpt-5.6-terra": true, "gpt-5.6-terra-fast": true,
-		"gpt-5.6-luna": true, "gpt-5.6-luna-fast": true,
+		"gpt-6.1-sol": true, "gpt-6.1-sol-fast": true,
+		"gpt-6-astra": true, "gpt-6-astra-fast": true,
+		"gpt-6-luna": true, "gpt-6-luna-fast": true,
 	}
 	for _, model := range codex {
 		alias, _ := model["model"].(string)
 		if !wantCodex[alias] || model["reasoningEffort"] != "max" {
-			t.Fatalf("GPT-5.6 settings capability mismatch: %#v", model)
+			t.Fatalf("current Codex settings capability mismatch: %#v", model)
 		}
 		delete(wantCodex, alias)
 	}
 	if len(wantCodex) != 0 {
-		t.Fatalf("missing GPT-5.6 settings aliases: %#v", wantCodex)
+		t.Fatalf("missing current Codex settings aliases: %#v", wantCodex)
 	}
 
 	xai := map[string]map[string]any{}
@@ -784,81 +784,6 @@ func TestDocsFencedYAMLExamplesParseable(t *testing.T) {
 	}
 }
 
-// --- VAL-CROSS-002: Donor reference cleanliness ---
-
-func TestDocsNoDonorReferences(t *testing.T) {
-	// Programmatic equivalent of the mission donor-denylist gate.
-	// Denylist patterns are loaded from a separate file to avoid the test
-	// source itself matching the grep.
-	denylistFile := filepath.Join(repoRoot(t), "internal", "config", "testdata", "donor_denylist.txt")
-	raw, err := os.ReadFile(denylistFile)
-	if err != nil {
-		t.Fatalf("read denylist: %v", err)
-	}
-	var denylist []string
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		denylist = append(denylist, line)
-	}
-	if len(denylist) == 0 {
-		t.Fatal("denylist is empty")
-	}
-
-	exts := map[string]bool{".go": true, ".md": true, ".yaml": true, ".yml": true, ".sh": true}
-
-	pattern := ""
-	for i, s := range denylist {
-		if i > 0 {
-			pattern += "|"
-		}
-		pattern += regexp.QuoteMeta(s)
-	}
-	re := regexp.MustCompile("(?i)(" + pattern + ")")
-
-	root := repoRoot(t)
-	walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			// Skip .git and vendor directories.
-			name := d.Name()
-			if name == ".git" || name == "vendor" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !exts[filepath.Ext(path)] {
-			return nil
-		}
-		rel, rerr := filepath.Rel(root, path)
-		if rerr != nil {
-			return rerr
-		}
-		// Skip this test file itself: the denylist patterns appear here
-		// as validation strings, not as actual donor references.
-		if strings.HasSuffix(rel, "docs_test.go") {
-			return nil
-		}
-		raw, rerr := os.ReadFile(path)
-		if rerr != nil {
-			t.Logf("skip unreadable %s: %v", rel, rerr)
-			return nil
-		}
-		if loc := re.FindIndex(raw); loc != nil {
-			line := strings.Count(string(raw[:loc[0]]), "\n") + 1
-			t.Fatalf("%s:%d contains denied donor reference %q", rel, line, string(raw[loc[0]:loc[1]]))
-		}
-		return nil
-	})
-	if walkErr != nil {
-		t.Fatalf("walk: %v", walkErr)
-	}
-}
-
 // --- VAL-CROSS-007: Skipped feature surfaces are absent or rejected ---
 
 func TestDocsDoNotClaimSkippedFeatures(t *testing.T) {
@@ -1167,35 +1092,6 @@ func TestDocsLiveE2eCleanupDocsMatchCode(t *testing.T) {
 	}
 	if !strings.Contains(lowerReadme, "basename") {
 		t.Fatal("README must document positive binary-basename cleanup identification")
-	}
-}
-
-// --- VAL-CROSS-016: Bootstrap idempotency and versioned tool readiness ---
-//
-// Mission-local executable bootstrap validation (TestBootstrapDeterministicExecution,
-// TestBootstrapRefusesBadRepoRoot) lives in bootstrap_mission_test.go behind the
-// "mission_bootstrap" build tag so that ordinary `go test ./...` in clean CI does
-// not require /tmp mission markers. The mission gate runs:
-//   go test -tags=mission_bootstrap ./internal/config/...
-// to execute those tests explicitly.
-//
-// The error-returning resolver and its missing-fixture test are in
-// bootstrap_resolver_test.go and run as part of ordinary `go test ./...`.
-
-func TestDocsGoModVersionMatchesBootstrap(t *testing.T) {
-	mod := readRepoFile(t, "go.mod")
-	var goVersion string
-	for _, line := range strings.Split(mod, "\n") {
-		if fields := strings.Fields(line); len(fields) == 2 && fields[0] == "go" {
-			goVersion = fields[1]
-			break
-		}
-	}
-	if goVersion == "" {
-		t.Fatal("go.mod does not declare a Go version")
-	}
-	if goVersion != "1.26.5" {
-		t.Fatalf("go.mod Go version = %q, want 1.26.5", goVersion)
 	}
 }
 

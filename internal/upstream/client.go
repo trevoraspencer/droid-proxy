@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"net"
 	"net/http"
 	"time"
 
@@ -21,6 +22,8 @@ func NewClient(cfg *config.Config) *Client {
 	}
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ResponseHeaderTimeout: timeout,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   16,
 		IdleConnTimeout:       90 * time.Second,

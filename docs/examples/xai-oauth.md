@@ -7,7 +7,7 @@
 | **Tier** | T1 OAuth - native xAI Responses passthrough |
 | **Factory mode** | `openai` |
 | **Upstream protocol** | `xai-responses` |
-| **When to use** | xAI subscription-backed models such as Grok 4.5, Composer 2.5 Fast, Grok Build 0.1, and Grok 4.3 |
+| **When to use** | xAI subscription-backed models such as Grok 4.7, Grok 4.7 Fast, Composer 2.5 Fast, Grok Build 0.1, and Grok 4.3 |
 
 For pay-per-use API-key access, see [xai.md](xai.md).
 
@@ -24,14 +24,43 @@ Uses browser PKCE login. See [OAUTH.md](../OAUTH.md) for the full walkthrough.
 
 ## config.yaml
 
-Grok 4.5 is the recommended xAI OAuth preset and the current Grok Build
-default. The private Grok Build route is a separate contract from the public
-xAI API, so this preset explicitly uses the Grok CLI proxy and model-override
-headers. It preserves `prompt_cache_key` and passes through Factory's supported
-low, medium, and high reasoning levels. The 500,000-token context window is
-publicly documented; the example intentionally makes no upstream maximum-output
-claim. Factory's JSON entry below uses droid-proxy's standard local 128,000-token
-client cap.
+Grok 4.7 and Grok 4.7 Fast are the current recommended presets from the
+reviewed Grok CLI catalog. Both use the private Grok CLI proxy, preserve
+`prompt_cache_key`, and pass through reasoning. Access depends on the account;
+public API access alone does not establish OAuth availability. The local
+Factory output cap is 128,000 tokens. See
+[MAINTENANCE.md](../MAINTENANCE.md) for the dated sources.
+
+```yaml
+models:
+  - alias: grok-4.7
+    display_name: "Grok 4.7 (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    base_url: https://cli-chat-proxy.grok.com/v1
+    upstream_model: grok-4.7
+    max_context_tokens: 500000
+    capabilities:
+      factory_reasoning: passthrough
+      factory_reasoning_effort: high
+      prompt_caching: true
+
+  - alias: grok-4.7-build-fast
+    display_name: "Grok 4.7 Fast (xAI OAuth)"
+    factory_provider: openai
+    upstream_protocol: xai-responses
+    oauth_provider: xai
+    base_url: https://cli-chat-proxy.grok.com/v1
+    upstream_model: grok-4.7-build-fast
+    max_context_tokens: 500000
+    capabilities:
+      factory_reasoning: passthrough
+      factory_reasoning_effort: high
+      prompt_caching: true
+```
+
+The following older presets remain available for existing accounts:
 
 ```yaml
 models:
@@ -215,12 +244,12 @@ Check the model is logged in: `curl -s http://127.0.0.1:9787/v1/models | jq
 
 ## Notes
 
-- `grok-4.5` is the recommended xAI OAuth alias and uses the private Grok CLI
-  proxy because Grok 4.5 is Grok Build's current default. Public API success is
-  not evidence that an account can use this private OAuth route.
-- Grok 4.5 access depends on account plan and region. At launch, xAI documents
-  Grok 4.5 as unavailable in the EU, with EU availability expected in mid-July
-  2026; verify the current xAI documentation for later changes.
+- Current recommended aliases are `grok-4.7` and `grok-4.7-build-fast`.
+- Private Grok CLI requests send client version `1.0.50`; older `0.2.x` profiles
+  are rejected by the current backend with HTTP 426. Model `extra_headers`
+  can override `x-grok-client-version` and `User-Agent` when needed.
+- Older presets and custom model IDs remain configurable; check your account
+  before relying on an older model.
 - `grok-build-0.1` is documented by xAI as the API model that powers Grok Build.
 - `grok-composer-2.5-fast` is the Grok Build / Grok CLI OAuth model key for
   Composer 2.5 Fast and uses `https://cli-chat-proxy.grok.com/v1`.

@@ -8,5 +8,5 @@
   "github.com/tidwall/gjson": "MIT",
   "github.com/tidwall/sjson": "MIT",
   "github.com/tiktoken-go/tokenizer": "MIT",
-  "gopkg.in/yaml.v3": "MIT"
+  "go.yaml.in/yaml/v3": "MIT AND Apache-2.0"
 }
